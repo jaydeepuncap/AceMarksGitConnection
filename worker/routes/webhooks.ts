@@ -40,7 +40,7 @@ const verifyWebhook = (): MiddlewareHandler<WebhookVars> => async (c, next) => {
   const topic = c.req.header('X-Shopify-Topic') ?? '';
   if (!shop || !topic) throw new ApiError(400, 'VALIDATION_ERROR', 'Missing webhook headers');
 
-  let payload: unknown = null;
+  let payload: unknown;
   try {
     payload = raw.byteLength ? JSON.parse(new TextDecoder().decode(raw)) : null;
   } catch {

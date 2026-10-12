@@ -113,7 +113,7 @@ export async function apiRequest<T>(method: Method, path: string, options: Reque
       throw new ApiClientError(403, 'SHOPIFY_REAUTH_REQUIRED', 'Redirecting to re-authorize the app…');
     }
 
-    let payload: ApiResponse<T> | null = null;
+    let payload: ApiResponse<T> | null;
     try {
       payload = (await response.json()) as ApiResponse<T>;
     } catch {

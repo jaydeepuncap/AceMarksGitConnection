@@ -1,0 +1,104 @@
+import { describe, expect, it, vi } from 'vitest';
+import { render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
+import { ErrorBanner } from '../../app/components/ErrorBanner';
+import { LoadingState } from '../../app/components/LoadingState';
+import { ApiClientError } from '../../app/lib/api-client';
+import Repositories from '../../app/routes/Repositories';
+import type * as ApiClientModule from '../../app/lib/api-client';
+import SyncHistory from '../../app/routes/SyncHistory';
+
+vi.mock('../../app/lib/api-client', async (importOriginal) => {
+  const actual = await importOriginal<typeof ApiClientModule>();
+  return {
+    ...actual,
+    api: {
+      github: { repositories: vi.fn() },
+      settings: { get: vi.fn(), update: vi.fn() },
+      sync: { history: vi.fn(), get: vi.fn(), retry: vi.fn() },
+    },
+  };
+});
+const { api } = await import('../../app/lib/api-client');
+const mocked = api as unknown as {
+  github: { repositories: ReturnType<typeof vi.fn> };
+  settings: { get: ReturnType<typeof vi.fn> };
+  sync: { history: ReturnType<typeof vi.fn> };
+};
+
+const wrap = (ui: React.ReactNode, path = '/') => render(<MemoryRouter initialEntries={[path]}>{ui}</MemoryRouter>);
+
+describe('loading and error states', () => {
+  it('renders an accessible loading state', () => {
+    wrap(<LoadingState title="Themes" />);
+    expect(screen.getByText('Loading…')).toBeInTheDocument();
+  });
+
+  it('shows the error message, a code-specific hint and the request ID', () => {
+    const err = new ApiClientError(400, 'GITHUB_NOT_CONNECTED', 'Connect GitHub first', undefined, undefined, 'req-123');
+    wrap(<ErrorBanner error={err} onRetry={() => undefined} />);
+    expect(screen.getByText('Connect GitHub first')).toBeInTheDocument();
+    expect(screen.getByText(/Connect a GitHub account in Settings/)).toBeInTheDocument();
+    expect(screen.getByText(/req-123/)).toBeInTheDocument();
+    expect(screen.getByText('Open settings')).toBeInTheDocument();
+  });
+
+  it('renders nothing without an error', () => {
+    const { container } = wrap(<ErrorBanner error={null} />);
+    expect(container).toBeEmptyDOMElement();
+  });
+});
+
+describe('pages', () => {
+  it('Repositories shows an empty state', async () => {
+    mocked.github.repositories.mockResolvedValue({ items: [], page: 1, perPage: 30, hasNextPage: false });
+    mocked.settings.get.mockResolvedValue({ shop: {}, settings: { defaultRepository: null } });
+    wrap(<Repositories />);
+    await waitFor(() => expect(screen.getByText(/No repositories found/)).toBeInTheDocument());
+  });
+
+  it('Repositories shows API errors', async () => {
+    mocked.github.repositories.mockRejectedValue(new ApiClientError(401, 'GITHUB_AUTH_FAILED', 'Token revoked'));
+    mocked.settings.get.mockResolvedValue({ shop: {}, settings: { defaultRepository: null } });
+    wrap(<Repositories />);
+    await waitFor(() => expect(screen.getByText('Token revoked')).toBeInTheDocument());
+  });
+
+  it('Sync history lists runs with status and file counts', async () => {
+    mocked.sync.history.mockResolvedValue({
+      items: [
+        {
+          id: '11111111-1111-4111-8111-111111111111',
+          repository: 'acme/theme',
+          branch: 'main',
+          commitSha: 'b'.repeat(40),
+          commitMessage: 'Update header\n\nbody',
+          themeId: 'gid://shopify/OnlineStoreTheme/1',
+          themeName: 'Dev copy',
+          themeRole: 'UNPUBLISHED',
+          strategy: 'commit_changes',
+          status: 'partially_failed',
+          filesChanged: 3,
+          filesSucceeded: 2,
+          filesFailed: 1,
+          filesSkipped: 0,
+          errorDetails: { code: 'FILES_FAILED', message: '1 file(s) failed to sync' },
+          attempt: 1,
+          initiatedAt: '2026-01-01T00:00:00Z',
+          startedAt: null,
+          completedAt: null,
+          canRetry: true,
+        },
+      ],
+      page: 1,
+      perPage: 20,
+      hasNextPage: false,
+    });
+    wrap(<SyncHistory />, '/sync-history');
+    await waitFor(() => expect(screen.getByText('bbbbbbb')).toBeInTheDocument());
+    expect(screen.getByText('Update header')).toBeInTheDocument();
+    expect(screen.getAllByText('Partially failed').length).toBeGreaterThan(0);
+    expect(screen.getByText(/2\/3/)).toBeInTheDocument();
+    expect(screen.getByText('View / retry')).toBeInTheDocument();
+  });
+});

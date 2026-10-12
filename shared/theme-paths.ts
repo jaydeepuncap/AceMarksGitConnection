@@ -16,7 +16,7 @@ export const PROTECTED_THEME_FILES: readonly string[] = [
   'config/settings_data.json',
 ];
 
-const SAFE_SEGMENT = /^[A-Za-z0-9_@+\-][A-Za-z0-9._@+\-]*$/;
+const SAFE_SEGMENT = /^[A-Za-z0-9_@+-][A-Za-z0-9._@+-]*$/;
 
 interface DirRule {
   /** Regex the full path must match. */
