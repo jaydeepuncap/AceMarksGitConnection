@@ -99,9 +99,7 @@ describe('sync workflow', () => {
       t.env,
       t.ctx,
     );
-    const parsed = (await res.json()) as { error?: unknown };
-    if (process.env.DEBUG_API && res.status >= 400) console.log(method, path, res.status, JSON.stringify(parsed));
-    return { status: res.status, body: parsed as { success: boolean; data: T; error: { code: string; message: string } } };
+    return { status: res.status, body: (await res.json()) as { success: boolean; data: T; error: { code: string; message: string } } };
   };
 
   const preview = (body: Record<string, unknown>) =>
