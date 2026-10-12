@@ -1,0 +1,107 @@
+# Cloudflare Workers configuration for Ace Marks Git Connection.
+# Requires Wrangler v4 (v3.x also works for everything except `run_worker_first`
+# as a boolean on [assets], which needs wrangler >= 3.109).
+#
+# The top-level environment is DEVELOPMENT (used by `wrangler dev` and
+# `npm run db:migrate:local`). Production lives under [env.production].
+# Bindings and [vars] are NOT inherited by named environments, so each one
+# re-declares them.
+#
+# Placeholders marked REPLACE_WITH_* come from the commands in README.md
+# ("Create Cloudflare resources"). Local `wrangler dev` works with the
+# placeholders because local D1/KV are simulated on disk under .wrangler/.
+
+name = "ace-marks-git-connection-dev"
+main = "worker/index.ts"
+compatibility_date = "2026-09-01"
+
+[assets]
+# Output of `vite build` (see vite.config.ts → build.outDir).
+directory = "./dist/client"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+# The Worker sees every request first so it can add the Shopify
+# frame-ancestors CSP header and inject the API key into index.html.
+# It hands static files back to env.ASSETS.
+run_worker_first = true
+
+[observability]
+enabled = true
+
+[vars]
+APP_ENV = "development"
+LOG_LEVEL = "debug"
+SHOPIFY_API_VERSION = "2026-07"
+SHOPIFY_SCOPES = "read_themes,write_themes"
+# Public base URL of the app. Leave empty in dev: the request origin is used,
+# or `npm run dev:worker` passes the Shopify CLI tunnel URL ($APP_URL).
+SHOPIFY_APP_URL = ""
+GITHUB_API_BASE_URL = "https://api.github.com"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "ace-marks-git-connection-dev"
+database_id = "REPLACE_WITH_DEV_D1_DATABASE_ID"
+# Canonical migrations directory, shared with drizzle.config.ts (`out`).
+migrations_dir = "migrations"
+
+[[kv_namespaces]]
+binding = "KV"
+id = "REPLACE_WITH_DEV_KV_NAMESPACE_ID"
+
+# Background sync jobs (Cloudflare Queues; Workers Paid plan).
+# Without this binding the app falls back to ctx.waitUntil() processing,
+# which is fine for small commits but bounded by request lifetime.
+[[queues.producers]]
+binding = "SYNC_QUEUE"
+queue = "ace-marks-sync-dev"
+
+[[queues.consumers]]
+queue = "ace-marks-sync-dev"
+max_batch_size = 1
+max_batch_timeout = 1
+max_retries = 5
+retry_delay = 30
+dead_letter_queue = "ace-marks-sync-dlq-dev"
+
+# ---------------------------------------------------------------------------
+# Production
+# Deploy with: npm run deploy  (or: wrangler deploy --env production)
+# Secrets:     wrangler secret put SHOPIFY_API_KEY --env production
+#              wrangler secret put SHOPIFY_API_SECRET --env production
+#              wrangler secret put ENCRYPTION_KEY --env production
+# ---------------------------------------------------------------------------
+[env.production]
+name = "ace-marks-git-connection"
+# Uncomment to serve from your own domain instead of *.workers.dev:
+# routes = [{ pattern = "git.example.com", custom_domain = true }]
+
+[env.production.vars]
+APP_ENV = "production"
+LOG_LEVEL = "info"
+SHOPIFY_API_VERSION = "2026-07"
+SHOPIFY_SCOPES = "read_themes,write_themes"
+SHOPIFY_APP_URL = "https://ace-marks-git-connection.REPLACE_WITH_WORKERS_SUBDOMAIN.workers.dev"
+GITHUB_API_BASE_URL = "https://api.github.com"
+
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "ace-marks-git-connection"
+database_id = "REPLACE_WITH_PROD_D1_DATABASE_ID"
+migrations_dir = "migrations"
+
+[[env.production.kv_namespaces]]
+binding = "KV"
+id = "REPLACE_WITH_PROD_KV_NAMESPACE_ID"
+
+[[env.production.queues.producers]]
+binding = "SYNC_QUEUE"
+queue = "ace-marks-sync"
+
+[[env.production.queues.consumers]]
+queue = "ace-marks-sync"
+max_batch_size = 1
+max_batch_timeout = 1
+max_retries = 5
+retry_delay = 30
+dead_letter_queue = "ace-marks-sync-dlq"

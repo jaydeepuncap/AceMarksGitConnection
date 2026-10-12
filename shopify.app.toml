@@ -1,0 +1,52 @@
+# Shopify app configuration (Shopify CLI 3.x / 4.x).
+# Link to your Partner Dashboard app with:  shopify app config link
+# which fills in client_id. Push changes with: shopify app deploy
+#
+# Learn more: https://shopify.dev/docs/apps/build/cli-for-apps/app-configuration
+
+client_id = "REPLACE_WITH_SHOPIFY_CLIENT_ID"
+name = "Ace Marks Git Connection"
+handle = "ace-marks-git-connection"
+application_url = "https://ace-marks-git-connection.REPLACE_WITH_WORKERS_SUBDOMAIN.workers.dev"
+embedded = true
+
+[build]
+# `shopify app dev` rewrites application_url/redirect_urls to the dev tunnel.
+automatically_update_urls_on_dev = true
+
+[access_scopes]
+# Least privilege for this feature set:
+#   read_themes  – list themes and read theme files (preview / diff)
+#   write_themes – create, update and delete theme files (sync)
+# Writing theme files ALSO requires Shopify to grant your app the theme-file
+# modification exemption (see README → "Theme write access").
+scopes = "read_themes,write_themes"
+# Shopify-managed installation: Shopify installs the app and grants scopes
+# before the app loads; the backend obtains tokens via token exchange.
+use_legacy_install_flow = false
+
+[auth]
+# Used only by the authorization-code OAuth flow (/auth → /auth/callback),
+# which remains available for non-embedded installs and manual re-authorization.
+redirect_urls = [
+  "https://ace-marks-git-connection.REPLACE_WITH_WORKERS_SUBDOMAIN.workers.dev/auth/callback"
+]
+
+[webhooks]
+api_version = "2026-07"
+
+  [[webhooks.subscriptions]]
+  topics = [ "app/uninstalled" ]
+  uri = "/webhooks/app/uninstalled"
+
+  [[webhooks.subscriptions]]
+  topics = [ "app/scopes_update" ]
+  uri = "/webhooks/app/scopes_update"
+
+  # Mandatory privacy compliance webhooks (required for App Store distribution).
+  [[webhooks.subscriptions]]
+  compliance_topics = [ "customers/data_request", "customers/redact", "shop/redact" ]
+  uri = "/webhooks/compliance"
+
+[pos]
+embedded = false
