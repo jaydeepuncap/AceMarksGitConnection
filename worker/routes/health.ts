@@ -1,6 +1,6 @@
 /** GET /api/health — liveness probe. Unauthenticated; reveals no configuration. */
 import { Hono } from 'hono';
-import type { HealthResponse } from '@shared/api-types';
+import type { HealthResponse } from '../../shared/api-types';
 import type { AppEnv } from '../env';
 import { ok } from '../lib/response';
 

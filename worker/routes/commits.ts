@@ -7,7 +7,7 @@
  *   GET /api/commits/:sha/files   ?repository&page&perPage   (up to 3000 files per commit)
  */
 import { Hono } from 'hono';
-import type { CommitDetail, CommitFile, CommitFilesResponse, CommitSummary, Paginated } from '@shared/api-types';
+import type { CommitDetail, CommitFile, CommitFilesResponse, CommitSummary, Paginated } from '../../shared/api-types';
 import type { AppEnv } from '../env';
 import { cached, cacheKeys } from '../lib/cache';
 import { githubClient, resolveRepository } from '../lib/clients';

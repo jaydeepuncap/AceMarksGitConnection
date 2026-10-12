@@ -1,8 +1,5 @@
-import { fileURLToPath, URL } from 'node:url';
 import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
-
-const shared = fileURLToPath(new URL('./shared', import.meta.url));
 
 /**
  * Two test projects:
@@ -13,12 +10,10 @@ const shared = fileURLToPath(new URL('./shared', import.meta.url));
  *  - app: React components in jsdom with a stubbed App Bridge `shopify` global.
  */
 export default defineConfig({
-  resolve: { alias: { '@shared': shared } },
   test: {
     projects: [
       {
-        resolve: { alias: { '@shared': shared } },
-        test: {
+              test: {
           name: 'worker',
           environment: 'node',
           include: ['test/worker/**/*.test.ts'],
@@ -26,8 +21,7 @@ export default defineConfig({
       },
       {
         plugins: [react()],
-        resolve: { alias: { '@shared': shared } },
-        test: {
+              test: {
           name: 'app',
           environment: 'jsdom',
           include: ['test/app/**/*.test.tsx'],

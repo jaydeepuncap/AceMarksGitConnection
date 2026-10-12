@@ -19,7 +19,7 @@ import type {
   GithubConnectionResponse,
   GithubRepository,
   Paginated,
-} from '@shared/api-types';
+} from '../../shared/api-types';
 import type { AppEnv } from '../env';
 import { cached, cacheKeys } from '../lib/cache';
 import { githubClient, githubTokenAad, resolveRepository } from '../lib/clients';

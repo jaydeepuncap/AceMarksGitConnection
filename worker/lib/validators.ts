@@ -3,8 +3,8 @@
  * shop domains, GitHub names, commit SHAs and Shopify theme IDs.
  */
 import { z } from 'zod';
-import { SYNC_STRATEGY_VALUES } from '@shared/api-types';
-import { normalizeThemeRoot, validateThemePath } from '@shared/theme-paths';
+import { SYNC_STRATEGY_VALUES } from '../../shared/api-types';
+import { normalizeThemeRoot, validateThemePath } from '../../shared/theme-paths';
 import { badRequest } from './response';
 
 // ---------------------------------------------------------------------------

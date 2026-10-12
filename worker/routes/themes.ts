@@ -3,7 +3,7 @@
  * (`themes` query, read_themes scope). Cached in KV for 60 s per shop.
  */
 import { Hono } from 'hono';
-import type { ShopifyTheme } from '@shared/api-types';
+import type { ShopifyTheme } from '../../shared/api-types';
 import type { AppEnv } from '../env';
 import { cached, cacheKeys, invalidate } from '../lib/cache';
 import { adminClient } from '../lib/clients';

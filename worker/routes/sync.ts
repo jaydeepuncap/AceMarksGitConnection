@@ -9,7 +9,7 @@
  *   POST /api/sync/history/:id/retry  re-runs failed/pending operations (idempotent writes)
  */
 import { Hono, type Context } from 'hono';
-import type { Paginated, SyncPreview, SyncRun, SyncRunDetail } from '@shared/api-types';
+import type { Paginated, SyncPreview, SyncRun, SyncRunDetail } from '../../shared/api-types';
 import type { SyncHistoryRow } from '../../drizzle/schema';
 import type { AppEnv } from '../env';
 import { adminClient, githubClient, resolveRepository } from '../lib/clients';

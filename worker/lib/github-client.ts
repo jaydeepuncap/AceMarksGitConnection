@@ -20,7 +20,7 @@ import type {
   CommitSummary,
   GithubBranch,
   GithubRepository,
-} from '@shared/api-types';
+} from '../../shared/api-types';
 import { base64ToBytes } from './crypto';
 import { fetchWithRetry } from './http';
 import type { Logger } from './logger';

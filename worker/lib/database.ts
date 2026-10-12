@@ -28,7 +28,7 @@ import {
   type SyncOperation,
   type SyncPreferences,
   type SyncRun,
-} from '@shared/api-types';
+} from '../../shared/api-types';
 
 export type Database = DrizzleD1Database<typeof schema>;
 

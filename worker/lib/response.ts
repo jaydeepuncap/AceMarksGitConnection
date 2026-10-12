@@ -6,7 +6,7 @@
  */
 import type { Context } from 'hono';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
-import type { ApiErrorBody, ApiErrorCode, ApiSuccess } from '@shared/api-types';
+import type { ApiErrorBody, ApiErrorCode, ApiSuccess } from '../../shared/api-types';
 
 export class ApiError extends Error {
   readonly status: ContentfulStatusCode;

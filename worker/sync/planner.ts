@@ -23,13 +23,13 @@ import type {
   SyncPreferences,
   SyncPreview,
   SyncStrategy,
-} from '@shared/api-types';
+} from '../../shared/api-types';
 import {
   PROTECTED_THEME_FILES,
   isIgnored,
   repoPathToThemePath,
   validateThemePath,
-} from '@shared/theme-paths';
+} from '../../shared/theme-paths';
 import { createSyncPreview, type Database, type NewSyncOperation } from '../lib/database';
 import { GITHUB_MAX_COMMIT_FILES, type GitHubClient } from '../lib/github-client';
 import type { Logger } from '../lib/logger';

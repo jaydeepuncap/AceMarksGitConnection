@@ -3,7 +3,7 @@
  * PUT /api/settings   → partial update; repository/branch/theme are verified upstream
  */
 import { Hono } from 'hono';
-import type { SettingsResponse, ShopInfo } from '@shared/api-types';
+import type { SettingsResponse, ShopInfo } from '../../shared/api-types';
 import type { AppEnv } from '../env';
 import { adminClient, githubClient } from '../lib/clients';
 import { getDb, getSettings, updateGithubConnectionRepository, upsertSettings, type SettingsWrite } from '../lib/database';

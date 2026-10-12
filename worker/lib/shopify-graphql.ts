@@ -14,7 +14,7 @@
  * retried after waiting for enough points to restore, based on
  * extensions.cost.throttleStatus.
  */
-import type { ShopifyTheme, ThemeRole } from '@shared/api-types';
+import type { ShopifyTheme, ThemeRole } from '../../shared/api-types';
 import { fetchWithRetry, sleep } from './http';
 import type { Logger } from './logger';
 import { ApiError } from './response';

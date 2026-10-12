@@ -19,11 +19,6 @@ export default defineConfig({
   publicDir: fileURLToPath(new URL('./public', import.meta.url)),
   envDir: fileURLToPath(new URL('.', import.meta.url)),
   plugins: [react()],
-  resolve: {
-    alias: {
-      '@shared': fileURLToPath(new URL('./shared', import.meta.url)),
-    },
-  },
   build: {
     outDir: fileURLToPath(new URL('./dist/client', import.meta.url)),
     emptyOutDir: true,

@@ -15,8 +15,7 @@
     "isolatedModules": true,
     "verbatimModuleSyntax": true,
     "skipLibCheck": true,
-    "noEmit": true,
-    "paths": { "@shared/*": ["./shared/*"] }
+    "noEmit": true
   },
   "include": ["worker", "drizzle", "shared"]
 }
