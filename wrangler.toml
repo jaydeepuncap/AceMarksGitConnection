@@ -28,6 +28,10 @@ run_worker_first = true
 [observability]
 enabled = true
 
+# Daily cleanup of expired previews and old session records (worker/index.ts → scheduled).
+[triggers]
+crons = ["17 3 * * *"]
+
 [vars]
 APP_ENV = "development"
 LOG_LEVEL = "debug"
@@ -64,6 +68,18 @@ max_retries = 5
 retry_delay = 30
 dead_letter_queue = "ace-marks-sync-dlq-dev"
 
+# Rate limiting (Workers Rate Limiting binding). namespace_id: any integer unique
+# within your account. If absent, an in-isolate fallback limiter is used.
+[[ratelimits]]
+name = "API_RATE_LIMITER"
+namespace_id = "1001"
+simple = { limit = 120, period = 60 }
+
+[[ratelimits]]
+name = "SYNC_RATE_LIMITER"
+namespace_id = "1002"
+simple = { limit = 10, period = 60 }
+
 # ---------------------------------------------------------------------------
 # Production
 # Deploy with: npm run deploy  (or: wrangler deploy --env production)
@@ -75,6 +91,9 @@ dead_letter_queue = "ace-marks-sync-dlq-dev"
 name = "ace-marks-git-connection"
 # Uncomment to serve from your own domain instead of *.workers.dev:
 # routes = [{ pattern = "git.example.com", custom_domain = true }]
+
+[env.production.triggers]
+crons = ["17 3 * * *"]
 
 [env.production.vars]
 APP_ENV = "production"
@@ -105,3 +124,13 @@ max_batch_timeout = 1
 max_retries = 5
 retry_delay = 30
 dead_letter_queue = "ace-marks-sync-dlq"
+
+[[env.production.ratelimits]]
+name = "API_RATE_LIMITER"
+namespace_id = "2001"
+simple = { limit = 120, period = 60 }
+
+[[env.production.ratelimits]]
+name = "SYNC_RATE_LIMITER"
+namespace_id = "2002"
+simple = { limit = 10, period = 60 }
