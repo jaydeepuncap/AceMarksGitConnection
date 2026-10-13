@@ -118,12 +118,16 @@ export class ShopifyGraphqlClient {
         });
       }
 
-      if (errors.some((e) => e.extensions?.code === 'ACCESS_DENIED')) {
+      const denied = errors.filter((e) => e.extensions?.code === 'ACCESS_DENIED');
+      if (denied.length > 0) {
+        // Include Shopify's own wording: it states whether a scope or the exemption is missing.
+        const shopifySays = [...new Set(denied.map((e) => e.message.trim()))].join(' ').slice(0, 600);
+        logger.warn('shopify.graphql_access_denied', { shop: this.shopDomain, errors: shopifySays });
         throw new ApiError(
           403,
           'THEME_WRITE_NOT_PERMITTED',
           'Shopify denied access. Writing theme files requires the write_themes scope AND a theme-modification ' +
-            'exemption granted to this app by Shopify.',
+            `exemption granted to this app by Shopify. Shopify said: ${shopifySays}`,
           { details: errors.map((e) => e.message) },
         );
       }
