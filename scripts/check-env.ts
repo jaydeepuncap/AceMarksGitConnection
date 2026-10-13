@@ -47,8 +47,11 @@ if (!prod) {
       console.log(`Shopify apps: ${apps.apps.map((a) => `${a.name} (${a.clientId})`).join(', ')}`);
     }
     const key = vars.ENCRYPTION_KEY;
-    if (key && !key.startsWith('replace-with') && Buffer.from(key, 'base64').length !== 32) {
-      errors.push('ENCRYPTION_KEY must be 32 random bytes encoded as base64');
+    if (key && !key.startsWith('replace-with')) {
+      const len = key.length === 32 || (key.length === 64 && /^[0-9a-fA-F]+$/.test(key)) ? 32 : Buffer.from(key, 'base64').length;
+      if (len !== 32) {
+        errors.push('ENCRYPTION_KEY must be 32 bytes (or 32 characters, or base64-encoded)');
+      }
     }
     if (process.env.SHOPIFY_API_KEY && !apps.apps.some((a) => a.clientId === process.env.SHOPIFY_API_KEY)) {
       warnings.push('The app Shopify CLI is running is not in .dev.vars — its session tokens will fail verification.');
