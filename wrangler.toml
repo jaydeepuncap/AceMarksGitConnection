@@ -10,6 +10,9 @@ name = "ace-marks-git-connection"
 main = "worker/index.ts"
 compatibility_date = "2026-09-01"
 
+[build]
+command = "npm run build"
+
 [assets]
 # Output of `vite build` (see vite.config.ts → build.outDir).
 directory = "./dist/client"
