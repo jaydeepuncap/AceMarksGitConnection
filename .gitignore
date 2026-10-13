@@ -15,11 +15,6 @@ node_modules/.tmp/
 .env.*
 !.env.example
 
-# Shopify CLI local state
-.shopify/
-shopify.app.*.toml
-!shopify.app.toml
-
 # Local D1/KV state created by wrangler/miniflare
 .mf/
 *.sqlite
