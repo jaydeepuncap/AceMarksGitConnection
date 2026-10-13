@@ -58,3 +58,4 @@ export interface Variables {
 }
 
 export type AppEnv = { Bindings: Env; Variables: Variables };
+export type HonoEnv = AppEnv;
