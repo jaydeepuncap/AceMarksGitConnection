@@ -71,6 +71,35 @@ namespace_id = "2002"
 simple = { limit = 10, period = 60 }
 
 # ---------------------------------------------------------------------------
+# Worker Previews (PR branches built by Workers Builds via `wrangler preview`)
+# Bindings are NOT inherited from production. Previews deliberately get no
+# D1, KV or Queue bindings so an unmerged branch can never read or write
+# production data or tokens; they serve the built UI and /api/health only.
+# To exercise the API in previews, create separate preview D1/KV resources
+# and add [[previews.d1_databases]] / [[previews.kv_namespaces]] here.
+# https://developers.cloudflare.com/workers/previews/configuration/
+# ---------------------------------------------------------------------------
+[previews.vars]
+APP_ENV = "preview"
+LOG_LEVEL = "debug"
+SHOPIFY_API_VERSION = "2026-07"
+SHOPIFY_SCOPES = "read_themes,write_themes"
+# Empty: the request origin (the preview URL) is used.
+SHOPIFY_APP_URL = ""
+GITHUB_API_BASE_URL = "https://api.github.com"
+
+# Separate rate-limit namespaces so preview traffic never counts against production.
+[[previews.ratelimits]]
+name = "API_RATE_LIMITER"
+namespace_id = "3001"
+simple = { limit = 120, period = 60 }
+
+[[previews.ratelimits]]
+name = "SYNC_RATE_LIMITER"
+namespace_id = "3002"
+simple = { limit = 10, period = 60 }
+
+# ---------------------------------------------------------------------------
 # Development Environment
 # Used by: npm run dev:development
 #          npm run deploy:development
