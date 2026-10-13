@@ -264,6 +264,7 @@ describe('sync workflow', () => {
       const { body } = await api<SyncRunDetail>('GET', `/api/sync/history/${p.data.syncId}`);
       expect(body.data.status).toBe('failed');
       expect(body.data.errorDetails?.code).toBe('THEME_WRITE_NOT_PERMITTED');
+      expect(body.data.errorDetails?.message).toContain('Shopify said: Access denied for themeFilesUpsert field.');
     });
 
     it('runs inline via waitUntil when no queue is bound', async () => {
