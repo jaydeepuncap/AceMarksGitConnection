@@ -12,6 +12,10 @@ const HINTS: Partial<Record<string, string>> = {
   SHOPIFY_REAUTH_REQUIRED: 'Reload the app from Shopify Admin to re-authorize it.',
   RATE_LIMITED: 'Too many requests. Wait a few seconds and try again.',
   PREVIEW_EXPIRED: 'Previews are valid for 30 minutes. Generate a new preview.',
+  SERVER_MISCONFIGURED:
+    'The app server is missing required secrets. An administrator must set them with `wrangler secret put` and redeploy.',
+  DATABASE_NOT_MIGRATED:
+    'The app database has not been initialised. An administrator must run `npm run db:migrate:remote`.',
 };
 
 interface Props {

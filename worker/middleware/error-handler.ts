@@ -35,6 +35,14 @@ export const apiSecurityHeaders = (): MiddlewareHandler<AppEnv> => async (c, nex
   c.header('Referrer-Policy', 'strict-origin-when-cross-origin');
 };
 
+/** D1 (via Drizzle) reports a schema that was never migrated as "no such table: <name>". */
+export function isMissingTableError(err: unknown): boolean {
+  for (let e: unknown = err, depth = 0; e instanceof Error && depth < 4; e = e.cause, depth++) {
+    if (/no such table/i.test(e.message)) return true;
+  }
+  return false;
+}
+
 export const errorHandler: ErrorHandler<AppEnv> = (err, c) => {
   const requestId = c.get('requestId');
   const logger = c.get('logger') ?? createLogger(c.env?.LOG_LEVEL);
@@ -59,6 +67,19 @@ export const errorHandler: ErrorHandler<AppEnv> = (err, c) => {
   logger.error('request.unhandled_error', {
     error: err instanceof Error ? { name: err.name, message: err.message, stack: err.stack } : String(err),
   });
+  if (isMissingTableError(err)) {
+    return c.json(
+      errorBody(
+        new ApiError(
+          500,
+          'DATABASE_NOT_MIGRATED',
+          'The D1 database has no tables yet. Apply the migrations: npm run db:migrate:remote',
+        ),
+        requestId,
+      ),
+      500,
+    );
+  }
   return c.json(
     errorBody(new ApiError(500, 'INTERNAL_ERROR', 'An unexpected error occurred'), requestId),
     500,
@@ -106,3 +127,45 @@ export function rateLimit(opts: {
     await next();
   };
 }
+
+// ---------------------------------------------------------------------------
+// Required configuration
+// ---------------------------------------------------------------------------
+/**
+ * Names of required Worker secrets that are missing or malformed. Values are
+ * never returned or logged, only names.
+ */
+function decodedLength(base64: string | undefined): number {
+  if (!base64) return 0;
+  try {
+    return atob(base64).length;
+  } catch {
+    return 0;
+  }
+}
+
+export function missingServerConfig(env: Partial<AppEnv['Bindings']>): string[] {
+  const missing: string[] = [];
+  if (!env.SHOPIFY_API_KEY?.trim()) missing.push('SHOPIFY_API_KEY');
+  if (!env.SHOPIFY_API_SECRET?.trim()) missing.push('SHOPIFY_API_SECRET');
+  const key = env.ENCRYPTION_KEY?.trim();
+  if (decodedLength(key) !== 32) missing.push('ENCRYPTION_KEY (32 random bytes, base64)');
+  return missing;
+}
+
+/**
+ * Fails closed when secrets are absent. Without SHOPIFY_API_KEY the session-token
+ * audience check would be skipped, and without ENCRYPTION_KEY tokens cannot be stored.
+ */
+export const requireServerConfig = (): MiddlewareHandler<AppEnv> => async (c, next) => {
+  const missing = missingServerConfig(c.env);
+  if (missing.length > 0) {
+    throw new ApiError(
+      500,
+      'SERVER_MISCONFIGURED',
+      `Missing Worker secrets: ${missing.join(', ')}. Set them with \`wrangler secret put <NAME>\` and redeploy.`,
+      { details: { missing } },
+    );
+  }
+  await next();
+};

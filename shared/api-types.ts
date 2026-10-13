@@ -29,6 +29,8 @@ export type ApiErrorCode =
   | 'PREVIEW_EXPIRED'
   | 'LIVE_THEME_CONFIRMATION_REQUIRED'
   | 'UPSTREAM_TIMEOUT'
+  | 'SERVER_MISCONFIGURED'
+  | 'DATABASE_NOT_MIGRATED'
   | 'INTERNAL_ERROR';
 
 export interface ApiSuccess<T> {
