@@ -15,8 +15,9 @@ import { cors } from 'hono/cors';
 import { and, inArray, lt } from 'drizzle-orm';
 import { syncHistory } from '../drizzle/schema';
 import type { AppEnv, Env, HonoEnv, SyncJobMessage } from './env';
-import { deleteExpiredSessions, getDb, transitionSyncRun } from './lib/database';
+import { deleteExpiredSessions, findShopByDomain, getDb, transitionSyncRun } from './lib/database';
 import { createLogger } from './lib/logger';
+import { appByClientId, appForShop, getShopifyApps, peekAudience, type ShopifyAppCredentials } from './lib/shopify-apps';
 import { normalizeShopDomain } from './lib/validators';
 import {
   apiSecurityHeaders,
@@ -96,25 +97,52 @@ export function frameAncestors(shop: string | null): string {
     : 'frame-ancestors https://admin.shopify.com;';
 }
 
+/**
+ * Which app's (public) client ID the HTML shell should hand to App Bridge.
+ * Every app shares this URL, so it is derived per request from what Shopify puts
+ * on the embedded-app URL: the `id_token`'s audience, else the app the shop is
+ * installed with or assigned to. The client ID is public; API calls are still
+ * authenticated by verifying the session token with that app's secret.
+ */
+export async function appForDocument(c: Context<HonoEnv>, shop: string | null): Promise<ShopifyAppCredentials | null> {
+  const fromToken = appByClientId(c.env, peekAudience(new URL(c.req.url).searchParams.get('id_token') ?? ''));
+  if (fromToken) return fromToken;
+  if (!shop) {
+    const { apps } = getShopifyApps(c.env);
+    return apps.length === 1 ? apps[0]! : null;
+  }
+  try {
+    const record = await findShopByDomain(getDb(c.env.DB), shop);
+    return appForShop(c.env, shop, record?.shopifyClientId);
+  } catch {
+    return appForShop(c.env, shop);
+  }
+}
+
 export async function serveSpa(c: Context<HonoEnv>): Promise<Response> {
   const url = new URL(c.req.url);
   const shop = normalizeShopDomain(url.searchParams.get('shop'));
   const isDocument = !/\.[a-z0-9]+$/i.test(url.pathname);
 
+  if (!isDocument) {
+    const asset = await c.env.ASSETS.fetch(c.req.raw);
+    if (!(asset.headers.get('content-type') ?? '').includes('text/html')) return asset;
+  }
+
+  const app = await appForDocument(c, shop);
+
   // Opened outside Shopify Admin (e.g. after install redirects): send the merchant into the embedded app.
-  if (isDocument && shop && url.searchParams.get('embedded') !== '1') {
+  if (isDocument && shop && app && url.searchParams.get('embedded') !== '1') {
     const adminHost = decodeAdminHost(url.searchParams.get('host'), shop);
-    if (adminHost) return c.redirect(`https://${adminHost}/apps/${c.env.SHOPIFY_API_KEY}${url.pathname}`, 302);
+    if (adminHost) return c.redirect(`https://${adminHost}/apps/${app.clientId}${url.pathname}`, 302);
   }
 
   const res = await c.env.ASSETS.fetch(c.req.raw);
   const contentType = res.headers.get('content-type') ?? '';
   if (!contentType.includes('text/html')) return res;
 
-  const html = (await res.text()).replaceAll(
-    '__SHOPIFY_API_KEY__',
-    c.env.SHOPIFY_API_KEY ?? '',
-  );
+  // Client IDs are validated to [A-Za-z0-9_-] in shopify-apps.ts, so this is safe in an attribute.
+  const html = (await res.text()).replaceAll('__SHOPIFY_API_KEY__', app?.clientId ?? '');
 
   c.header('Content-Security-Policy', frameAncestors(shop));
   c.header('Cache-Control', 'no-store');

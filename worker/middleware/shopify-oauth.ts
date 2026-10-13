@@ -19,6 +19,7 @@ import type { MiddlewareHandler } from 'hono';
 import type { AppEnv } from '../env';
 import { bytesToBase64, bytesToHex, hmacSha256, timingSafeEqual } from '../lib/crypto';
 import { ApiError } from '../lib/response';
+import { findAppBySignature } from '../lib/shopify-apps';
 import { normalizeShopDomain } from '../lib/validators';
 
 /** Builds the message Shopify signs for query-string HMACs. */
@@ -69,18 +70,20 @@ export async function verifyWebhookHmac(
 }
 
 /**
- * Middleware for Shopify-signed redirects (OAuth callback): verifies the HMAC,
- * the timestamp window and the shop domain format before the handler runs.
+ * Middleware for Shopify-signed redirects (OAuth callback): verifies the HMAC
+ * against each configured app's secret (identifying the app), the timestamp
+ * window and the shop domain format before the handler runs.
  */
 export const requireSignedShopifyQuery = (): MiddlewareHandler<AppEnv> => async (c, next) => {
   const params = new URL(c.req.url).searchParams;
   const shop = normalizeShopDomain(params.get('shop'));
   if (!shop) throw new ApiError(400, 'VALIDATION_ERROR', 'Missing or invalid shop parameter');
-  if (!(await verifyQueryHmac(params, c.env.SHOPIFY_API_SECRET))) {
-    throw new ApiError(401, 'UNAUTHORIZED', 'Invalid Shopify HMAC signature');
-  }
+  // The app whose secret produced the HMAC is the app this redirect belongs to.
+  const app = await findAppBySignature(c.env, (secret) => verifyQueryHmac(params, secret));
+  if (!app) throw new ApiError(401, 'UNAUTHORIZED', 'Invalid Shopify HMAC signature');
   if (!isFreshTimestamp(params.get('timestamp'))) {
     throw new ApiError(401, 'UNAUTHORIZED', 'Shopify request timestamp is too old');
   }
+  c.set('shopifyApp', app);
   await next();
 };

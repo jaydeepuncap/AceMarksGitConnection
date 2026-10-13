@@ -2,18 +2,25 @@ import { encryptSecret } from '../../worker/lib/crypto';
 import { githubTokenAad } from '../../worker/lib/clients';
 import { getDb, upsertGithubConnection, upsertSettings } from '../../worker/lib/database';
 import { storeOfflineToken } from '../../worker/lib/sessions';
+import { appByClientId } from '../../worker/lib/shopify-apps';
+import { TEST_API_KEY } from './env';
 import type { Env } from '../../worker/env';
 
 export const SHA_B = 'b'.repeat(40);
 export const SHA_D = 'd'.repeat(40);
 
 /** Creates an installed shop with a non-expiring offline token, a GitHub connection and settings. */
-export async function seedShop(env: Env, shopDomain: string, opts: { github?: boolean } = {}) {
+export async function seedShop(env: Env, shopDomain: string, opts: { github?: boolean; clientId?: string } = {}) {
   const db = getDb(env.DB);
-  const shop = await storeOfflineToken(env, db, shopDomain, {
-    access_token: `shpat_${shopDomain.replace(/\W/g, '')}_token`,
-    scope: 'read_themes,write_themes',
-  });
+  const app = appByClientId(env, opts.clientId ?? TEST_API_KEY);
+  if (!app) throw new Error('Test app not configured');
+  const shop = await storeOfflineToken(
+    env,
+    db,
+    shopDomain,
+    { access_token: `shpat_${shopDomain.replace(/\W/g, '')}_token`, scope: 'read_themes,write_themes' },
+    app,
+  );
   if (opts.github !== false) {
     await upsertGithubConnection(db, shop.id, {
       authType: 'fine_grained_pat',

@@ -27,3 +27,6 @@ coverage/
 *.log
 .vscode/*
 !.vscode/extensions.json
+
+# Per-store Shopify app secrets (uploaded with npm run apps:push-secret)
+shopify-apps.secret.json

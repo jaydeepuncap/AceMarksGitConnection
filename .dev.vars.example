@@ -1,8 +1,12 @@
 # Copy to .dev.vars for `wrangler dev`. NEVER commit .dev.vars.
 # In production set each of these with `wrangler secret put <NAME> --env production`.
 
-# Shopify app credentials (Partner Dashboard → App → Client credentials,
-# or `shopify app env show`). The client ID is public; the secret is not.
+# Shopify app credentials (Partner Dashboard → App → Client credentials).
+# One Worker serves one custom app per store. List every app as single-line JSON
+# (single quotes around the value). Production: npm run apps:push-secret.
+# SHOPIFY_APPS='[{"name":"Store A","clientId":"…","clientSecret":"…","shops":["store-a.myshopify.com"]}]'
+#
+# Or, with a single app only, the legacy pair:
 SHOPIFY_API_KEY="replace-with-shopify-client-id"
 SHOPIFY_API_SECRET="replace-with-shopify-client-secret"
 

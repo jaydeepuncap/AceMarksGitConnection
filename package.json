@@ -42,7 +42,12 @@
     "db:console:development:remote": "wrangler d1 execute ace-marks-git-connection-dev --env development --remote --command",
     "db:studio": "drizzle-kit studio",
     "db:studio:dev": "drizzle-kit studio --config drizzle.config.dev.ts",
-    "check-env": "tsx scripts/check-env.ts"
+    "check-env": "tsx scripts/check-env.ts",
+    "apps:new": "tsx scripts/shopify-apps.ts new",
+    "apps:check": "tsx scripts/shopify-apps.ts check",
+    "apps:push-secret": "tsx scripts/shopify-apps.ts push-secret",
+    "apps:deploy": "tsx scripts/shopify-apps.ts deploy",
+    "deploy:all": "npm run deploy && npm run apps:deploy"
   },
   "dependencies": {
     "@shopify/app-bridge-react": "^4.2.13",

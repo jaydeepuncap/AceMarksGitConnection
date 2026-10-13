@@ -14,8 +14,10 @@ import {
   exchangeSessionToken,
   getOfflineAccessToken,
   ShopifyReauthRequiredError,
+  shopifyAppForShop,
   storeOfflineToken,
 } from './sessions';
+import type { ShopifyAppCredentials } from './shopify-apps';
 import { ShopifyGraphqlClient } from './shopify-graphql';
 import { splitRepository } from './validators';
 
@@ -26,7 +28,7 @@ export async function createAdminClientForShop(
   db: Database,
   shop: Shop,
   logger: Logger,
-  opts: { sessionToken?: string; fetchImpl?: typeof fetch } = {},
+  opts: { sessionToken?: string; app?: ShopifyAppCredentials; fetchImpl?: typeof fetch } = {},
 ): Promise<ShopifyGraphqlClient> {
   let accessToken: string;
   try {
@@ -34,8 +36,10 @@ export async function createAdminClientForShop(
   } catch (err) {
     if (!(err instanceof ShopifyReauthRequiredError) || !opts.sessionToken) throw err;
     // Embedded request: silently re-authorize with token exchange.
-    const exchanged = await exchangeSessionToken(env, shop.shopDomain, opts.sessionToken, logger, opts.fetchImpl);
-    await storeOfflineToken(env, db, shop.shopDomain, exchanged);
+    // The session token was verified against `opts.app`, so that app owns the new token.
+    const app = opts.app ?? shopifyAppForShop(env, shop);
+    const exchanged = await exchangeSessionToken(app, shop.shopDomain, opts.sessionToken, logger, opts.fetchImpl);
+    await storeOfflineToken(env, db, shop.shopDomain, exchanged, app);
     accessToken = exchanged.access_token;
   }
   return new ShopifyGraphqlClient({
@@ -69,8 +73,8 @@ export async function createGithubClientForShop(
 // Route-level helpers (Hono context)
 // ---------------------------------------------------------------------------
 export function adminClient(c: Context<AppEnv>): Promise<ShopifyGraphqlClient> {
-  const { shop, sessionToken } = c.get('auth');
-  return createAdminClientForShop(c.env, getDb(c.env.DB), shop, c.get('logger'), { sessionToken });
+  const { shop, sessionToken, app } = c.get('auth');
+  return createAdminClientForShop(c.env, getDb(c.env.DB), shop, c.get('logger'), { sessionToken, app });
 }
 
 export function githubClient(c: Context<AppEnv>) {

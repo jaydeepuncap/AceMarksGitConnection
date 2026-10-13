@@ -16,6 +16,7 @@ A Shopify embedded app that connects a store to a GitHub repository. You can bro
 4. [Data model and migrations](#data-model-and-migrations)
 5. [Sync workflow](#sync-workflow)
 6. [Setup](#setup)
+   - [Multiple stores (one custom app per store)](#multiple-stores-one-custom-app-per-store)
 7. [Local development](#local-development)
 8. [Testing](#testing)
 9. [Deploy to production](#deploy-to-production)
@@ -254,6 +255,50 @@ The GitHub client is modular (`worker/lib/github-client.ts`), so you can add a G
 
 ---
 
+## Multiple stores (one custom app per store)
+
+A **custom-distribution** app can only be installed on one store, or on several stores that belong to the same Shopify Plus organization ([Shopify docs](https://shopify.dev/docs/apps/distribution/select-distribution-method)). Five unrelated stores therefore need **five Shopify apps**, each with its own client ID and client secret.
+
+This project runs all of them from **one Worker, one database and one codebase**:
+
+| Concern | How it is handled |
+|---|---|
+| Credentials | Worker secret `SHOPIFY_APPS`: a JSON array of `{ name, clientId, clientSecret, shops }`. The legacy `SHOPIFY_API_KEY` / `SHOPIFY_API_SECRET` pair still works as one more app. |
+| Which app a request belongs to | Always proven by Shopify's signature: session token `aud` + that app's secret, OAuth HMAC, or webhook HMAC. A token signed with app A's secret can never pass as app B. |
+| Access tokens | Each store's offline token is exchanged and refreshed with **its own app's** credentials. `shops.shopify_client_id` records which app the store installed. |
+| HTML shell | Every app uses the same URL. The page receives the right client ID from the `id_token` Shopify adds to the URL, or from the shop's app. |
+| Webhooks | A webhook from an app the store no longer uses cannot uninstall or erase the store's current install. |
+| Code updates | `npm run deploy` deploys the Worker once and every store gets the new code immediately. |
+| App config updates (scopes, URLs, webhooks) | `npm run apps:deploy` runs `shopify app deploy` for every `shopify.app.*.toml`. |
+
+### Add a store
+
+1. In the [Partner Dashboard](https://partners.shopify.com), go to **Apps → Create app → Create app manually**, then choose **Custom distribution** and enter the store's domain. Copy the **Client ID** and **Client secret**.
+2. Create the store's config from the shared template, then release it:
+   ```bash
+   npm run apps:new -- store-b <client-id>   # writes shopify.app.store-b.toml (commit it)
+   npm run apps:deploy                        # releases scopes, URLs and webhooks to every app
+   ```
+3. Add the app to `shopify-apps.secret.json`. This file is gitignored; start from `config/shopify-apps.example.json`. Then upload it:
+   ```bash
+   npm run apps:check         # validates every entry and cross-checks the .toml files (never prints secrets)
+   npm run apps:push-secret   # uploads it as the SHOPIFY_APPS Worker secret
+   ```
+4. Generate the install link in the Partner Dashboard (**Distribution → Generate link**) and install the app on the store.
+5. Request the **theme-modification exemption for this app** (see [Shopify scopes and theme write access](#shopify-scopes-and-theme-write-access)). Shopify approves it per app.
+
+### Release a change to all stores
+
+```bash
+npm run deploy        # code: one Worker deploy updates every store
+npm run apps:deploy   # only when shopify.app.*.toml / the template changed
+npm run deploy:all    # both
+```
+
+To change scopes or webhooks for every store, edit `config/shopify.app.template.toml` and the generated `shopify.app.*.toml` files the same way, then run `npm run apps:deploy`.
+
+**Encryption.** `ENCRYPTION_KEY` is shared by all apps. Every stored token is still bound to its own store (AES-GCM associated data), so one store's ciphertext cannot be decrypted as another's.
+
 ## Local development
 
 ```bash
@@ -355,8 +400,8 @@ For CI, set `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`, plus `SHOPIFY_CL
 | Value | Where it lives | Notes |
 |---|---|---|
 | `client_id`, app name, URLs, scopes, webhooks | `shopify.app.toml` (Shopify CLI) | Released with `shopify app deploy` |
-| `SHOPIFY_API_KEY` (client ID) | `.dev.vars` locally; Worker secret in prod | Public value, but kept out of `[vars]` to avoid a var/secret name clash. Injected into `index.html` at serve time. |
-| `SHOPIFY_API_SECRET` | `.dev.vars`; Worker secret | Verifies session tokens and HMACs, used in token requests |
+| `SHOPIFY_APPS` | `.dev.vars` (single-line JSON in single quotes); Worker secret via `npm run apps:push-secret` | Every app's `{ name, clientId, clientSecret, shops }`. See [Multiple stores](#multiple-stores-one-custom-app-per-store). |
+| `SHOPIFY_API_KEY` / `SHOPIFY_API_SECRET` | `.dev.vars`; Worker secrets | Legacy single-app credentials. Still supported, and treated as one more app. |
 | `ENCRYPTION_KEY` / `ENCRYPTION_KEY_PREVIOUS` | `.dev.vars`; Worker secrets | 32-byte base64 AES key / rotation key |
 | `SHOPIFY_API_VERSION`, `SHOPIFY_SCOPES`, `SHOPIFY_APP_URL`, `GITHUB_API_BASE_URL`, `LOG_LEVEL`, `APP_ENV` | `wrangler.toml [vars]` / `[env.production.vars]` | Non-secret. `.dev.vars` can override them locally. |
 | `DB` | `wrangler.toml [[d1_databases]]` | D1 binding. No connection strings or env vars. |

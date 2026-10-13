@@ -27,6 +27,7 @@ import {
   type ShopTokenWrite,
 } from './database';
 import { fetchWithRetry } from './http';
+import { appForShop, type ShopifyAppCredentials } from './shopify-apps';
 import type { Logger } from './logger';
 import { ApiError } from './response';
 
@@ -106,7 +107,7 @@ async function requestToken(
 
 /** Session token → expiring offline access token (Shopify token exchange). */
 export function exchangeSessionToken(
-  env: Env,
+  app: ShopifyAppCredentials,
   shopDomain: string,
   sessionToken: string,
   logger: Logger,
@@ -115,8 +116,8 @@ export function exchangeSessionToken(
   return requestToken(
     shopDomain,
     {
-      client_id: env.SHOPIFY_API_KEY,
-      client_secret: env.SHOPIFY_API_SECRET,
+      client_id: app.clientId,
+      client_secret: app.clientSecret,
       grant_type: 'urn:ietf:params:oauth:grant-type:token-exchange',
       subject_token: sessionToken,
       subject_token_type: 'urn:ietf:params:oauth:token-type:id_token',
@@ -130,7 +131,7 @@ export function exchangeSessionToken(
 
 /** Authorization code (OAuth callback) → expiring offline access token. */
 export function exchangeAuthorizationCode(
-  env: Env,
+  app: ShopifyAppCredentials,
   shopDomain: string,
   code: string,
   logger: Logger,
@@ -138,14 +139,14 @@ export function exchangeAuthorizationCode(
 ): Promise<AccessTokenResponse> {
   return requestToken(
     shopDomain,
-    { client_id: env.SHOPIFY_API_KEY, client_secret: env.SHOPIFY_API_SECRET, code, expiring: '1' },
+    { client_id: app.clientId, client_secret: app.clientSecret, code, expiring: '1' },
     logger,
     fetchImpl,
   );
 }
 
 function refreshAccessToken(
-  env: Env,
+  app: ShopifyAppCredentials,
   shopDomain: string,
   refreshToken: string,
   logger: Logger,
@@ -154,8 +155,8 @@ function refreshAccessToken(
   return requestToken(
     shopDomain,
     {
-      client_id: env.SHOPIFY_API_KEY,
-      client_secret: env.SHOPIFY_API_SECRET,
+      client_id: app.clientId,
+      client_secret: app.clientSecret,
       grant_type: 'refresh_token',
       refresh_token: refreshToken,
     },
@@ -185,8 +186,22 @@ export async function storeOfflineToken(
   db: Database,
   shopDomain: string,
   token: AccessTokenResponse,
+  app: ShopifyAppCredentials,
 ): Promise<Shop> {
-  return upsertInstalledShop(db, shopDomain, await toTokenWrite(env, shopDomain, token));
+  return upsertInstalledShop(db, shopDomain, await toTokenWrite(env, shopDomain, token), app.clientId);
+}
+
+/** The app whose credentials refresh this shop's tokens (see shopify-apps.ts). */
+export function shopifyAppForShop(env: Env, shop: Shop): ShopifyAppCredentials {
+  const app = appForShop(env, shop.shopDomain, shop.shopifyClientId);
+  if (!app) {
+    throw new ApiError(
+      500,
+      'SERVER_MISCONFIGURED',
+      `No Shopify app credentials configured for ${shop.shopDomain}. Add its app to SHOPIFY_APPS.`,
+    );
+  }
+  return app;
 }
 
 export function hasUsableToken(shop: Shop, now = Date.now()): boolean {
@@ -229,7 +244,7 @@ export async function getOfflineAccessToken(
     const refreshToken = await decryptSecret(env, shop.refreshTokenEncrypted, refreshTokenAad(shop.shopDomain));
     let token: AccessTokenResponse;
     try {
-      token = await refreshAccessToken(env, shop.shopDomain, refreshToken, logger, fetchImpl);
+      token = await refreshAccessToken(shopifyAppForShop(env, shop), shop.shopDomain, refreshToken, logger, fetchImpl);
     } catch (err) {
       if (err instanceof ShopifyReauthRequiredError) {
         // Another isolate may have rotated the refresh token first: use its result.

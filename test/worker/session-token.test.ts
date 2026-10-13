@@ -11,8 +11,9 @@ const env = { SHOPIFY_API_KEY: TEST_API_KEY, SHOPIFY_API_SECRET: TEST_API_SECRET
 
 describe('verifySessionToken', () => {
   it('accepts a valid token and derives the shop from dest', async () => {
-    const { shopDomain, claims } = await verifySessionToken(await sessionToken(SHOP), env);
+    const { shopDomain, claims, app } = await verifySessionToken(await sessionToken(SHOP), env);
     expect(shopDomain).toBe(SHOP);
+    expect(app.clientId).toBe(TEST_API_KEY);
     expect(claims.sub).toBe('42');
   });
 

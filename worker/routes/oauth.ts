@@ -17,12 +17,13 @@
  */
 import { Hono } from 'hono';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
-import type { AppEnv } from '../env';
+import type { AppEnv, Env } from '../env';
 import { cacheKeys } from '../lib/cache';
 import { randomToken, timingSafeEqual } from '../lib/crypto';
-import { getDb } from '../lib/database';
+import { findShopByDomain, getDb } from '../lib/database';
 import { ApiError } from '../lib/response';
 import { exchangeAuthorizationCode, storeOfflineToken } from '../lib/sessions';
+import { appByClientId, appForShop, findAppBySignature, type ShopifyAppCredentials } from '../lib/shopify-apps';
 import { normalizeShopDomain } from '../lib/validators';
 import { requireSignedShopifyQuery, verifyQueryHmac } from '../middleware/shopify-oauth';
 
@@ -57,23 +58,67 @@ export function exitIframeHtml(apiKey: string, target: string): string {
 <body><script>window.open(${safe(target)}, '_top');</script></body></html>`;
 }
 
+interface OAuthState {
+  shop: string;
+  clientId: string;
+}
+
+function parseOAuthState(raw: string | null): OAuthState | null {
+  if (!raw) return null;
+  try {
+    const value = JSON.parse(raw) as Partial<OAuthState>;
+    return typeof value.shop === 'string' && typeof value.clientId === 'string'
+      ? { shop: value.shop, clientId: value.clientId }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Picks the app to install for /auth: the app whose secret signed the request
+ * (Shopify-initiated), an explicit ?client_id=, or the shop's configured app.
+ */
+async function resolveOAuthApp(env: Env, params: URLSearchParams, shop: string): Promise<ShopifyAppCredentials> {
+  if (params.has('hmac')) {
+    const signed = await findAppBySignature(env, (secret) => verifyQueryHmac(params, secret));
+    if (!signed) throw new ApiError(401, 'UNAUTHORIZED', 'Invalid Shopify HMAC signature');
+    return signed;
+  }
+  const requested = params.get('client_id');
+  if (requested) {
+    const app = appByClientId(env, requested);
+    if (!app) throw new ApiError(400, 'VALIDATION_ERROR', 'Unknown client_id');
+    return app;
+  }
+  const existing = await findShopByDomain(getDb(env.DB), shop);
+  const app = appForShop(env, shop, existing?.shopifyClientId);
+  if (!app) {
+    throw new ApiError(
+      400,
+      'VALIDATION_ERROR',
+      `Several Shopify apps are configured and none is assigned to ${shop}. Add the shop to its app's "shops" ` +
+        'list in SHOPIFY_APPS, or pass ?client_id=<app client ID>.',
+    );
+  }
+  return app;
+}
+
 export const oauthRoutes = new Hono<AppEnv>()
   .get('/', async (c) => {
     const url = new URL(c.req.url);
     const shop = normalizeShopDomain(url.searchParams.get('shop'));
     if (!shop) throw new ApiError(400, 'VALIDATION_ERROR', 'A valid ?shop=<store>.myshopify.com parameter is required');
 
-    // If Shopify signed this request, the signature must be valid.
-    if (url.searchParams.has('hmac') && !(await verifyQueryHmac(url.searchParams, c.env.SHOPIFY_API_SECRET))) {
-      throw new ApiError(401, 'UNAUTHORIZED', 'Invalid Shopify HMAC signature');
-    }
+    const app = await resolveOAuthApp(c.env, url.searchParams, shop);
 
     const state = randomToken(32);
-    await c.env.KV.put(cacheKeys.oauthState(state), shop, { expirationTtl: STATE_TTL_SECONDS });
+    const stateValue: OAuthState = { shop, clientId: app.clientId };
+    await c.env.KV.put(cacheKeys.oauthState(state), JSON.stringify(stateValue), { expirationTtl: STATE_TTL_SECONDS });
 
     const redirectUri = `${appBaseUrl(c.env, c.req.url)}/auth/callback`;
     const authorize = new URL(`https://${shop}/admin/oauth/authorize`);
-    authorize.searchParams.set('client_id', c.env.SHOPIFY_API_KEY);
+    authorize.searchParams.set('client_id', app.clientId);
     authorize.searchParams.set('scope', c.env.SHOPIFY_SCOPES);
     authorize.searchParams.set('redirect_uri', redirectUri);
     authorize.searchParams.set('state', state);
@@ -82,8 +127,10 @@ export const oauthRoutes = new Hono<AppEnv>()
     if (url.searchParams.get('embedded') === '1') {
       // Inside the Admin iframe: Shopify's authorize page cannot be framed and the
       // state cookie would be third-party. Break out to the top window first.
-      const topLevel = `${appBaseUrl(c.env, c.req.url)}/auth?shop=${encodeURIComponent(shop)}`;
-      return c.html(exitIframeHtml(c.env.SHOPIFY_API_KEY, topLevel));
+      const topLevel =
+        `${appBaseUrl(c.env, c.req.url)}/auth?shop=${encodeURIComponent(shop)}` +
+        `&client_id=${encodeURIComponent(app.clientId)}`;
+      return c.html(exitIframeHtml(app.clientId, topLevel));
     }
 
     setCookie(c, STATE_COOKIE, state, {
@@ -107,21 +154,22 @@ export const oauthRoutes = new Hono<AppEnv>()
     if (!state || !cookieState || !timingSafeEqual(state, cookieState)) {
       throw new ApiError(403, 'FORBIDDEN', 'OAuth state mismatch. Start the installation again.');
     }
+    const app = c.get('shopifyApp');
     const stateKey = cacheKeys.oauthState(state);
-    const stateShop = await c.env.KV.get(stateKey);
+    const stored = parseOAuthState(await c.env.KV.get(stateKey));
     await c.env.KV.delete(stateKey);
-    if (stateShop !== shop) {
-      throw new ApiError(403, 'FORBIDDEN', 'OAuth state expired or issued for a different shop');
+    if (!stored || stored.shop !== shop || stored.clientId !== app.clientId) {
+      throw new ApiError(403, 'FORBIDDEN', 'OAuth state expired or issued for a different shop or app');
     }
     if (!/^[A-Za-z0-9_-]{1,512}$/.test(code)) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid authorization code');
 
-    const token = await exchangeAuthorizationCode(c.env, shop, code, logger);
-    await storeOfflineToken(c.env, getDb(c.env.DB), shop, token);
-    logger.info('shopify.oauth_completed', { scopes: token.scope });
+    const token = await exchangeAuthorizationCode(app, shop, code, logger);
+    await storeOfflineToken(c.env, getDb(c.env.DB), shop, token, app);
+    logger.info('shopify.oauth_completed', { scopes: token.scope, app: app.name });
 
     const adminHost = decodeAdminHost(params.get('host'), shop);
     const target = adminHost
-      ? `https://${adminHost}/apps/${c.env.SHOPIFY_API_KEY}`
-      : `https://${shop}/admin/apps/${c.env.SHOPIFY_API_KEY}`;
+      ? `https://${adminHost}/apps/${app.clientId}`
+      : `https://${shop}/admin/apps/${app.clientId}`;
     return c.redirect(target, 302);
   });

@@ -4,7 +4,8 @@
  * The React app calls `shopify.idToken()` and sends `Authorization: Bearer <JWT>`.
  * We verify (HS256, signed with the app's client secret):
  *   - signature, `exp`, `nbf` (10 s clock tolerance)
- *   - `aud` === SHOPIFY_API_KEY (token minted for THIS app)
+ *   - `aud` === the client ID of one of the configured apps (SHOPIFY_APPS),
+ *     verified with that app's own secret
  *   - `dest` === https://{shop} and `iss` === https://{shop}/admin, same shop
  *   - shop is a valid *.myshopify.com domain
  *
@@ -22,10 +23,11 @@
 import type { MiddlewareHandler } from 'hono';
 import { errors as joseErrors, jwtVerify, type JWTPayload } from 'jose';
 import type { AppEnv, Env } from '../env';
-import { findShopByDomain, getDb, recordSession } from '../lib/database';
+import { findShopByDomain, getDb, recordSession, setShopClientId } from '../lib/database';
 import type { Logger } from '../lib/logger';
 import { ApiError } from '../lib/response';
 import { exchangeSessionToken, hasUsableToken, storeOfflineToken } from '../lib/sessions';
+import { appByClientId, peekAudience, type ShopifyAppCredentials, type ShopifyAppsEnv } from '../lib/shopify-apps';
 import { normalizeShopDomain } from '../lib/validators';
 
 export interface ShopifySessionClaims extends JWTPayload {
@@ -45,16 +47,27 @@ const RETRY_HEADER = { 'X-Shopify-Retry-Invalid-Session-Request': '1' };
 const invalidSession = (message: string) =>
   new ApiError(401, 'UNAUTHORIZED', message, { headers: RETRY_HEADER });
 
-/** Verifies a Shopify session token and returns its claims plus the canonical shop domain. */
+/**
+ * Verifies a Shopify session token and returns its claims, the canonical shop
+ * domain and the app it was issued for. The `aud` claim selects which
+ * configured app's secret to verify with; the signature and `aud` are then
+ * checked against that same app, so a token can never be validated with a
+ * different app's credentials.
+ */
 export async function verifySessionToken(
   token: string,
-  env: Pick<Env, 'SHOPIFY_API_KEY' | 'SHOPIFY_API_SECRET'>,
-): Promise<{ claims: ShopifySessionClaims; shopDomain: string }> {
+  env: ShopifyAppsEnv,
+): Promise<{ claims: ShopifySessionClaims; shopDomain: string; app: ShopifyAppCredentials }> {
+  const app = appByClientId(env, peekAudience(token));
+  if (!app) {
+    // Retrying with a fresh token cannot help, so no retry header here.
+    throw new ApiError(401, 'UNAUTHORIZED', 'Session token was issued for an app this server does not know');
+  }
   let payload: JWTPayload;
   try {
-    ({ payload } = await jwtVerify(token, encoder.encode(env.SHOPIFY_API_SECRET), {
+    ({ payload } = await jwtVerify(token, encoder.encode(app.clientSecret), {
       algorithms: ['HS256'],
-      audience: env.SHOPIFY_API_KEY,
+      audience: app.clientId,
       clockTolerance: 10,
       requiredClaims: ['iss', 'dest', 'aud', 'exp', 'nbf', 'iat'],
     }));
@@ -83,7 +96,7 @@ export async function verifySessionToken(
   if (issUrl.hostname !== shopDomain || issUrl.pathname.replace(/\/$/, '') !== '/admin') {
     throw invalidSession('Session token issuer does not match its destination');
   }
-  return { claims, shopDomain };
+  return { claims, shopDomain, app };
 }
 
 async function rememberSession(
@@ -117,17 +130,26 @@ export const requireShopifySession = (): MiddlewareHandler<AppEnv> => async (c, 
   if (!match) throw invalidSession('Missing session token');
   const token = match[1]!;
 
-  const { claims, shopDomain } = await verifySessionToken(token, c.env);
-  const logger = c.get('logger').child({ shop: shopDomain });
+  const { claims, shopDomain, app } = await verifySessionToken(token, c.env);
+  const logger = c.get('logger').child({ shop: shopDomain, app: app.name });
   c.set('logger', logger);
 
   const db = getDb(c.env.DB);
   let shop = await findShopByDomain(db, shopDomain);
 
-  if (!shop || !hasUsableToken(shop)) {
-    logger.info('shopify.token_exchange', { reason: shop ? 'token_unusable' : 'new_shop' });
-    const offline = await exchangeSessionToken(c.env, shopDomain, token, logger);
-    shop = await storeOfflineToken(c.env, db, shopDomain, offline);
+  // A token from another app (the store switched to a different custom app)
+  // means the stored offline token belongs to the old app: replace it.
+  const appChanged = !!shop?.shopifyClientId && shop.shopifyClientId !== app.clientId;
+  if (!shop || appChanged || !hasUsableToken(shop)) {
+    logger.info('shopify.token_exchange', {
+      reason: !shop ? 'new_shop' : appChanged ? 'app_changed' : 'token_unusable',
+    });
+    const offline = await exchangeSessionToken(app, shopDomain, token, logger);
+    shop = await storeOfflineToken(c.env, db, shopDomain, offline, app);
+  } else if (!shop.shopifyClientId) {
+    // Installed before multi-app support: remember the app this verified token proves.
+    await setShopClientId(db, shop.id, app.clientId);
+    shop = { ...shop, shopifyClientId: app.clientId };
   }
 
   c.set('auth', {
@@ -135,6 +157,7 @@ export const requireShopifySession = (): MiddlewareHandler<AppEnv> => async (c, 
     shopDomain,
     userId: claims.sub ?? null,
     sessionId: claims.sid ?? null,
+    app,
     sessionToken: token,
   });
 
