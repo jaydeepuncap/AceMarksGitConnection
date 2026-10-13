@@ -10,11 +10,11 @@
  * Also exports the Cloudflare Queues consumer (background sync) and a daily
  * scheduled cleanup.
  */
-import { Hono } from 'hono';
+import { type Context, Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { and, inArray, lt } from 'drizzle-orm';
 import { syncHistory } from '../drizzle/schema';
-import type { AppEnv, Env, SyncJobMessage } from './env';
+import type { AppEnv, Env, HonoEnv, SyncJobMessage } from './env';
 import { deleteExpiredSessions, getDb, transitionSyncRun } from './lib/database';
 import { createLogger } from './lib/logger';
 import { normalizeShopDomain } from './lib/validators';
@@ -91,9 +91,7 @@ export function frameAncestors(shop: string | null): string {
     : 'frame-ancestors https://admin.shopify.com;';
 }
 
-const API_KEY_META = /<meta\s+name="shopify-api-key"\s+content="[^"]*"\s*\/?>/i;
-
-app.get('*', async (c) => {
+export async function serveSpa(c: Context<HonoEnv>): Promise<Response> {
   const url = new URL(c.req.url);
   const shop = normalizeShopDomain(url.searchParams.get('shop'));
   const isDocument = !/\.[a-z0-9]+$/i.test(url.pathname);
@@ -104,23 +102,24 @@ app.get('*', async (c) => {
     if (adminHost) return c.redirect(`https://${adminHost}/apps/${c.env.SHOPIFY_API_KEY}${url.pathname}`, 302);
   }
 
-  const asset = await c.env.ASSETS.fetch(c.req.raw);
-  const type = asset.headers.get('content-type') ?? '';
-  if (!type.includes('text/html')) return asset;
+  const res = await c.env.ASSETS.fetch(c.req.raw);
+  const contentType = res.headers.get('content-type') ?? '';
+  if (!contentType.includes('text/html')) return res;
 
-  // Inject the public client ID for App Bridge (keeps one build for all environments).
-  const html = (await asset.text()).replace(
-    API_KEY_META,
-    `<meta name="shopify-api-key" content="${c.env.SHOPIFY_API_KEY.replace(/[^A-Za-z0-9_-]/g, '')}" />`,
+  const html = (await res.text()).replaceAll(
+    '__SHOPIFY_API_KEY__',
+    c.env.SHOPIFY_API_KEY ?? '',
   );
-  const headers = new Headers(asset.headers);
-  headers.delete('content-length');
-  headers.set('Content-Security-Policy', frameAncestors(shop));
-  headers.set('Cache-Control', 'no-store');
-  headers.set('X-Content-Type-Options', 'nosniff');
-  headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
-  return new Response(html, { status: asset.status, headers });
-});
+
+  c.header('Content-Security-Policy', frameAncestors(shop));
+  c.header('Cache-Control', 'no-store');
+  c.header('X-Content-Type-Options', 'nosniff');
+  c.header('Referrer-Policy', 'strict-origin-when-cross-origin');
+
+  return c.html(html);
+}
+
+app.get('*', serveSpa);
 
 app.notFound(notFoundHandler);
 

@@ -41,6 +41,7 @@
     "db:console:development:local": "wrangler d1 execute ace-marks-git-connection-dev --env development --local --command",
     "db:console:development:remote": "wrangler d1 execute ace-marks-git-connection-dev --env development --remote --command",
     "db:studio": "drizzle-kit studio",
+    "db:studio:dev": "drizzle-kit studio --config drizzle.config.dev.ts",
     "check-env": "tsx scripts/check-env.ts"
   },
   "dependencies": {

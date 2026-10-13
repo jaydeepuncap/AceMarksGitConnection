@@ -75,7 +75,7 @@ export function createTestEnv(options: { withQueue?: boolean } = {}): TestContex
     KV: kv as unknown as KVNamespace,
     ASSETS: {
       fetch: async () =>
-        new Response('<html><head><meta name="shopify-api-key" content="" /></head></html>', {
+        new Response('<html><head><meta name="shopify-api-key" content="__SHOPIFY_API_KEY__" /></head></html>', {
           headers: { 'content-type': 'text/html' },
         }),
     } as unknown as Fetcher,
