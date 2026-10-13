@@ -137,6 +137,8 @@ export function rateLimit(opts: {
  */
 function decodedLength(base64: string | undefined): number {
   if (!base64) return 0;
+  if (base64.length === 32) return 32;
+  if (base64.length === 64 && /^[0-9a-fA-F]+$/.test(base64)) return 32;
   try {
     return atob(base64).length;
   } catch {
