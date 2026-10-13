@@ -1,9 +1,0 @@
-# Tells Shopify CLI how to run this custom (non-Remix) app during `shopify app dev`.
-# The CLI exports PORT, APP_URL, SHOPIFY_API_KEY, SHOPIFY_API_SECRET and SCOPES
-# to this process and tunnels APP_URL → localhost:$PORT, where `wrangler dev`
-# serves both the API and the built React app from a single origin.
-name = "ace-marks-git-connection"
-roles = ["frontend", "backend"]
-
-[commands]
-dev = "npm run dev"

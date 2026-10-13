@@ -1,15 +1,10 @@
 # Cloudflare Workers configuration for Ace Marks Git Connection.
-# Requires Wrangler v4 (v3.x also works for everything except `run_worker_first`
-# as a boolean on [assets], which needs wrangler >= 3.109).
 #
-# The top-level environment is DEVELOPMENT (used by `wrangler dev` and
-# `npm run db:migrate:local`). Production lives under [env.production].
-# Bindings and [vars] are NOT inherited by named environments, so each one
-# re-declares them.
-#
-# Placeholders marked REPLACE_WITH_* come from the commands in README.md
-# ("Create Cloudflare resources"). Local `wrangler dev` works with the
-# placeholders because local D1/KV are simulated on disk under .wrangler/.
+# Production is the default top-level environment (used by `wrangler deploy`
+# and `npm run db:migrate:remote`).
+# Development lives under [env.development] (used by `wrangler dev --env development`,
+# `npm run deploy:development`, and `npm run db:migrate:development:remote`).
+# An explicit [env.production] block is also provided for compatibility with `--env production`.
 
 name = "ace-marks-git-connection"
 main = "worker/index.ts"
@@ -33,27 +28,23 @@ enabled = true
 crons = ["17 3 * * *"]
 
 [vars]
-APP_ENV = "development"
-LOG_LEVEL = "debug"
+APP_ENV = "production"
+LOG_LEVEL = "info"
 SHOPIFY_API_VERSION = "2026-07"
 SHOPIFY_SCOPES = "read_themes,write_themes"
-SHOPIFY_APP_URL = ""
+SHOPIFY_APP_URL = "https://ace-marks-git-connection.REPLACE_WITH_WORKERS_SUBDOMAIN.workers.dev"
 GITHUB_API_BASE_URL = "https://api.github.com"
 
 [[d1_databases]]
 binding = "DB"
 database_name = "ace-marks-git-connection"
 database_id = "0fa8cf96-ed3d-4505-9028-79064d9a422a"
-# Canonical migrations directory, shared with drizzle.config.ts (`out`).
 migrations_dir = "migrations"
 
 [[kv_namespaces]]
 binding = "KV"
-id = "REPLACE_WITH_DEV_KV_NAMESPACE_ID"
+id = "45ff456d0e2644b58e0aba0140c28da1"
 
-# Background sync jobs (Cloudflare Queues; Workers Paid plan).
-# Without this binding the app falls back to ctx.waitUntil() processing,
-# which is fine for small commits but bounded by request lifetime.
 [[queues.producers]]
 binding = "SYNC_QUEUE"
 queue = "ace-marks-sync"
@@ -66,16 +57,65 @@ max_retries = 5
 retry_delay = 30
 dead_letter_queue = "ace-marks-sync-dlq"
 
-# Rate limiting (Workers Rate Limiting binding). namespace_id: any integer unique
-# within your account. If absent, an in-isolate fallback limiter is used.
 [[ratelimits]]
 name = "API_RATE_LIMITER"
-namespace_id = "1001"
+namespace_id = "2001"
 simple = { limit = 120, period = 60 }
 
 [[ratelimits]]
 name = "SYNC_RATE_LIMITER"
-namespace_id = "1002"
+namespace_id = "2002"
 simple = { limit = 10, period = 60 }
 
+# ---------------------------------------------------------------------------
+# Development Environment
+# Used by: npm run dev:development
+#          npm run deploy:development
+#          npm run db:migrate:development:remote
+# ---------------------------------------------------------------------------
+[env.development]
+name = "ace-marks-git-connection-dev"
+
+[env.development.triggers]
+crons = ["17 3 * * *"]
+
+[env.development.vars]
+APP_ENV = "development"
+LOG_LEVEL = "debug"
+SHOPIFY_API_VERSION = "2026-07"
+SHOPIFY_SCOPES = "read_themes,write_themes"
+SHOPIFY_APP_URL = ""
+GITHUB_API_BASE_URL = "https://api.github.com"
+
+[[env.development.d1_databases]]
+binding = "DB"
+database_name = "ace-marks-git-connection-dev"
+database_id = "REPLACE_WITH_DEV_D1_DATABASE_ID"
+migrations_dir = "migrations"
+
+[[env.development.kv_namespaces]]
+binding = "KV"
+id = "REPLACE_WITH_DEV_KV_NAMESPACE_ID"
+
+[[env.development.queues.producers]]
+binding = "SYNC_QUEUE"
+queue = "ace-marks-sync-dev"
+
+[[env.development.queues.consumers]]
+queue = "ace-marks-sync-dev"
+max_batch_size = 1
+max_batch_timeout = 1
+max_retries = 5
+retry_delay = 30
+dead_letter_queue = "ace-marks-sync-dlq-dev"
+
+[[env.development.ratelimits]]
+name = "API_RATE_LIMITER"
+namespace_id = "1001"
+simple = { limit = 120, period = 60 }
+
+[[env.development.ratelimits]]
+name = "SYNC_RATE_LIMITER"
+namespace_id = "1002"
+simple = { limit = 10, period = 60 }
 
