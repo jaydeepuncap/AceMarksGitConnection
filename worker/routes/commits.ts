@@ -7,11 +7,11 @@
  *   GET /api/commits/:sha/files   ?repository&page&perPage   (up to 3000 files per commit)
  */
 import { Hono } from 'hono';
-import type { CommitDetail, CommitFile, CommitFilesResponse, CommitSummary, Paginated } from '../../shared/api-types';
+import type { CommitDetail, CommitFile, CommitFilesResponse, CommitListItem, CommitsResponse } from '../../shared/api-types';
 import type { AppEnv } from '../env';
 import { cached, cacheKeys } from '../lib/cache';
 import { githubClient, resolveRepository } from '../lib/clients';
-import { getDb, getSettings } from '../lib/database';
+import { getDb, getLastSynced, getSettings, syncedCommits, toLastSynced } from '../lib/database';
 import { GITHUB_MAX_COMMIT_FILES } from '../lib/github-client';
 import { ok } from '../lib/response';
 import {
@@ -35,7 +35,51 @@ export const commitsRoutes = new Hono<AppEnv>()
       page: query.page,
       perPage: query.perPage,
     });
-    return ok<Paginated<CommitSummary>>(c, { ...result, page: query.page, perPage: query.perPage });
+    const items: CommitListItem[] = result.items.map((commit) => ({ ...commit, syncStatus: null }));
+    const response: CommitsResponse = {
+      items,
+      page: query.page,
+      perPage: query.perPage,
+      hasNextPage: result.hasNextPage,
+      lastSynced: null,
+      waiting: 0,
+      waitingMore: false,
+    };
+    if (!query.themeId) return ok<CommitsResponse>(c, response);
+
+    // Where the theme stands on this branch: New / Last synced / Added.
+    const { shop } = c.get('auth');
+    const db = getDb(c.env.DB);
+    const branch = ref ?? (await client.getRepository(target.owner, target.repo)).defaultBranch;
+    const last = await getLastSynced(db, shop.id, query.themeId, branch);
+    response.lastSynced = toLastSynced(last);
+    let lastIndex: number | null = null;
+    if (last) {
+      const walk = await cached(
+        c.env.KV,
+        `cache:${shop.id}:gh:${target.fullName}:after:${branch}:${last.commitSha}`,
+        60,
+        async () => {
+          const w = await client.listCommitsUntil(target.owner, target.repo, branch, last.commitSha, 300);
+          return { count: w.commits.length, found: w.found, more: !w.found && w.hasMore };
+        },
+        c.get('logger'),
+      );
+      response.waiting = walk.count;
+      response.waitingMore = walk.more;
+      if (walk.found) lastIndex = walk.count;
+    }
+    const synced = await syncedCommits(db, shop.id, query.themeId, branch, items.map((i) => i.sha));
+    const offset = (query.page - 1) * query.perPage;
+    items.forEach((item, i) => {
+      const position = offset + i;
+      if (lastIndex !== null) {
+        item.syncStatus = position < lastIndex ? (synced.has(item.sha) ? 'added' : 'new') : position === lastIndex ? 'last_synced' : 'added';
+      } else {
+        item.syncStatus = synced.has(item.sha) ? 'added' : last ? 'new' : null;
+      }
+    });
+    return ok<CommitsResponse>(c, response);
   })
   .get('/:sha', async (c) => {
     const sha = parseOrThrow(commitShaSchema, c.req.param('sha'));

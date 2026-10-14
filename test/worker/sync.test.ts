@@ -210,15 +210,15 @@ describe('sync workflow', () => {
       expect(res.body.error.code).toBe('PREVIEW_EXPIRED');
     });
 
-    it('fails a file whose bytes do not match the commit blob (integrity check)', async () => {
+    it('blocks a file whose bytes do not match the commit blob (integrity check) before anything changes', async () => {
       await setup({ world: { corrupt: 'sections/header.liquid' } });
       const { body: p } = await preview({});
-      await api('POST', '/api/sync', { syncId: p.data.syncId, confirm: true });
-      await drainQueue();
-      const { body } = await api<SyncRunDetail>('GET', `/api/sync/history/${p.data.syncId}`);
-      expect(body.data.status).toBe('partially_failed');
-      const op = body.data.operations.find((o) => o.path === 'sections/header.liquid');
-      expect(op).toMatchObject({ status: 'failed', error: /Integrity check failed/ });
+      expect(p.data.checks.code.status).toBe('failed');
+      expect(p.data.checks.code.issues[0]).toMatchObject({ path: 'sections/header.liquid', message: /integrity check failed/ });
+      const res = await api('POST', '/api/sync', { syncId: p.data.syncId, confirm: true });
+      expect(res.status).toBe(422);
+      expect(res.body.error.code).toBe('CODE_ERRORS');
+      expect(world.upserts).toHaveLength(0);
       expect(world.themeFiles.get(THEME_DEV.id)!.get('sections/header.liquid')).toBe('old');
     });
 
@@ -240,7 +240,8 @@ describe('sync workflow', () => {
       detail = (await api<SyncRunDetail>('GET', `/api/sync/history/${p.data.syncId}`)).body.data;
       expect(detail).toMatchObject({ status: 'succeeded', filesFailed: 0, attempt: 2 });
       const retried = world.upserts.slice(upsertsBefore).flatMap((u) => u.files.map((f) => f.filename));
-      expect(retried).toEqual(['sections/header.liquid']);
+      // Only the failed file is written again; the sync record file comes last once everything succeeded.
+      expect(retried).toEqual(['sections/header.liquid', 'assets/theme-sync.json']);
     });
 
     it('applies explicit deletions and treats already-missing files as deleted', async () => {

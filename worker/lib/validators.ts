@@ -88,6 +88,8 @@ export const branchesQuerySchema = paginationSchema.extend({
 export const commitsQuerySchema = paginationSchema.extend({
   repository: repositorySchema.optional(),
   branch: branchSchema.optional(),
+  /** Mark each commit New / Last synced / Added for this theme. */
+  themeId: themeIdSchema.optional(),
   path: z.string().trim().max(255).optional(),
 });
 
@@ -101,6 +103,8 @@ export const commitFilesQuerySchema = paginationSchema.extend({
 });
 
 export const historyQuerySchema = paginationSchema.extend({
+  themeId: themeIdSchema.optional(),
+  branch: branchSchema.optional(),
   status: z
     .enum(['previewed', 'queued', 'running', 'succeeded', 'partially_failed', 'failed', 'cancelled', 'expired'])
     .optional(),
@@ -181,6 +185,7 @@ export const confirmSyncSchema = z
     confirm: z.literal(true, { message: 'Explicit confirmation (confirm: true) is required' }),
     confirmLiveTheme: z.boolean().optional(),
     confirmThemeName: z.string().max(200).optional(),
+    acceptDirectEdits: z.boolean().optional(),
   })
   .strict();
 

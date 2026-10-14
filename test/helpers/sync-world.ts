@@ -129,6 +129,20 @@ export function installWorld(opts: WorldOptions = {}) {
           },
         };
       },
+      AceThemeFileBodies: (v) => {
+        const files = themeFiles.get(v.id as string);
+        if (!files) return { theme: null };
+        return {
+          theme: {
+            id: v.id,
+            files: {
+              nodes: (v.filenames as string[])
+                .filter((n) => files.has(n))
+                .map((n) => ({ filename: n, body: { __typename: 'OnlineStoreThemeFileBodyText', content: files.get(n)! } })),
+            },
+          },
+        };
+      },
       AceThemeFilesUpsert: (v) => {
         const files = v.files as { filename: string; body: { type: string; value: string } }[];
         upserts.push({ themeId: v.themeId as string, files });

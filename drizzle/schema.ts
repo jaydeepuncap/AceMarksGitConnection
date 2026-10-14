@@ -161,7 +161,7 @@ export const SYNC_STATUSES = [
 ] as const;
 export type SyncStatus = (typeof SYNC_STATUSES)[number];
 
-export const SYNC_STRATEGIES = ['commit_changes', 'full_snapshot'] as const;
+export const SYNC_STRATEGIES = ['commit_changes', 'full_snapshot', 'since_last_sync'] as const;
 export type SyncStrategy = (typeof SYNC_STRATEGIES)[number];
 
 export const syncHistory = sqliteTable(
@@ -255,6 +255,29 @@ export const syncOperations = sqliteTable(
 );
 
 // ---------------------------------------------------------------------------
+// theme_branch_sync — the last commit fully synced to a theme from a branch.
+// Saved only when every file of a sync succeeded; mirrored into the theme as
+// assets/theme-sync.json.
+// ---------------------------------------------------------------------------
+export const themeBranchSync = sqliteTable(
+  'theme_branch_sync',
+  {
+    id: id(),
+    shopId: text('shop_id')
+      .notNull()
+      .references(() => shops.id, { onDelete: 'cascade' }),
+    themeId: text('theme_id').notNull(),
+    branch: text('branch').notNull(),
+    commitSha: text('commit_sha').notNull(),
+    commitMessage: text('commit_message'),
+    syncId: text('sync_id'),
+    syncedAt: integer('synced_at', { mode: 'timestamp_ms' }).notNull(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex('theme_branch_sync_unique').on(t.shopId, t.themeId, t.branch)],
+);
+
+// ---------------------------------------------------------------------------
 // Relations (for Drizzle relational queries)
 // ---------------------------------------------------------------------------
 export const shopsRelations = relations(shops, ({ many, one }) => ({
@@ -292,3 +315,4 @@ export type GithubConnection = typeof githubConnections.$inferSelect;
 export type AppSettingsRow = typeof appSettings.$inferSelect;
 export type SyncHistoryRow = typeof syncHistory.$inferSelect;
 export type SyncOperationRow = typeof syncOperations.$inferSelect;
+export type ThemeBranchSyncRow = typeof themeBranchSync.$inferSelect;

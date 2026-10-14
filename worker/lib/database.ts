@@ -14,7 +14,9 @@ import {
   shops,
   syncHistory,
   syncOperations,
+  themeBranchSync,
   type AppSettingsRow,
+  type ThemeBranchSyncRow,
   type GithubConnection,
   type Shop,
   type SyncHistoryRow,
@@ -25,6 +27,8 @@ import {
   DEFAULT_SYNC_PREFERENCES,
   type AppSettings,
   type GithubConnectionInfo,
+  type IncludedCommit,
+  type LastSynced,
   type SyncOperation,
   type SyncPreferences,
   type SyncRun,
@@ -323,9 +327,19 @@ export async function getSyncRun(db: Database, shopId: string, syncId: string): 
 export async function listSyncRuns(
   db: Database,
   shopId: string,
-  opts: { page: number; perPage: number; status?: SyncStatus; includePreviews?: boolean },
+  opts: {
+    page: number;
+    perPage: number;
+    status?: SyncStatus;
+    includePreviews?: boolean;
+    themeId?: string;
+    /** Runs whose commit came from this branch (runs recorded without a branch are included). */
+    branch?: string;
+  },
 ): Promise<{ rows: SyncHistoryRow[]; hasNextPage: boolean }> {
   const filters = [eq(syncHistory.shopId, shopId)];
+  if (opts.themeId) filters.push(eq(syncHistory.themeId, opts.themeId));
+  if (opts.branch) filters.push(sql`(${syncHistory.branch} = ${opts.branch} or ${syncHistory.branch} is null)`);
   if (opts.status) filters.push(eq(syncHistory.status, opts.status));
   else if (!opts.includePreviews) {
     filters.push(ne(syncHistory.status, 'previewed'), ne(syncHistory.status, 'expired'));
@@ -457,6 +471,7 @@ const RETRYABLE_STATUSES: SyncStatus[] = ['failed', 'partially_failed'];
 
 export function toSyncRunDto(row: SyncHistoryRow): SyncRun {
   const details = row.errorDetails as { code?: string; message?: string } | null;
+  const options = (row.options ?? {}) as Record<string, unknown>;
   return {
     id: row.id,
     repository: row.repository,
@@ -478,6 +493,9 @@ export function toSyncRunDto(row: SyncHistoryRow): SyncRun {
     startedAt: iso(row.startedAt),
     completedAt: iso(row.completedAt),
     canRetry: RETRYABLE_STATUSES.includes(row.status),
+    baseSha: typeof options.baseSha === 'string' ? options.baseSha : null,
+    commitsIncluded: Array.isArray(options.commitsIncluded) ? (options.commitsIncluded as IncludedCommit[]) : [],
+    backedUp: typeof options.backedUp === 'number' ? options.backedUp : 0,
   };
 }
 
@@ -494,4 +512,101 @@ export function toSyncOperationDto(row: SyncOperationRow): SyncOperation {
     attempts: row.attempts,
     error: row.error,
   };
+}
+
+/** Adds `n` to options.backedUp (files saved before they changed). */
+export async function addBackedUp(db: Database, shopId: string, syncId: string, n: number): Promise<void> {
+  if (n <= 0) return;
+  await db
+    .update(syncHistory)
+    .set({
+      options: sql`json_set(${syncHistory.options}, '$.backedUp', coalesce(json_extract(${syncHistory.options}, '$.backedUp'), 0) + ${n})`,
+    })
+    .where(and(eq(syncHistory.id, syncId), eq(syncHistory.shopId, shopId)));
+}
+
+/**
+ * Commits of `shas` fully synced to the theme from `branch`
+ * (runs recorded without a branch count as the given branch).
+ */
+export async function syncedCommits(
+  db: Database,
+  shopId: string,
+  themeId: string,
+  branch: string | null,
+  shas: string[],
+): Promise<Set<string>> {
+  if (shas.length === 0) return new Set();
+  const rows = await db
+    .selectDistinct({ sha: syncHistory.commitSha })
+    .from(syncHistory)
+    .where(
+      and(
+        eq(syncHistory.shopId, shopId),
+        eq(syncHistory.themeId, themeId),
+        eq(syncHistory.status, 'succeeded'),
+        inArray(syncHistory.commitSha, shas.slice(0, 90)),
+        ...(branch ? [sql`(${syncHistory.branch} = ${branch} or ${syncHistory.branch} is null)`] : []),
+      ),
+    );
+  return new Set(rows.map((r) => r.sha));
+}
+
+// ---------------------------------------------------------------------------
+// Last synced commit per theme and branch
+// ---------------------------------------------------------------------------
+export function toLastSynced(row: ThemeBranchSyncRow | undefined | null): LastSynced | null {
+  if (!row) return null;
+  return {
+    themeId: row.themeId,
+    branch: row.branch,
+    sha: row.commitSha,
+    shortSha: row.commitSha.slice(0, 7),
+    message: row.commitMessage,
+    syncedAt: row.syncedAt.toISOString(),
+    syncId: row.syncId,
+  };
+}
+
+export async function getLastSynced(
+  db: Database,
+  shopId: string,
+  themeId: string,
+  branch: string,
+): Promise<ThemeBranchSyncRow | undefined> {
+  return db.query.themeBranchSync.findFirst({
+    where: and(eq(themeBranchSync.shopId, shopId), eq(themeBranchSync.themeId, themeId), eq(themeBranchSync.branch, branch)),
+  });
+}
+
+/** The most recent sync of each theme (any branch). */
+export async function latestSyncPerTheme(db: Database, shopId: string): Promise<Map<string, ThemeBranchSyncRow>> {
+  const rows = await db
+    .select()
+    .from(themeBranchSync)
+    .where(eq(themeBranchSync.shopId, shopId))
+    .orderBy(desc(themeBranchSync.syncedAt));
+  const out = new Map<string, ThemeBranchSyncRow>();
+  for (const row of rows) if (!out.has(row.themeId)) out.set(row.themeId, row);
+  return out;
+}
+
+export async function saveLastSynced(
+  db: Database,
+  shopId: string,
+  values: { themeId: string; branch: string; commitSha: string; commitMessage: string | null; syncId: string | null; syncedAt: Date },
+): Promise<void> {
+  await db
+    .insert(themeBranchSync)
+    .values({ shopId, ...values })
+    .onConflictDoUpdate({
+      target: [themeBranchSync.shopId, themeBranchSync.themeId, themeBranchSync.branch],
+      set: {
+        commitSha: values.commitSha,
+        commitMessage: values.commitMessage,
+        syncId: values.syncId,
+        syncedAt: values.syncedAt,
+        updatedAt: new Date(),
+      },
+    });
 }

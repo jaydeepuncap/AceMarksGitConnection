@@ -135,6 +135,36 @@ function SyncDetail({ id, onBack }: { id: string; onBack: () => void }) {
         </>
       }
     >
+      {data?.status === 'succeeded' && (
+        <s-banner tone="success" heading="Update complete">
+          <s-paragraph>{`Files: ${data.filesSucceeded} of ${data.filesChanged} updated${data.backedUp ? ` · backup of ${data.backedUp} file(s) saved first` : ''}`}</s-paragraph>
+          <s-paragraph>{`${data.themeName} is now on ${data.commitSha.slice(0, 7)} ${firstLine(data.commitMessage)}`}</s-paragraph>
+          <s-paragraph color="subdued">
+            {data.themeRole === 'MAIN'
+              ? 'Customers see the update now.'
+              : 'Preview the theme in Shopify. When you are happy with it, publish it in Shopify as usual — Theme Sync never publishes a theme on its own.'}
+          </s-paragraph>
+        </s-banner>
+      )}
+      {(data?.status === 'partially_failed' || data?.status === 'failed') && (
+        <s-banner tone="critical" heading={`Update incomplete · ${data.filesSucceeded} of ${data.filesChanged} files updated`}>
+          <s-paragraph>
+            {`${data.themeName} keeps its previous last synced commit${data.baseSha ? ` (${data.baseSha.slice(0, 7)})` : ''} until every file succeeds. Retry the failed files, or ask your developer when a file has a code error.`}
+          </s-paragraph>
+        </s-banner>
+      )}
+      {data && data.commitsIncluded.length > 0 && (
+        <s-section heading={`Updates included (${data.commitsIncluded.length})`}>
+          <s-stack gap="small-300">
+            {data.baseSha && <s-text color="subdued">{`From ${data.baseSha.slice(0, 7)} (last synced before this update)`}</s-text>}
+            {data.commitsIncluded.map((c) => (
+              <s-text key={c.sha}>
+                <s-text type="strong">{c.shortSha}</s-text> {firstLine(c.message)}
+              </s-text>
+            ))}
+          </s-stack>
+        </s-section>
+      )}
       {data && (
         <s-section heading="Summary">
           <s-stack gap="small-200">
@@ -240,13 +270,14 @@ function SyncList({ onOpen }: { onOpen: (id: string) => void }) {
           <s-select
             slot="filters"
             label="Status"
-            value={status}
+            value={status || 'all'}
             onChange={(event) => {
-              setStatus(event.currentTarget.value as SyncStatus | '');
+              const value = event.currentTarget.value;
+              setStatus(value === 'all' ? '' : (value as SyncStatus));
               setPage(1);
             }}
           >
-            <s-option value="">All statuses</s-option>
+            <s-option value="all">All statuses</s-option>
             {(Object.keys(SYNC_STATUS_BADGE) as SyncStatus[]).map((s) => (
               <s-option key={s} value={s}>
                 {SYNC_STATUS_BADGE[s].label}

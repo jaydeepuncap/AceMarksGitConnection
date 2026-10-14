@@ -9,7 +9,7 @@
  *   POST /api/sync/history/:id/retry  re-runs failed/pending operations (idempotent writes)
  */
 import { Hono, type Context } from 'hono';
-import type { Paginated, SyncPreview, SyncRun, SyncRunDetail } from '../../shared/api-types';
+import type { Paginated, SyncChecks, SyncPreview, SyncRun, SyncRunDetail } from '../../shared/api-types';
 import type { SyncHistoryRow } from '../../drizzle/schema';
 import type { AppEnv } from '../env';
 import { adminClient, githubClient, resolveRepository } from '../lib/clients';
@@ -87,6 +87,9 @@ export const syncRoutes = new Hono<AppEnv>()
     const settings = await getSettings(db, shop.id);
     const { client: github, connection } = await githubClient(c);
     const target = await resolveRepository(c, connection, body.repository);
+    // The branch is needed to know the theme's last synced commit on it.
+    const branch =
+      body.branch ?? target.defaultBranch ?? (await github.getRepository(target.owner, target.repo)).defaultBranch;
 
     const preview = await buildSyncPreview(
       { db, github, admin: await adminClient(c), logger: c.get('logger') },
@@ -95,7 +98,7 @@ export const syncRoutes = new Hono<AppEnv>()
         userId,
         owner: target.owner,
         repo: target.repo,
-        branch: body.branch ?? target.defaultBranch,
+        branch,
         commitSha: body.commitSha,
         themeId: body.themeId,
         strategy: body.strategy ?? settings.syncPreferences.strategy,
@@ -121,6 +124,22 @@ export const syncRoutes = new Hono<AppEnv>()
     if (!run.previewExpiresAt || run.previewExpiresAt.getTime() < Date.now()) {
       await transitionSyncRun(db, shop.id, run.id, ['previewed'], 'expired');
       throw new ApiError(410, 'PREVIEW_EXPIRED', 'This preview expired. Generate a new preview.');
+    }
+
+    // Step 3 results: code errors block the sync; direct edits need an explicit "replace".
+    const checks = (run.options as { checks?: SyncChecks } | null)?.checks;
+    if (checks?.code.status === 'failed') {
+      throw new ApiError(422, 'CODE_ERRORS', 'The code check found errors. Ask your developer to fix them and choose the new commit.', {
+        details: { issues: checks.code.issues },
+      });
+    }
+    if (checks?.directEdits.status === 'warning' && body.acceptDirectEdits !== true) {
+      throw new ApiError(
+        422,
+        'DIRECT_EDITS_FOUND',
+        'Some files were edited directly in Shopify since the last sync. Confirm that they may be replaced.',
+        { details: { files: checks.directEdits.files } },
+      );
     }
 
     const { isLive } = await assertWriteAllowed(c, run, body);

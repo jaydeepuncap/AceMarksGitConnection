@@ -145,6 +145,9 @@ export function matchesGlob(path: string, pattern: string): boolean {
   return new RegExp(regex).test(path);
 }
 
+/** Written by Theme Sync after every fully completed sync; never taken from the repository. */
+export const THEME_SYNC_MARKER_PATH = 'assets/theme-sync.json';
+
 export function isIgnored(path: string, patterns: readonly string[]): string | null {
   for (const pattern of patterns) {
     if (pattern.trim() !== '' && matchesGlob(path, pattern.trim())) return pattern;

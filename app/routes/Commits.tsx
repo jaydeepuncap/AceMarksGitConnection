@@ -6,12 +6,86 @@ import { ErrorBanner } from '../components/ErrorBanner';
 import { LoadingInline, LoadingState } from '../components/LoadingState';
 import { api } from '../lib/api-client';
 import { showToast } from '../lib/app-bridge';
-import { FILE_STATUS_BADGE, firstLine, formatDate } from '../lib/format';
-import { useApiQuery, useMutation } from '../lib/hooks';
-import type { SyncPreview, SyncStrategy } from '../lib/types';
+import { FILE_STATUS_BADGE, firstLine, formatDate, SYNC_STATUS_BADGE, type Tone } from '../lib/format';
+import { useApiQuery, useMutation, useNavigateHandler } from '../lib/hooks';
+import type { CommitSyncStatus, SyncPreview, SyncStrategy } from '../lib/types';
 
 const COMMITS_PER_PAGE = 20;
 const FILES_PER_PAGE = 100;
+/** Select values for "no choice" — an empty option value is not reliable in <s-select>. */
+const DEFAULT_BRANCH = '__default__';
+const NO_THEME = '__none__';
+
+const SYNC_STATUS: Record<CommitSyncStatus, { label: string; tone: Tone }> = {
+  new: { label: 'New', tone: 'info' },
+  last_synced: { label: 'Last synced', tone: 'success' },
+  added: { label: 'Added', tone: 'neutral' },
+};
+
+/** Sync history of the selected theme and branch. */
+function ThemeBranchHistory({ themeId, branch, themeName }: { themeId: string; branch: string; themeName: string }) {
+  const go = useNavigateHandler();
+  const [page, setPage] = useState(1);
+  const history = useApiQuery(
+    () => api.sync.history({ themeId, branch: branch || undefined, page, perPage: 10 }),
+    [themeId, branch, page],
+  );
+  const items = history.data?.items ?? [];
+  return (
+    <s-section heading={`Sync history · ${themeName}${branch ? ` · ${branch}` : ''}`}>
+      <s-stack gap="base">
+        <ErrorBanner error={history.error} onRetry={history.reload} heading="History could not be loaded" />
+        {!history.loading && items.length === 0 ? (
+          <s-paragraph color="subdued">No syncs to this theme from this branch yet.</s-paragraph>
+        ) : (
+          <s-table
+            variant="auto"
+            loading={history.loading}
+            paginate
+            hasPreviousPage={page > 1}
+            hasNextPage={!!history.data?.hasNextPage}
+            onPreviousPage={() => setPage((p) => Math.max(1, p - 1))}
+            onNextPage={() => setPage((p) => p + 1)}
+          >
+            <s-table-header-row>
+              <s-table-header listSlot="labeled">Date</s-table-header>
+              <s-table-header listSlot="primary">Updated to</s-table-header>
+              <s-table-header>Updates</s-table-header>
+              <s-table-header listSlot="inline">Status</s-table-header>
+              <s-table-header>Files</s-table-header>
+              <s-table-header>Details</s-table-header>
+            </s-table-header-row>
+            <s-table-body>
+              {items.map((run) => {
+                const badge = SYNC_STATUS_BADGE[run.status];
+                return (
+                  <s-table-row key={run.id}>
+                    <s-table-cell>{formatDate(run.startedAt ?? run.initiatedAt)}</s-table-cell>
+                    <s-table-cell>
+                      <s-text>
+                        <s-text type="strong">{run.commitSha.slice(0, 7)}</s-text> {firstLine(run.commitMessage)}
+                      </s-text>
+                    </s-table-cell>
+                    <s-table-cell>{run.commitsIncluded.length || 1}</s-table-cell>
+                    <s-table-cell>
+                      <s-badge tone={badge.tone}>{badge.label}</s-badge>
+                    </s-table-cell>
+                    <s-table-cell>{`${run.filesSucceeded}/${run.filesChanged}`}</s-table-cell>
+                    <s-table-cell>
+                      <s-button variant="tertiary" onClick={go(`/sync-history?id=${run.id}`)}>
+                        Open
+                      </s-button>
+                    </s-table-cell>
+                  </s-table-row>
+                );
+              })}
+            </s-table-body>
+          </s-table>
+        )}
+      </s-stack>
+    </s-section>
+  );
+}
 
 function CommitDetailSection({ sha, repository }: { sha: string; repository: string }) {
   const [filePage, setFilePage] = useState(1);
@@ -128,10 +202,17 @@ export default function Commits() {
   const repository = defaults?.defaultRepository ?? '';
   const branches = useApiQuery(() => api.github.branches({ repository, perPage: 100 }), [repository], !!repository);
   const commits = useApiQuery(
-    () => api.commits.list({ repository, branch: branch || undefined, page, perPage: COMMITS_PER_PAGE }),
-    [repository, branch, page],
+    () =>
+      api.commits.list({ repository, branch: branch || undefined, page, perPage: COMMITS_PER_PAGE, themeId: themeId || undefined }),
+    [repository, branch, page, themeId],
     !!repository,
   );
+  const lastSynced = commits.data?.lastSynced ?? null;
+  // Default to applying everything since the last sync once the theme has a last synced commit here.
+  const [strategyTouched, setStrategyTouched] = useState(false);
+  useEffect(() => {
+    if (!strategyTouched && lastSynced) setStrategy('since_last_sync');
+  }, [lastSynced, strategyTouched]);
 
   const previewMutation = useMutation(api.sync.preview);
   const confirmMutation = useMutation(api.sync.confirm);
@@ -146,7 +227,7 @@ export default function Commits() {
     confirmMutation.clearError();
     const result = await previewMutation.run({
       repository,
-      branch: branch || undefined,
+      branch: branch || commits.data?.lastSynced?.branch || undefined,
       commitSha: selectedSha,
       themeId,
       strategy,
@@ -158,7 +239,7 @@ export default function Commits() {
     }
   };
 
-  const confirm = async (confirmation: { confirmLiveTheme?: boolean; confirmThemeName?: string }) => {
+  const confirm = async (confirmation: { confirmLiveTheme?: boolean; confirmThemeName?: string; acceptDirectEdits?: boolean }) => {
     if (!preview) return;
     const run = await confirmMutation.run({ syncId: preview.syncId, confirm: true, ...confirmation });
     if (run) {
@@ -198,22 +279,31 @@ export default function Commits() {
           <s-grid gridTemplateColumns="repeat(auto-fit, minmax(200px, 1fr))" gap="base">
             <s-select
               label="Branch"
-              value={branch}
+              value={branch || DEFAULT_BRANCH}
               onChange={(event) => {
-                setBranch(event.currentTarget.value);
+                const value = event.currentTarget.value;
+                setBranch(value === DEFAULT_BRANCH ? '' : value);
                 setPage(1);
                 setSelectedSha(null);
               }}
             >
-              <s-option value="">Repository default</s-option>
+              <s-option value={DEFAULT_BRANCH}>Repository default</s-option>
               {(branches.data?.items ?? []).map((b) => (
                 <s-option key={b.name} value={b.name}>
                   {b.name}
                 </s-option>
               ))}
             </s-select>
-            <s-select label="Target theme" value={themeId} onChange={(event) => setThemeId(event.currentTarget.value)}>
-              <s-option value="">Select a theme</s-option>
+            <s-select
+              label="Target theme"
+              value={themeId || NO_THEME}
+              onChange={(event) => {
+                const value = event.currentTarget.value;
+                setThemeId(value === NO_THEME ? '' : value);
+                setSelectedSha(null);
+              }}
+            >
+              <s-option value={NO_THEME}>Select a theme</s-option>
               {writableThemes.map((t) => (
                 <s-option key={t.id} value={t.id}>
                   {`${t.name}${t.isLive ? ' (LIVE)' : ''}`}
@@ -223,8 +313,12 @@ export default function Commits() {
             <s-select
               label="Strategy"
               value={strategy}
-              onChange={(event) => setStrategy(event.currentTarget.value as SyncStrategy)}
+              onChange={(event) => {
+                setStrategyTouched(true);
+                setStrategy(event.currentTarget.value as SyncStrategy);
+              }}
             >
+              <s-option value="since_last_sync">All updates since last sync</s-option>
               <s-option value="commit_changes">Commit changes</s-option>
               <s-option value="full_snapshot">Full snapshot</s-option>
             </s-select>
@@ -235,6 +329,31 @@ export default function Commits() {
             disabled={strategy === 'full_snapshot'}
             onChange={(event) => setAllowDeletes(event.currentTarget.checked)}
           />
+          {selectedTheme && (
+            <s-box padding="small" background="subdued" borderRadius="base">
+              {lastSynced ? (
+                <s-stack gap="small-300">
+                  <s-text>
+                    {`${selectedTheme.name} last synced from ${lastSynced.branch}: `}
+                    <s-text type="strong">{lastSynced.shortSha}</s-text> {`${firstLine(lastSynced.message)} · ${formatDate(lastSynced.syncedAt)}`}
+                  </s-text>
+                  <s-text color="subdued">
+                    {commits.data && commits.data.waiting > 0
+                      ? `${commits.data.waiting}${commits.data.waitingMore ? '+' : ''} ${commits.data.waiting === 1 ? 'update' : 'updates'} waiting · select the newest to apply all of them`
+                      : 'Up to date with this branch'}
+                  </s-text>
+                </s-stack>
+              ) : (
+                <s-text color="subdued">{`${selectedTheme.name} has no last synced commit from this branch yet.`}</s-text>
+              )}
+            </s-box>
+          )}
+          {strategy === 'since_last_sync' && (
+            <s-text color="subdued">
+              Applies every update between the theme&apos;s last synced commit and the selected one together, in order, so
+              no developer work is left out.
+            </s-text>
+          )}
           {selectedTheme?.isLive && (
             <s-banner tone="warning" heading="Live theme selected">
               <s-paragraph>Syncing will change the storefront customers see. You will be asked to confirm twice.</s-paragraph>
@@ -272,6 +391,7 @@ export default function Commits() {
             <s-table-header listSlot="kicker">SHA</s-table-header>
             <s-table-header listSlot="secondary">Author</s-table-header>
             <s-table-header listSlot="labeled">Date</s-table-header>
+            <s-table-header listSlot="inline">Status</s-table-header>
             <s-table-header>Select</s-table-header>
           </s-table-header-row>
           <s-table-body>
@@ -290,6 +410,13 @@ export default function Commits() {
                 </s-table-cell>
                 <s-table-cell>{commit.authorLogin ?? commit.authorName ?? '—'}</s-table-cell>
                 <s-table-cell>{formatDate(commit.date)}</s-table-cell>
+                <s-table-cell>
+                  {commit.syncStatus ? (
+                    <s-badge tone={SYNC_STATUS[commit.syncStatus].tone}>{SYNC_STATUS[commit.syncStatus].label}</s-badge>
+                  ) : (
+                    <s-text color="subdued">—</s-text>
+                  )}
+                </s-table-cell>
                 <s-table-cell>
                   <s-button
                     variant={selectedSha === commit.sha ? 'primary' : 'secondary'}
@@ -311,6 +438,14 @@ export default function Commits() {
       </s-section>
 
       {selectedSha && <CommitDetailSection sha={selectedSha} repository={repository} />}
+
+      {selectedTheme && (
+        <ThemeBranchHistory
+          themeId={selectedTheme.id}
+          branch={branch || lastSynced?.branch || defaults?.defaultBranch || ''}
+          themeName={selectedTheme.name}
+        />
+      )}
 
       <ConfirmSyncModal
         open={modalOpen}

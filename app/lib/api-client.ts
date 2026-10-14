@@ -15,7 +15,8 @@ import type {
   AppSettings,
   CommitDetail,
   CommitFilesResponse,
-  CommitSummary,
+  CommitsResponse,
+  LastSynced,
   ConfirmSyncRequest,
   CreateGithubConnectionRequest,
   GithubBranch,
@@ -163,10 +164,11 @@ export const api = {
   },
   themes: {
     list: (refresh = false) => apiRequest<ShopifyTheme[]>('GET', '/api/themes', { query: { refresh: refresh ? 1 : undefined } }),
+    lastSynced: () => apiRequest<Record<string, LastSynced>>('GET', '/api/themes/last-synced'),
   },
   commits: {
-    list: (query: { repository?: string; branch?: string; page?: number; perPage?: number; path?: string }) =>
-      apiRequest<Paginated<CommitSummary>>('GET', '/api/commits', { query }),
+    list: (query: { repository?: string; branch?: string; page?: number; perPage?: number; path?: string; themeId?: string }) =>
+      apiRequest<CommitsResponse>('GET', '/api/commits', { query }),
     get: (sha: string, repository?: string) =>
       apiRequest<CommitDetail>('GET', `/api/commits/${encodeURIComponent(sha)}`, { query: { repository } }),
     files: (sha: string, query: { repository?: string; page?: number; perPage?: number } = {}) =>
@@ -175,7 +177,7 @@ export const api = {
   sync: {
     preview: (body: SyncPreviewRequest) => apiRequest<SyncPreview>('POST', '/api/sync/preview', { body }),
     confirm: (body: ConfirmSyncRequest) => apiRequest<SyncRun>('POST', '/api/sync', { body }),
-    history: (query: { page?: number; perPage?: number; status?: SyncStatus } = {}) =>
+    history: (query: { page?: number; perPage?: number; status?: SyncStatus; themeId?: string; branch?: string } = {}) =>
       apiRequest<Paginated<SyncRun>>('GET', '/api/sync/history', { query }),
     get: (id: string) => apiRequest<SyncRunDetail>('GET', `/api/sync/history/${encodeURIComponent(id)}`),
     retry: (id: string, body: RetrySyncRequest = {}) =>

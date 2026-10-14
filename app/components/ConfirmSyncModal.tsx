@@ -8,7 +8,24 @@ interface Props {
   submitting: boolean;
   error?: string | null;
   onClose: () => void;
-  onConfirm: (confirmation: { confirmLiveTheme?: boolean; confirmThemeName?: string }) => void;
+  onConfirm: (confirmation: { confirmLiveTheme?: boolean; confirmThemeName?: string; acceptDirectEdits?: boolean }) => void;
+}
+
+const firstLine = (message: string | null | undefined) => (message ?? '').split('\n')[0] ?? '';
+
+function FileGroup({ title, tone, mark, paths }: { title: string; tone: Tone; mark: string; paths: string[] }) {
+  if (paths.length === 0) return null;
+  return (
+    <s-stack gap="small-300">
+      <s-text type="strong" tone={tone}>{`${title} (${paths.length})`}</s-text>
+      {paths.slice(0, 50).map((path) => (
+        <s-text key={path}>
+          <s-text tone={tone}>{mark}</s-text> {path}
+        </s-text>
+      ))}
+      {paths.length > 50 && <s-text color="subdued">{`and ${paths.length - 50} more (see All files below)`}</s-text>}
+    </s-stack>
+  );
 }
 
 function actionBadge(op: SyncPlanOperation): { label: string; tone: Tone } {
@@ -29,6 +46,7 @@ export function ConfirmSyncModal({ open, preview, submitting, error, onClose, on
   const [ack, setAck] = useState(false);
   const [typedName, setTypedName] = useState('');
   const [showSkipped, setShowSkipped] = useState(false);
+  const [acceptEdits, setAcceptEdits] = useState(false);
 
   useEffect(() => {
     const modal = modalRef.current;
@@ -41,6 +59,7 @@ export function ConfirmSyncModal({ open, preview, submitting, error, onClose, on
     if (!open) {
       setAck(false);
       setTypedName('');
+      setAcceptEdits(false);
     }
   }, [open]);
 
@@ -52,14 +71,20 @@ export function ConfirmSyncModal({ open, preview, submitting, error, onClose, on
   const live = preview?.requiresLiveConfirmation ?? false;
   const writes = preview ? preview.summary.creates + preview.summary.updates + preview.summary.deletes : 0;
   const liveConfirmed = !live || (ack && typedName === preview?.theme.name);
-  const canConfirm = !!preview && writes > 0 && liveConfirmed && !submitting;
+  const codeBlocked = preview?.checks.code.status === 'failed';
+  const editsWarning = preview?.checks.directEdits.status === 'warning';
+  const canConfirm = !!preview && writes > 0 && liveConfirmed && !codeBlocked && (!editsWarning || acceptEdits) && !submitting;
+  const ops = preview?.operations ?? [];
+  const newFiles = ops.filter((op) => op.action === 'upsert' && !op.existsInTheme).map((op) => op.path);
+  const updatedFiles = ops.filter((op) => op.action === 'upsert' && op.existsInTheme).map((op) => op.path);
+  const removedFiles = ops.filter((op) => op.action === 'delete').map((op) => op.path);
 
   return (
     <s-modal
       id={MODAL_ID}
       ref={modalRef}
       size="large"
-      heading={preview ? `Sync ${preview.commit.sha.slice(0, 7)} → ${preview.theme.name}` : 'Sync preview'}
+      heading="Review before updating"
       onHide={onClose}
     >
       {preview && (
@@ -76,6 +101,71 @@ export function ConfirmSyncModal({ open, preview, submitting, error, onClose, on
               </s-paragraph>
             </s-banner>
           )}
+          <s-grid gridTemplateColumns="8rem 1fr" gap="small-200">
+            <s-text color="subdued">Theme</s-text>
+            <s-text type="strong">{preview.theme.name}</s-text>
+            <s-text color="subdued">Current</s-text>
+            <s-text>
+              {preview.base ? (
+                <>
+                  <s-text type="strong">{preview.base.shortSha}</s-text> {firstLine(preview.base.message)}
+                </>
+              ) : (
+                'No last synced commit on this branch'
+              )}
+            </s-text>
+            <s-text color="subdued">Updating to</s-text>
+            <s-text>
+              <s-text type="strong">{preview.commit.sha.slice(0, 7)}</s-text> {firstLine(preview.commit.message)}
+            </s-text>
+          </s-grid>
+
+          <s-stack gap="small-300">
+            <s-text type="strong">{`Updates included (${preview.commitsIncluded.length})`}</s-text>
+            {preview.commitsIncluded.map((c) => (
+              <s-text key={c.sha}>
+                <s-text type="strong">{c.shortSha}</s-text> {firstLine(c.message)}
+              </s-text>
+            ))}
+          </s-stack>
+
+          {codeBlocked ? (
+            <s-banner tone="critical" heading="Code errors found — ask your developer to fix them">
+              {preview.checks.code.issues.map((issue) => (
+                <s-paragraph key={`${issue.path}:${issue.line}:${issue.message}`}>
+                  {`${issue.path}${issue.line ? ` line ${issue.line}` : ''}: ${issue.message}`}
+                </s-paragraph>
+              ))}
+            </s-banner>
+          ) : null}
+          {editsWarning && (
+            <s-banner tone="warning" heading="Files were edited directly in Shopify">
+              {preview.checks.directEdits.files.map((f) => (
+                <s-paragraph key={f.path}>
+                  {`${f.path}${f.updatedAt ? ` was edited on ${new Date(f.updatedAt).toLocaleString()}` : ' was changed in Shopify'}.`}
+                </s-paragraph>
+              ))}
+              <s-checkbox
+                label="Replace these files with the repository version"
+                checked={acceptEdits}
+                onChange={(event) => setAcceptEdits(event.currentTarget.checked)}
+              />
+            </s-banner>
+          )}
+          {!codeBlocked && !editsWarning && (
+            <s-banner tone="success">
+              <s-paragraph>
+                {`Checks passed — no problems found (code checked in ${preview.checks.code.filesChecked} file(s)${
+                  preview.checks.directEdits.status === 'skipped' ? '' : ', no direct edits in Shopify'
+                }).`}
+              </s-paragraph>
+            </s-banner>
+          )}
+
+          <FileGroup title="New files" tone="success" mark="+" paths={newFiles} />
+          <FileGroup title="Updated files" tone="caution" mark="~" paths={updatedFiles} />
+          <FileGroup title="Removed files" tone="critical" mark="−" paths={removedFiles} />
+
           {preview.warnings
             .filter((w) => !w.startsWith('This is the LIVE theme'))
             .map((warning) => (
@@ -161,9 +251,14 @@ export function ConfirmSyncModal({ open, preview, submitting, error, onClose, on
         tone={live || (preview?.summary.deletes ?? 0) > 0 ? 'critical' : 'auto'}
         disabled={!canConfirm}
         loading={submitting}
-        onClick={() => onConfirm(live ? { confirmLiveTheme: true, confirmThemeName: typedName } : {})}
+        onClick={() =>
+          onConfirm({
+            ...(live ? { confirmLiveTheme: true, confirmThemeName: typedName } : {}),
+            ...(editsWarning ? { acceptDirectEdits: acceptEdits } : {}),
+          })
+        }
       >
-        {live ? 'Sync to live theme' : `Apply ${writes} change${writes === 1 ? '' : 's'}`}
+        {live ? 'Confirm update to live theme' : 'Confirm Update'}
       </s-button>
       <s-button slot="secondary-actions" disabled={submitting} onClick={onClose}>
         Cancel

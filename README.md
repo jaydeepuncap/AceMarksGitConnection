@@ -168,6 +168,18 @@ npm run db:migrate:remote    # production D1 (--env production)
 
 ---
 
+## Updating a theme, step by step
+
+1. **Choose a theme** — *Themes* shows every theme with its **last update** (last synced commit, branch, date); *Select →* opens Commits for that theme.
+2. **Choose an update** — *Commits* (branch + target theme) labels every commit **New** (waiting), **Last synced** or **Added** (already in the theme) and shows "N updates waiting". The strategy **All updates since last sync** applies every update between the theme's last synced commit on that branch and the selected one, together and in order.
+3. **Automatic checks** — before anything changes: a Liquid/JSON **code check** (errors block the sync) and **direct edit detection** (files changed in Shopify since the last sync must be explicitly replaced).
+4. **Review** — Theme, Current (last synced commit), Updating to, Updates included, New / Updated / Removed files, check results; *Confirm Update*.
+5. **Confirm** — the theme's current version of each affected file is backed up (KV, 30 days) right before it changes; progress is shown file by file.
+6. **Result** — "Update complete · Files X of Y updated · <theme> is now on <commit>". Only when every file succeeded is the commit stored as the theme's **last synced commit for that branch** (`theme_branch_sync` table) and written to `assets/theme-sync.json` in the theme (last step).
+7. **Test, then publish** in Shopify — Theme Sync never publishes a theme.
+
+The sync history of the selected theme and branch is shown under the commit list.
+
 ## Sync workflow
 
 1. Pick a **theme** (Themes page or Settings).

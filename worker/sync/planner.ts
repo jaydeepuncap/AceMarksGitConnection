@@ -17,7 +17,11 @@
  * the ignore patterns before it is planned. Protected files are never deleted.
  */
 import type {
+  CodeIssue,
   CommitFile,
+  DirectEdit,
+  IncludedCommit,
+  SyncChecks,
   ShopifyTheme,
   SyncPlanOperation,
   SyncPreferences,
@@ -26,11 +30,12 @@ import type {
 } from '../../shared/api-types';
 import {
   PROTECTED_THEME_FILES,
+  THEME_SYNC_MARKER_PATH,
   isIgnored,
   repoPathToThemePath,
   validateThemePath,
 } from '../../shared/theme-paths';
-import { createSyncPreview, type Database, type NewSyncOperation } from '../lib/database';
+import { createSyncPreview, getLastSynced, type Database, type NewSyncOperation } from '../lib/database';
 import { GITHUB_MAX_COMMIT_FILES, type GitHubClient } from '../lib/github-client';
 import type { Logger } from '../lib/logger';
 import { ApiError } from '../lib/response';
@@ -39,11 +44,21 @@ import {
   getThemeFilesMetadata,
   listAllThemeFiles,
   type ShopifyGraphqlClient,
+  type ThemeFileInfo,
 } from '../lib/shopify-graphql';
+import { bytesToBase64, gitBlobSha } from '../lib/crypto';
+import { md5 } from '../lib/md5';
+import { checkThemeFile, isCheckedFile } from './code-check';
 
 export const PREVIEW_TTL_MS = 30 * 60 * 1000;
 export const MAX_FILE_BYTES = 10 * 1024 * 1024;
 export const MAX_PLANNED_OPERATIONS = 5000;
+/** Files downloaded for the code check while previewing; the rest are checked as they are applied. */
+const MAX_CODE_CHECK_FILES = 150;
+/** Files compared with their last synced version when looking for direct edits. */
+const MAX_DIRECT_EDIT_DOWNLOADS = 60;
+
+const firstLine = (message: string) => message.split('\n')[0] ?? '';
 
 export interface PlanInput {
   shopId: string;
@@ -82,6 +97,7 @@ export function mapPath(
 ): { ok: true; themePath: string } | { ok: false; reason: string; themePath: string | null } {
   const themePath = repoPathToThemePath(repoPath, prefs.themeRoot);
   if (themePath === null) return { ok: false, reason: `Outside theme root "${prefs.themeRoot}"`, themePath: null };
+  if (themePath === THEME_SYNC_MARKER_PATH) return { ok: false, reason: 'Reserved for Theme Sync', themePath };
   const check = validateThemePath(themePath);
   if (!check.ok) return { ok: false, reason: check.reason, themePath };
   const ignoredBy = isIgnored(themePath, prefs.ignorePatterns);
@@ -193,6 +209,119 @@ export function planCommitChanges(
   return { ops: [...ops.values(), ...finalSkips], warnings };
 }
 
+interface TreeFile {
+  repoPath: string;
+  sha: string;
+  size: number | null;
+}
+
+async function themeTree(
+  github: GitHubClient,
+  owner: string,
+  repo: string,
+  treeSha: string,
+  prefs: SyncPreferences,
+): Promise<Map<string, TreeFile> & { outside?: number }> {
+  const tree = await github.getTree(owner, repo, treeSha);
+  if (tree.truncated) {
+    throw new ApiError(
+      422,
+      'VALIDATION_ERROR',
+      'The repository tree is too large for GitHub to list in one request. Set a theme root folder in Settings so only the theme directory is synced.',
+    );
+  }
+  const files: Map<string, TreeFile> & { outside?: number } = new Map<string, TreeFile>();
+  let outside = 0;
+  for (const entry of tree.entries) {
+    // Regular files only (skip symlinks 120000 and submodules 160000).
+    if (entry.type !== 'blob' || !(entry.mode === '100644' || entry.mode === '100755')) continue;
+    const mapped = mapPath(entry.path, prefs);
+    if (mapped.ok) files.set(mapped.themePath, { repoPath: entry.path, sha: entry.sha, size: entry.size ?? null });
+    else outside++;
+  }
+  files.outside = outside;
+  return files;
+}
+
+const md5Matches = (bytes: Uint8Array, checksum: string) => {
+  const digest = md5(bytes);
+  const hex = [...digest].map((b) => b.toString(16).padStart(2, '0')).join('');
+  return checksum.toLowerCase() === hex || checksum === bytesToBase64(digest);
+};
+
+/** Step 3: code check (Liquid / JSON) of the files that will be written. */
+async function runCodeCheck(
+  github: GitHubClient,
+  input: PlanInput,
+  ops: PlannedOp[],
+): Promise<SyncChecks['code']> {
+  const candidates = ops.filter((op) => op.action === 'upsert' && isCheckedFile(op.path));
+  const checked = candidates.slice(0, MAX_CODE_CHECK_FILES);
+  const issues: CodeIssue[] = [];
+  for (let i = 0; i < checked.length; i += 6) {
+    await Promise.all(
+      checked.slice(i, i + 6).map(async (op) => {
+        const bytes = await github.getFileAtCommit(input.owner, input.repo, op.sourcePath ?? op.path, input.commitSha);
+        if (op.blobSha && (await gitBlobSha(bytes)) !== op.blobSha) {
+          issues.push({ path: op.path, line: null, message: 'Downloaded content does not match the commit (integrity check failed)' });
+          return;
+        }
+        issues.push(...checkThemeFile(op.path, bytes));
+      }),
+    );
+  }
+  issues.sort((a, b) => a.path.localeCompare(b.path) || (a.line ?? 0) - (b.line ?? 0));
+  return {
+    status: issues.length > 0 ? 'failed' : 'passed',
+    filesChecked: checked.length,
+    filesDeferred: candidates.length - checked.length,
+    issues,
+  };
+}
+
+/**
+ * Step 3: files the sync replaces or removes that were edited directly in
+ * Shopify since the last sync — the theme's copy no longer matches the file
+ * at the last synced commit.
+ */
+async function detectDirectEdits(
+  github: GitHubClient,
+  input: PlanInput,
+  baseFiles: Map<string, TreeFile> | null,
+  ops: PlannedOp[],
+  existing: Map<string, ThemeFileInfo>,
+): Promise<SyncChecks['directEdits']> {
+  if (!baseFiles) {
+    return { status: 'skipped', files: [], note: 'This theme has no last synced commit on this branch yet, so there is nothing to compare with.' };
+  }
+  const touched = ops.filter((op) => op.action !== 'skip' && existing.has(op.path));
+  const found: DirectEdit[] = [];
+  const compare: { path: string; sha: string; checksum: string; updatedAt: string | null }[] = [];
+  for (const op of touched) {
+    const current = existing.get(op.path)!;
+    if (!current.checksumMd5) continue;
+    const before = baseFiles.get(op.path);
+    if (!before) found.push({ path: op.path, updatedAt: current.updatedAt });
+    else compare.push({ path: op.path, sha: before.sha, checksum: current.checksumMd5, updatedAt: current.updatedAt });
+  }
+  const limited = compare.slice(0, MAX_DIRECT_EDIT_DOWNLOADS);
+  for (let i = 0; i < limited.length; i += 6) {
+    await Promise.all(
+      limited.slice(i, i + 6).map(async (item) => {
+        const bytes = await github.getBlob(input.owner, input.repo, item.sha);
+        if (!md5Matches(bytes, item.checksum)) found.push({ path: item.path, updatedAt: item.updatedAt });
+      }),
+    );
+  }
+  found.sort((a, b) => a.path.localeCompare(b.path));
+  const notCompared = compare.length - limited.length;
+  return {
+    status: found.length > 0 ? 'warning' : 'passed',
+    files: found,
+    note: notCompared > 0 ? `${notCompared} more file(s) were not compared because the sync is very large.` : null,
+  };
+}
+
 export async function buildSyncPreview(
   deps: { db: Database; github: GitHubClient; admin: ShopifyGraphqlClient; logger: Logger },
   input: PlanInput,
@@ -216,10 +345,89 @@ export async function buildSyncPreview(
     throw new ApiError(400, 'VALIDATION_ERROR', 'Commit SHA did not resolve exactly; use the full 40-character SHA');
   }
 
+  // The commit this theme was last synced to from this branch (the "current" update).
+  const last = input.branch ? await getLastSynced(db, input.shopId, theme.id, input.branch) : undefined;
+  if (input.strategy === 'since_last_sync' && last?.commitSha === input.commitSha) {
+    throw new ApiError(409, 'CONFLICT', `${theme.name} is already on ${input.commitSha.slice(0, 7)} from ${input.branch}`);
+  }
+  let baseFiles: Map<string, TreeFile> | null = null;
+  let baseMessage: string | null = last?.commitMessage ?? null;
+  if (last) {
+    try {
+      const baseCommit = await github.getCommitPage(input.owner, input.repo, last.commitSha, 1, 1);
+      baseMessage = baseCommit.commit.commit.message;
+      baseFiles = await themeTree(github, input.owner, input.repo, baseCommit.treeSha, input.preferences);
+    } catch (err) {
+      if (!(err instanceof ApiError && (err.code === 'GITHUB_NOT_FOUND' || err.code === 'VALIDATION_ERROR'))) throw err;
+    }
+  }
+
   const warnings: string[] = [];
   let ops: PlannedOp[];
+  let strategy: SyncStrategy = input.strategy;
+  let commitsIncluded: IncludedCommit[] = [
+    { sha: input.commitSha, shortSha: input.commitSha.slice(0, 7), message: commitData.commit.commit.message },
+  ];
 
-  if (input.strategy === 'commit_changes') {
+  if (strategy === 'since_last_sync' && !baseFiles) {
+    warnings.push(
+      last
+        ? `The last synced commit ${last.commitSha.slice(0, 7)} no longer exists in the repository, so the complete theme from this commit is applied (nothing is removed).`
+        : 'This theme has no last synced commit on this branch yet, so the complete theme from this commit is applied (nothing is removed).',
+    );
+    strategy = 'full_snapshot';
+  }
+
+  if (strategy === 'since_last_sync' && baseFiles && last) {
+    // Every update between the last synced commit and the selected one, in one step.
+    const targetFiles = await themeTree(github, input.owner, input.repo, commitData.treeSha, input.preferences);
+    const walk = await github.listCommitsUntil(input.owner, input.repo, input.commitSha, last.commitSha, 300);
+    if (walk.found) {
+      commitsIncluded = walk.commits
+        .reverse()
+        .map((c) => ({ sha: c.sha, shortSha: c.shortSha, message: c.message }));
+    } else {
+      const back = await github.listCommitsUntil(input.owner, input.repo, last.commitSha, input.commitSha, 300);
+      if (back.found) {
+        warnings.push(`This commit is older than the theme's last synced commit ${last.commitSha.slice(0, 7)}: the changes made after it are undone.`);
+        commitsIncluded = back.commits.map((c) => ({ sha: c.sha, shortSha: c.shortSha, message: `Undo: ${firstLine(c.message)}` }));
+      } else {
+        warnings.push(`The last synced commit ${last.commitSha.slice(0, 7)} is not in this commit's history; the theme is changed to match this commit exactly.`);
+      }
+    }
+    ops = [];
+    let deletesDisabled = 0;
+    for (const [path, file] of targetFiles) {
+      const before = baseFiles.get(path);
+      if (!before || before.sha !== file.sha) {
+        ops.push({
+          path,
+          sourcePath: file.repoPath,
+          previousPath: null,
+          action: (file.size ?? 0) > MAX_FILE_BYTES ? 'skip' : 'upsert',
+          changeType: before ? 'modified' : 'added',
+          existsInTheme: null,
+          size: file.size,
+          blobSha: file.sha,
+          skipReason: (file.size ?? 0) > MAX_FILE_BYTES ? 'File exceeds the 10 MB sync limit' : null,
+        });
+      }
+    }
+    for (const [path, file] of baseFiles) {
+      if (targetFiles.has(path)) continue;
+      if (PROTECTED_THEME_FILES.includes(path)) {
+        ops.push(skip(path, file.repoPath, 'removed', 'Protected file is never deleted'));
+      } else if (!input.allowDeletes) {
+        deletesDisabled++;
+        ops.push(skip(path, file.repoPath, 'removed', 'Deletions are disabled for this sync'));
+      } else {
+        ops.push({ path, sourcePath: file.repoPath, previousPath: null, action: 'delete', changeType: 'removed', existsInTheme: null, size: null, blobSha: null, skipReason: null });
+      }
+    }
+    if (deletesDisabled > 0) {
+      warnings.push(`${deletesDisabled} file(s) removed since the last sync stay in the theme because deletions are disabled.`);
+    }
+  } else if (strategy === 'commit_changes') {
     if (commitData.truncated) {
       warnings.push(
         `GitHub lists at most ${GITHUB_MAX_COMMIT_FILES} changed files per commit and this commit reached that ` +
@@ -236,46 +444,26 @@ export async function buildSyncPreview(
     ops = planned.ops;
     warnings.push(...planned.warnings);
   } else {
-    const tree = await github.getTree(input.owner, input.repo, commitData.treeSha);
-    if (tree.truncated) {
-      throw new ApiError(
-        422,
-        'VALIDATION_ERROR',
-        'The repository tree is too large for GitHub to list in one request. Set a theme root folder in Settings ' +
-          'so only the theme directory is synced.',
-      );
-    }
+    const targetFiles = await themeTree(github, input.owner, input.repo, commitData.treeSha, input.preferences);
     ops = [];
-    let outside = 0;
-    for (const entry of tree.entries) {
-      // Regular files only (skip symlinks 120000 and submodules 160000).
-      if (entry.type !== 'blob' || !(entry.mode === '100644' || entry.mode === '100755')) continue;
-      const mapped = mapPath(entry.path, input.preferences);
-      if (!mapped.ok) {
-        if (mapped.themePath === null || !mapped.reason.startsWith('Matches ignore')) {
-          outside++;
-          continue;
-        }
-        ops.push(skip(mapped.themePath, entry.path, 'snapshot', mapped.reason));
-        continue;
-      }
-      if ((entry.size ?? 0) > MAX_FILE_BYTES) {
-        ops.push(skip(mapped.themePath, entry.path, 'snapshot', 'File exceeds the 10 MB sync limit'));
+    for (const [path, file] of targetFiles) {
+      if ((file.size ?? 0) > MAX_FILE_BYTES) {
+        ops.push(skip(path, file.repoPath, 'snapshot', 'File exceeds the 10 MB sync limit'));
         continue;
       }
       ops.push({
-        path: mapped.themePath,
-        sourcePath: entry.path,
+        path,
+        sourcePath: file.repoPath,
         previousPath: null,
         action: 'upsert',
         changeType: 'snapshot',
         existsInTheme: null,
-        size: entry.size ?? null,
-        blobSha: entry.sha,
+        size: file.size,
+        blobSha: file.sha,
         skipReason: null,
       });
     }
-    if (outside > 0) warnings.push(`${outside} repository file(s) are not theme files and were ignored.`);
+    if (targetFiles.outside) warnings.push(`${targetFiles.outside} repository file(s) are not theme files and were ignored.`);
     warnings.push('Full snapshot never deletes theme files that are missing from the repository.');
   }
 
@@ -295,7 +483,7 @@ export async function buildSyncPreview(
   // 3. Compare against the target theme (metadata only).
   const writes = ops.filter((op) => op.action !== 'skip');
   const existing =
-    input.strategy === 'full_snapshot'
+    strategy === 'full_snapshot' || writes.length > 250
       ? new Map((await listAllThemeFiles(admin, theme.id)).map((f) => [f.filename, f]))
       : await getThemeFilesMetadata(
           admin,
@@ -322,6 +510,14 @@ export async function buildSyncPreview(
     warnings.push('This is the LIVE theme. Changes are visible to customers immediately after sync.');
   }
 
+  // 4. Automatic checks (step 3) — before anything changes.
+  const [code, directEdits] = await Promise.all([
+    runCodeCheck(github, input, ops),
+    detectDirectEdits(github, input, baseFiles, ops, existing),
+  ]);
+  if (code.filesDeferred > 0) warnings.push(`${code.filesDeferred} more file(s) are checked for code errors as they are applied.`);
+  const checks: SyncChecks = { code, directEdits };
+
   const summary = {
     creates: ops.filter((op) => op.action === 'upsert' && !op.existsInTheme).length,
     updates: ops.filter((op) => op.action === 'upsert' && op.existsInTheme).length,
@@ -330,7 +526,7 @@ export async function buildSyncPreview(
     total: ops.length,
   };
 
-  // 4. Persist the plan so POST /api/sync executes exactly what was previewed.
+  // 5. Persist the plan so POST /api/sync executes exactly what was previewed.
   const syncId = crypto.randomUUID();
   const expiresAt = new Date(Date.now() + PREVIEW_TTL_MS);
   const persisted: NewSyncOperation[] = ops.map((op) => ({
@@ -346,6 +542,7 @@ export async function buildSyncPreview(
     skipReason: op.skipReason,
   }));
 
+  const base = last && baseFiles ? { sha: last.commitSha, shortSha: last.commitSha.slice(0, 7), message: baseMessage } : null;
   await createSyncPreview(
     db,
     input.shopId,
@@ -358,26 +555,35 @@ export async function buildSyncPreview(
       themeId: theme.id,
       themeName: theme.name,
       themeRole: theme.role,
-      strategy: input.strategy,
+      strategy,
       filesChanged: summary.creates + summary.updates + summary.deletes,
       filesSkipped: summary.skipped,
-      options: { allowDeletes: input.allowDeletes, themeRoot: input.preferences.themeRoot },
+      options: {
+        allowDeletes: input.allowDeletes,
+        themeRoot: input.preferences.themeRoot,
+        baseSha: base?.sha ?? null,
+        commitsIncluded: commitsIncluded.slice(0, 100),
+        checks,
+      },
       initiatedBy: input.userId,
       previewExpiresAt: expiresAt,
     },
     persisted,
   );
 
-  logger.info('sync.previewed', { syncId, commitSha: input.commitSha, themeId: theme.id, ...summary });
+  logger.info('sync.previewed', { syncId, commitSha: input.commitSha, themeId: theme.id, strategy, ...summary });
 
   return {
     syncId,
     expiresAt: expiresAt.toISOString(),
+    base,
+    commitsIncluded,
+    checks,
     repository: `${input.owner}/${input.repo}`,
     branch: input.branch,
     commit: { sha: input.commitSha, message: commitData.commit.commit.message },
     theme,
-    strategy: input.strategy,
+    strategy,
     operations: ops,
     summary,
     warnings,

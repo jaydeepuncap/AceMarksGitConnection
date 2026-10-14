@@ -14,6 +14,9 @@ import {
   validateThemeRootInput,
 } from '../lib/validation';
 
+/** Select value for "no choice" — an empty option value is not reliable in <s-select>. */
+const NONE = '__none__';
+
 function GithubConnectionSection({ onChanged }: { onChanged: () => void }) {
   const connection = useApiQuery(() => api.github.connection(), []);
   const [token, setToken] = useState('');
@@ -206,12 +209,12 @@ export default function Settings() {
           />
           <s-select
             label="Default branch"
-            value={branch}
+            value={branch || NONE}
             disabled={!repoValid || branchesQuery.loading}
             details={branchesQuery.error ? branchesQuery.error.message : undefined}
-            onChange={(event) => setBranch(event.currentTarget.value)}
+            onChange={(event) => setBranch(event.currentTarget.value === NONE ? '' : event.currentTarget.value)}
           >
-            <s-option value="">Repository default</s-option>
+            <s-option value={NONE}>Repository default</s-option>
             {branches.map((b) => (
               <s-option key={b.name} value={b.name}>
                 {b.name}
@@ -225,8 +228,12 @@ export default function Settings() {
       <s-section heading="Default Shopify theme">
         <s-stack gap="base">
           <ErrorBanner error={themesQuery.error} onRetry={themesQuery.reload} heading="Themes could not be loaded" />
-          <s-select label="Target theme" value={themeId} onChange={(event) => setThemeId(event.currentTarget.value)}>
-            <s-option value="">No default theme</s-option>
+          <s-select
+            label="Target theme"
+            value={themeId || NONE}
+            onChange={(event) => setThemeId(event.currentTarget.value === NONE ? '' : event.currentTarget.value)}
+          >
+            <s-option value={NONE}>No default theme</s-option>
             {(themesQuery.data ?? []).map((t) => (
               <s-option key={t.id} value={t.id} disabled={!t.writable}>
                 {`${t.name}${t.isLive ? ' (live)' : ''}${t.writable ? '' : ' — read-only'}`}

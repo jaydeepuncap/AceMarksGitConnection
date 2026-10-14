@@ -28,6 +28,8 @@ export type ApiErrorCode =
   | 'THEME_NOT_WRITABLE'
   | 'PREVIEW_EXPIRED'
   | 'LIVE_THEME_CONFIRMATION_REQUIRED'
+  | 'CODE_ERRORS'
+  | 'DIRECT_EDITS_FOUND'
   | 'UPSTREAM_TIMEOUT'
   | 'SERVER_MISCONFIGURED'
   | 'DATABASE_NOT_MIGRATED'
@@ -71,13 +73,15 @@ export interface ShopInfo {
   canWriteThemes: boolean;
 }
 
-export const SYNC_STRATEGY_VALUES = ['commit_changes', 'full_snapshot'] as const;
+export const SYNC_STRATEGY_VALUES = ['commit_changes', 'full_snapshot', 'since_last_sync'] as const;
 export type SyncStrategy = (typeof SYNC_STRATEGY_VALUES)[number];
 
 export interface SyncPreferences {
   /**
    * commit_changes – apply only the files the selected commit changed.
    * full_snapshot  – upsert every theme file present in the repository at the commit.
+   * since_last_sync – every update between the theme's last synced commit (on this
+   *                   branch) and the selected one, applied together in one step.
    */
   strategy: SyncStrategy;
   /** Apply deletions for files removed (or renamed away) in the commit. Off by default. */
@@ -179,6 +183,36 @@ export interface CommitSummary {
   date: string | null;
   htmlUrl: string;
   parents: string[];
+}
+
+/** The last commit fully synced to a theme from a branch. */
+export interface LastSynced {
+  themeId: string;
+  branch: string;
+  sha: string;
+  shortSha: string;
+  message: string | null;
+  syncedAt: string;
+  syncId: string | null;
+}
+
+/**
+ * new         – newer than the theme's last synced commit on this branch (waiting)
+ * last_synced – the commit the theme was last synced to from this branch
+ * added       – already in the theme (synced before, or older than the last synced commit)
+ */
+export type CommitSyncStatus = 'new' | 'last_synced' | 'added';
+
+export interface CommitListItem extends CommitSummary {
+  syncStatus: CommitSyncStatus | null;
+}
+
+export interface CommitsResponse extends Paginated<CommitListItem> {
+  /** Present when the list was requested for a theme. */
+  lastSynced: LastSynced | null;
+  /** Commits newer than the last synced one on this branch. */
+  waiting: number;
+  waitingMore: boolean;
 }
 
 export interface CommitDetail extends CommitSummary {
@@ -286,8 +320,36 @@ export interface SyncPreviewSummary {
   total: number;
 }
 
+export interface CodeIssue {
+  path: string;
+  line: number | null;
+  message: string;
+}
+
+export interface DirectEdit {
+  path: string;
+  updatedAt: string | null;
+}
+
+/** Step 3 — automatic checks, run before anything changes. */
+export interface SyncChecks {
+  code: { status: 'passed' | 'failed'; filesChecked: number; filesDeferred: number; issues: CodeIssue[] };
+  directEdits: { status: 'passed' | 'warning' | 'skipped'; files: DirectEdit[]; note: string | null };
+}
+
+export interface IncludedCommit {
+  sha: string;
+  shortSha: string;
+  message: string;
+}
+
 export interface SyncPreview {
   syncId: string;
+  /** The theme's last synced commit on this branch (what it is updated from). */
+  base: { sha: string; shortSha: string; message: string | null } | null;
+  /** Every update the sync brings in, oldest first. */
+  commitsIncluded: IncludedCommit[];
+  checks: SyncChecks;
   expiresAt: string;
   repository: string;
   branch: string | null;
@@ -307,6 +369,8 @@ export interface ConfirmSyncRequest {
   confirmLiveTheme?: boolean;
   /** Required for the live theme: must equal the theme name exactly. */
   confirmThemeName?: string;
+  /** Replace files that were edited directly in Shopify since the last sync. */
+  acceptDirectEdits?: boolean;
 }
 
 export interface RetrySyncRequest {
@@ -336,6 +400,11 @@ export interface SyncRun {
   completedAt: string | null;
   /** Failed operations can be retried; upserts/deletes are idempotent. */
   canRetry: boolean;
+  /** The commit the theme was on before this sync (same branch), when known. */
+  baseSha: string | null;
+  commitsIncluded: IncludedCommit[];
+  /** Files whose previous version was saved before they changed. */
+  backedUp: number;
 }
 
 export interface SyncOperation {

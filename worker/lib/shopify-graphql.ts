@@ -15,6 +15,7 @@
  * extensions.cost.throttleStatus.
  */
 import type { ShopifyTheme, ThemeRole } from '../../shared/api-types';
+import { bytesToBase64 } from './crypto';
 import { fetchWithRetry, sleep } from './http';
 import type { Logger } from './logger';
 import { ApiError } from './response';
@@ -177,8 +178,27 @@ export const THEME_FILES_QUERY = `#graphql
     theme(id: $id) {
       id
       files(filenames: $filenames, first: $first, after: $after) {
-        nodes { filename size checksumMd5 }
+        nodes { filename size checksumMd5 updatedAt }
         pageInfo { hasNextPage endCursor }
+      }
+    }
+  }
+`;
+
+export const THEME_FILE_BODIES_QUERY = `#graphql
+  query AceThemeFileBodies($id: ID!, $filenames: [String!], $first: Int!) {
+    theme(id: $id) {
+      id
+      files(filenames: $filenames, first: $first) {
+        nodes {
+          filename
+          body {
+            __typename
+            ... on OnlineStoreThemeFileBodyText { content }
+            ... on OnlineStoreThemeFileBodyBase64 { contentBase64 }
+            ... on OnlineStoreThemeFileBodyUrl { url }
+          }
+        }
       }
     }
   }
@@ -261,12 +281,13 @@ export interface ThemeFileInfo {
   filename: string;
   size: number | null;
   checksumMd5: string | null;
+  updatedAt: string | null;
 }
 
 interface ThemeFilesPage {
   theme: {
     files: {
-      nodes: { filename: string; size: string | number | null; checksumMd5: string | null }[];
+      nodes: { filename: string; size: string | number | null; checksumMd5: string | null; updatedAt?: string | null }[];
       pageInfo: { hasNextPage: boolean; endCursor: string | null };
     } | null;
   } | null;
@@ -298,6 +319,7 @@ async function collectFiles(
         filename: node.filename,
         size: node.size === null ? null : Number(node.size),
         checksumMd5: node.checksumMd5,
+        updatedAt: node.updatedAt ?? null,
       });
     }
     if (!files.pageInfo.hasNextPage) break;
@@ -435,4 +457,41 @@ export async function waitForJob(
     await sleep(intervalMs);
   }
   return false;
+}
+
+export type ThemeFileBodyContent = { type: 'TEXT' | 'BASE64'; value: string };
+
+/**
+ * Current contents of `filenames` in the theme (backups before a sync).
+ * Files that do not exist are absent from the map. Large binary files are
+ * returned by Shopify as a URL and downloaded here.
+ */
+export async function getThemeFileBodies(
+  client: ShopifyGraphqlClient,
+  themeId: string,
+  filenames: string[],
+  fetchImpl: typeof fetch = fetch,
+): Promise<Map<string, ThemeFileBodyContent>> {
+  const result = new Map<string, ThemeFileBodyContent>();
+  for (let i = 0; i < filenames.length; i += FILENAME_LOOKUP_BATCH) {
+    const batch = filenames.slice(i, i + FILENAME_LOOKUP_BATCH);
+    const data = await client.request<{
+      theme: {
+        files: { nodes: { filename: string; body: { content?: string; contentBase64?: string; url?: string } | null }[] } | null;
+      } | null;
+    }>(THEME_FILE_BODIES_QUERY, { id: themeId, filenames: batch, first: batch.length });
+    if (!data.theme) throw new ApiError(404, 'NOT_FOUND', 'Theme not found in this store');
+    for (const node of data.theme.files?.nodes ?? []) {
+      const body = node.body;
+      if (!body) continue;
+      if (typeof body.content === 'string') result.set(node.filename, { type: 'TEXT', value: body.content });
+      else if (typeof body.contentBase64 === 'string') result.set(node.filename, { type: 'BASE64', value: body.contentBase64 });
+      else if (typeof body.url === 'string') {
+        const response = await fetchWithRetry(body.url, { method: 'GET' }, { timeoutMs: 30_000, idempotent: true, retries: 2, fetchImpl });
+        if (!response.ok) throw new ApiError(502, 'SHOPIFY_ERROR', `Could not download ${node.filename} for the backup`);
+        result.set(node.filename, { type: 'BASE64', value: bytesToBase64(new Uint8Array(await response.arrayBuffer())) });
+      }
+    }
+  }
+  return result;
 }

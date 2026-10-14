@@ -3,12 +3,13 @@ import { ErrorBanner } from '../components/ErrorBanner';
 import { LoadingState } from '../components/LoadingState';
 import { api } from '../lib/api-client';
 import { showToast } from '../lib/app-bridge';
-import { formatDate, THEME_ROLE_BADGE } from '../lib/format';
+import { firstLine, formatDate, THEME_ROLE_BADGE } from '../lib/format';
 import { useApiQuery, useMutation, useNavigateHandler } from '../lib/hooks';
 
 export default function Themes() {
   const go = useNavigateHandler();
   const themes = useApiQuery(() => api.themes.list(), []);
+  const lastSynced = useApiQuery(() => api.themes.lastSynced(), []);
   const settings = useApiQuery(() => api.settings.get(), []);
   const select = useMutation(api.settings.update);
 
@@ -54,7 +55,7 @@ export default function Themes() {
             <s-table-header-row>
               <s-table-header listSlot="primary">Theme</s-table-header>
               <s-table-header listSlot="inline">Role</s-table-header>
-              <s-table-header listSlot="labeled">Updated</s-table-header>
+              <s-table-header listSlot="labeled">Last update</s-table-header>
               <s-table-header>Actions</s-table-header>
             </s-table-header-row>
             <s-table-body>
@@ -76,7 +77,19 @@ export default function Themes() {
                     <s-table-cell>
                       <s-badge tone={role.tone}>{role.label}</s-badge>
                     </s-table-cell>
-                    <s-table-cell>{formatDate(theme.updatedAt)}</s-table-cell>
+                    <s-table-cell>
+                      {lastSynced.data?.[theme.id] ? (
+                        <s-stack gap="none">
+                          <s-text>
+                            <s-text type="strong">{lastSynced.data[theme.id]!.shortSha}</s-text>{' '}
+                            {firstLine(lastSynced.data[theme.id]!.message)}
+                          </s-text>
+                          <s-text color="subdued">{`${lastSynced.data[theme.id]!.branch} · ${formatDate(lastSynced.data[theme.id]!.syncedAt)}`}</s-text>
+                        </s-stack>
+                      ) : (
+                        <s-text color="subdued">No sync yet</s-text>
+                      )}
+                    </s-table-cell>
                     <s-table-cell>
                       <s-stack direction="inline" gap="small-200">
                         <s-button
@@ -93,7 +106,7 @@ export default function Themes() {
                           disabled={!theme.writable}
                           onClick={go(`/commits?themeId=${encodeURIComponent(theme.id)}`)}
                         >
-                          Sync a commit
+                          Select →
                         </s-button>
                       </s-stack>
                     </s-table-cell>
