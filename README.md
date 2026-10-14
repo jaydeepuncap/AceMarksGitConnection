@@ -171,7 +171,10 @@ npm run db:migrate:remote    # production D1 (--env production)
 ## Updating a theme, step by step
 
 1. **Choose a theme** — *Themes* shows every theme with its **last update** (last synced commit, branch, date); *Select →* opens Commits for that theme.
-2. **Choose an update** — *Commits* (branch + target theme) labels every commit **New** (waiting), **Last synced** or **Added** (already in the theme) and shows "N updates waiting". The strategy **All updates since last sync** applies every update between the theme's last synced commit on that branch and the selected one, together and in order. Selecting a commit with **Commit changes** also brings the earlier commits that are not in the theme yet — a theme never skips an update.
+2. **Choose an update** — *Commits* (branch + target theme) labels every commit **New** (waiting), **Last synced** or **Added** (already in the theme) and shows "N updates waiting". What *Sync* pushes is set in **Settings → Sync preferences → When you click Sync, push** (and can be changed per sync on the Commits page):
+   - **From the last sync to the selected commit** (default) — the selected commit together with every earlier commit on the branch that is not in the theme yet, in one step. The preview lists every file with the commit(s) it comes from (e.g. `snippets/size-chart.liquid · from 50924bd`). A theme that was never synced gets the complete theme at the selected commit.
+   - **Only the selected commit** — just the files that commit changed; the preview warns how many earlier un-added commits are left out.
+   - **Full snapshot** — every theme file as it is at the selected commit (never deletes).
 3. **Automatic checks** — before anything changes: a Liquid/JSON **code check** (errors block the sync) and **direct edit detection** (files changed in Shopify since the last sync must be explicitly replaced).
 4. **Review** — Theme, Current (last synced commit), Updating to, Updates included, New / Updated / Removed files, check results; *Confirm Update*.
 5. **Confirm** — the theme's current version of each affected file is backed up (KV, 30 days) right before it changes; progress is shown file by file.

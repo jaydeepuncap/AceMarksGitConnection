@@ -186,7 +186,7 @@ export default function Commits() {
   const [page, setPage] = useState(1);
   const [selectedSha, setSelectedSha] = useState<string | null>(null);
   const [themeId, setThemeId] = useState(params.get('themeId') ?? '');
-  const [strategy, setStrategy] = useState<SyncStrategy>('commit_changes');
+  const [strategy, setStrategy] = useState<SyncStrategy>('since_last_sync');
   const [allowDeletes, setAllowDeletes] = useState(false);
   const [preview, setPreview] = useState<SyncPreview | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
@@ -208,11 +208,6 @@ export default function Commits() {
     !!repository,
   );
   const lastSynced = commits.data?.lastSynced ?? null;
-  // Default to applying everything since the last sync once the theme has a last synced commit here.
-  const [strategyTouched, setStrategyTouched] = useState(false);
-  useEffect(() => {
-    if (!strategyTouched && lastSynced) setStrategy('since_last_sync');
-  }, [lastSynced, strategyTouched]);
 
   const previewMutation = useMutation(api.sync.preview);
   const confirmMutation = useMutation(api.sync.confirm);
@@ -318,15 +313,13 @@ export default function Commits() {
               ))}
             </s-select>
             <s-select
-              label="Strategy"
+              label="Push"
+              details="Default from Settings → Sync preferences"
               value={strategy}
-              onChange={(event) => {
-                setStrategyTouched(true);
-                setStrategy(event.currentTarget.value as SyncStrategy);
-              }}
+              onChange={(event) => setStrategy(event.currentTarget.value as SyncStrategy)}
             >
-              <s-option value="since_last_sync">All updates since last sync</s-option>
-              <s-option value="commit_changes">Commit changes</s-option>
+              <s-option value="since_last_sync">From the last sync to the selected commit</s-option>
+              <s-option value="commit_changes">Only the selected commit</s-option>
               <s-option value="full_snapshot">Full snapshot</s-option>
             </s-select>
           </s-grid>
@@ -346,7 +339,7 @@ export default function Commits() {
                   </s-text>
                   <s-text color="subdued">
                     {commits.data && commits.data.waiting > 0
-                      ? `${commits.data.waiting}${commits.data.waitingMore ? '+' : ''} ${commits.data.waiting === 1 ? 'update' : 'updates'} waiting · syncing one also applies the earlier ones not added yet`
+                      ? `${commits.data.waiting}${commits.data.waitingMore ? '+' : ''} ${commits.data.waiting === 1 ? 'update' : 'updates'} waiting · ${strategy === 'commit_changes' ? 'only the selected one is pushed' : 'syncing one also pushes the earlier ones not added yet'}`
                       : 'Up to date with this branch'}
                   </s-text>
                 </s-stack>
@@ -359,13 +352,14 @@ export default function Commits() {
           )}
           {strategy === 'since_last_sync' && (
             <s-text color="subdued">
-              Applies every update between the theme&apos;s last synced commit and the selected one together, in order, so
-              no developer work is left out.
+              Pushes every update between the theme&apos;s last synced commit and the selected one together, in order, so
+              no developer work is left out. The preview lists every file and the commit it comes from.
             </s-text>
           )}
-          {strategy === 'commit_changes' && lastSynced && (
+          {strategy === 'commit_changes' && (
             <s-text color="subdued">
-              Earlier updates that are not in the theme yet are applied together with the selected commit.
+              Pushes only the files changed in the selected commit; earlier updates that are not in the theme yet are
+              left out.
             </s-text>
           )}
           {selectedTheme?.isLive && (
@@ -384,7 +378,7 @@ export default function Commits() {
             </s-button>
             <s-text color="subdued">
               {selectedSha ? `Selected commit ${selectedSha.slice(0, 7)}` : 'Select a commit below'}
-              {catchUp > 0 ? ` · also applies ${catchUp}${commits.data?.hasNextPage && listed[listed.length - 1]?.syncStatus === 'new' ? '+' : ''} earlier ${catchUp === 1 ? 'update' : 'updates'} not added yet` : ''}{' '}
+              {catchUp > 0 ? ` · ${strategy === 'commit_changes' ? 'leaves out' : 'also pushes'} ${catchUp}${commits.data?.hasNextPage && listed[listed.length - 1]?.syncStatus === 'new' ? '+' : ''} earlier ${catchUp === 1 ? 'update' : 'updates'} not added yet` : ''}{' '}
               · previews never modify the theme
             </s-text>
           </s-stack>

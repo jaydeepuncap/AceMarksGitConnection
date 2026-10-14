@@ -84,7 +84,12 @@ export default function Dashboard() {
           <s-stack gap="small-200">
             <s-text type="strong">{settings?.defaultThemeName ?? 'No theme selected'}</s-text>
             <s-text color="subdued">
-              Strategy: {settings?.syncPreferences.strategy === 'full_snapshot' ? 'Full snapshot' : 'Commit changes'}
+              Push:{' '}
+              {settings?.syncPreferences.strategy === 'full_snapshot'
+                ? 'Full snapshot'
+                : settings?.syncPreferences.strategy === 'commit_changes'
+                  ? 'Only the selected commit'
+                  : 'From the last sync to the selected commit'}
               {' · '}Deletions {settings?.syncPreferences.allowDeletes ? 'allowed' : 'disabled'}
             </s-text>
             <s-stack direction="inline">

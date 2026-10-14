@@ -221,17 +221,40 @@ describe('updating a theme, step by step', () => {
     expect((await api<Paginated<SyncRun>>('GET', `/api/sync/history?themeId=111&branch=feature`)).body.data.items).toEqual([]);
     expect((await api<Paginated<SyncRun>>('GET', `/api/sync/history?themeId=222`)).body.data.items).toEqual([]);
   });
-  it('selecting a later commit also applies the earlier commits that are not added yet', async () => {
+  it('"from the last sync" pushes the earlier un-added commits too, and the preview says which commit each file comes from', async () => {
     await setup();
     await sync(C1, { strategy: 'commit_changes' });
-    const { preview } = await sync(C3, { strategy: 'commit_changes' });
+    const { preview } = await sync(C3); // the default push setting
     expect(preview.strategy).toBe('since_last_sync');
     expect(preview.commitsIncluded.map((c) => c.sha)).toEqual([C2, C3]);
-    expect(preview.warnings.join(' ')).toContain('1 earlier update(s) on main are not in');
-    expect(w.theme.get('snippets/size-chart.liquid')!.value).toBe(F2['snippets/size-chart.liquid']); // from C2
+    const from = Object.fromEntries(preview.operations.map((op) => [op.path, op.commits]));
+    expect(from).toMatchObject({
+      'snippets/size-chart.liquid': ['2222222'], // only changed in the earlier commit
+      'sections/cart.liquid': ['3333333'],
+      'snippets/cart-item.liquid': ['3333333'],
+    });
+    expect(w.theme.get('snippets/size-chart.liquid')!.value).toBe(F2['snippets/size-chart.liquid']);
     expect(w.theme.get('sections/cart.liquid')!.value).toBe(F3['sections/cart.liquid']);
     const list = (await api<CommitsResponse>('GET', `/api/commits?branch=main&themeId=${encodeURIComponent(THEME_DEV.id)}`)).body.data;
     expect(list.items.map((i) => i.syncStatus)).toEqual(['last_synced', 'added', 'added']);
+  });
+
+  it('"only the selected commit" pushes just that commit and says what is left out', async () => {
+    await setup();
+    await sync(C1, { strategy: 'commit_changes' });
+    const { preview } = await sync(C3, { strategy: 'commit_changes' });
+    expect(preview.strategy).toBe('commit_changes');
+    expect(preview.warnings.join(' ')).toContain('Only the selected commit is pushed: 1 earlier update(s) on main');
+    expect(preview.operations.every((op) => op.commits?.[0] === '3333333')).toBe(true);
+    expect(w.theme.has('snippets/size-chart.liquid')).toBe(false); // C2 left out
+  });
+
+  it('uses the push setting from Settings', async () => {
+    await setup();
+    await sync(C1, { strategy: 'commit_changes' });
+    await api('PUT', '/api/settings', { syncPreferences: { strategy: 'commit_changes' } });
+    const preview = (await api<SyncPreview>('POST', '/api/sync/preview', { commitSha: C3, themeId: THEME_DEV.id, branch: 'main' })).body.data;
+    expect(preview.strategy).toBe('commit_changes');
   });
 
   it('recovers the last synced commit from earlier successful syncs', async () => {
@@ -243,7 +266,7 @@ describe('updating a theme, step by step', () => {
     const list = (await api<CommitsResponse>('GET', `/api/commits?branch=main&themeId=${encodeURIComponent(THEME_DEV.id)}`)).body.data;
     expect(list).toMatchObject({ waiting: 2, lastSynced: { sha: C1 } });
     expect(list.items.map((i) => i.syncStatus)).toEqual(['new', 'new', 'last_synced']);
-    const { preview } = await sync(C3, { strategy: 'commit_changes' });
+    const { preview } = await sync(C3, { strategy: 'since_last_sync' });
     expect(preview.commitsIncluded.map((c) => c.sha)).toEqual([C2, C3]);
   });
 

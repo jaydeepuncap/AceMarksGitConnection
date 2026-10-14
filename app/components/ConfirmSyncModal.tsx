@@ -13,20 +13,30 @@ interface Props {
 
 const firstLine = (message: string | null | undefined) => (message ?? '').split('\n')[0] ?? '';
 
-function FileGroup({ title, tone, mark, paths }: { title: string; tone: Tone; mark: string; paths: string[] }) {
-  if (paths.length === 0) return null;
+/** "from 50924bd, f6ca831" — the included commits that changed the file. */
+const fromCommits = (op: SyncPlanOperation) => (op.commits && op.commits.length > 0 ? `from ${op.commits.join(', ')}` : '');
+
+function FileGroup({ title, tone, mark, ops }: { title: string; tone: Tone; mark: string; ops: SyncPlanOperation[] }) {
+  if (ops.length === 0) return null;
   return (
     <s-stack gap="small-300">
-      <s-text type="strong" tone={tone}>{`${title} (${paths.length})`}</s-text>
-      {paths.slice(0, 50).map((path) => (
-        <s-text key={path}>
-          <s-text tone={tone}>{mark}</s-text> {path}
+      <s-text type="strong" tone={tone}>{`${title} (${ops.length})`}</s-text>
+      {ops.slice(0, 50).map((op) => (
+        <s-text key={op.path}>
+          <s-text tone={tone}>{mark}</s-text> {op.path}
+          {fromCommits(op) && <s-text color="subdued">{` · ${fromCommits(op)}`}</s-text>}
         </s-text>
       ))}
-      {paths.length > 50 && <s-text color="subdued">{`and ${paths.length - 50} more (see All files below)`}</s-text>}
+      {ops.length > 50 && <s-text color="subdued">{`and ${ops.length - 50} more (see All files below)`}</s-text>}
     </s-stack>
   );
 }
+
+const STRATEGY_LABEL: Record<SyncPreview['strategy'], string> = {
+  since_last_sync: 'from the last sync to the selected commit',
+  commit_changes: 'only the selected commit',
+  full_snapshot: 'full snapshot',
+};
 
 function actionBadge(op: SyncPlanOperation): { label: string; tone: Tone } {
   if (op.action === 'skip') return { label: 'Skip', tone: 'neutral' };
@@ -75,9 +85,9 @@ export function ConfirmSyncModal({ open, preview, submitting, error, onClose, on
   const editsWarning = preview?.checks.directEdits.status === 'warning';
   const canConfirm = !!preview && writes > 0 && liveConfirmed && !codeBlocked && (!editsWarning || acceptEdits) && !submitting;
   const ops = preview?.operations ?? [];
-  const newFiles = ops.filter((op) => op.action === 'upsert' && !op.existsInTheme).map((op) => op.path);
-  const updatedFiles = ops.filter((op) => op.action === 'upsert' && op.existsInTheme).map((op) => op.path);
-  const removedFiles = ops.filter((op) => op.action === 'delete').map((op) => op.path);
+  const newFiles = ops.filter((op) => op.action === 'upsert' && !op.existsInTheme);
+  const updatedFiles = ops.filter((op) => op.action === 'upsert' && op.existsInTheme);
+  const removedFiles = ops.filter((op) => op.action === 'delete');
 
   return (
     <s-modal
@@ -162,9 +172,9 @@ export function ConfirmSyncModal({ open, preview, submitting, error, onClose, on
             </s-banner>
           )}
 
-          <FileGroup title="New files" tone="success" mark="+" paths={newFiles} />
-          <FileGroup title="Updated files" tone="caution" mark="~" paths={updatedFiles} />
-          <FileGroup title="Removed files" tone="critical" mark="−" paths={removedFiles} />
+          <FileGroup title="New files" tone="success" mark="+" ops={newFiles} />
+          <FileGroup title="Updated files" tone="caution" mark="~" ops={updatedFiles} />
+          <FileGroup title="Removed files" tone="critical" mark="−" ops={removedFiles} />
 
           {preview.warnings
             .filter((w) => !w.startsWith('This is the LIVE theme'))
@@ -183,14 +193,14 @@ export function ConfirmSyncModal({ open, preview, submitting, error, onClose, on
 
           <s-paragraph color="subdued">
             Repository <s-text type="strong">{preview.repository}</s-text> at commit{' '}
-            <s-text type="strong">{preview.commit.sha}</s-text> · strategy{' '}
-            {preview.strategy === 'full_snapshot' ? 'full snapshot' : 'commit changes'} · preview valid until{' '}
+            <s-text type="strong">{preview.commit.sha}</s-text> · push {STRATEGY_LABEL[preview.strategy]} · preview valid
+            until{' '}
             {new Date(preview.expiresAt).toLocaleTimeString()}
           </s-paragraph>
 
           {writes === 0 && (
             <s-banner tone="info" heading="Nothing to apply">
-              <s-paragraph>No file in this commit maps to a writable theme file with the current settings.</s-paragraph>
+              <s-paragraph>No file in the pushed commits maps to a writable theme file with the current settings.</s-paragraph>
             </s-banner>
           )}
 
@@ -218,6 +228,7 @@ export function ConfirmSyncModal({ open, preview, submitting, error, onClose, on
                     <s-table-cell>
                       <s-text color="subdued">
                         {op.skipReason ?? (op.previousPath ? `renamed from ${op.previousPath}` : op.changeType)}
+                        {fromCommits(op) ? ` · ${fromCommits(op)}` : ''}
                       </s-text>
                     </s-table-cell>
                   </s-table-row>

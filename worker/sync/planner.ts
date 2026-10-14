@@ -323,6 +323,41 @@ async function detectDirectEdits(
   };
 }
 
+/** At most this many included commits are inspected to show which commit changed each file. */
+const MAX_ATTRIBUTED_COMMITS = 30;
+
+/** Theme path → short SHAs (oldest first) of the included commits that changed it. */
+async function filesPerCommit(
+  github: GitHubClient,
+  input: PlanInput,
+  commits: IncludedCommit[],
+): Promise<Map<string, string[]>> {
+  const out = new Map<string, string[]>();
+  const inspected = commits.slice(-MAX_ATTRIBUTED_COMMITS);
+  const lists = await Promise.all(
+    inspected.map(async (c) => {
+      try {
+        return (await github.getAllCommitFiles(input.owner, input.repo, c.sha)).files;
+      } catch {
+        return [];
+      }
+    }),
+  );
+  inspected.forEach((c, i) => {
+    for (const file of lists[i]!) {
+      for (const repoPath of [file.filename, file.previousFilename]) {
+        if (!repoPath) continue;
+        const mapped = mapPath(repoPath, input.preferences);
+        if (!mapped.themePath) continue;
+        const list = out.get(mapped.themePath) ?? [];
+        if (!list.includes(c.shortSha)) list.push(c.shortSha);
+        out.set(mapped.themePath, list);
+      }
+    }
+  });
+  return out;
+}
+
 export async function buildSyncPreview(
   deps: { db: Database; github: GitHubClient; admin: ShopifyGraphqlClient; kv: KVNamespace; logger: Logger },
   input: PlanInput,
@@ -360,19 +395,17 @@ export async function buildSyncPreview(
     throw new ApiError(409, 'CONFLICT', `${theme.name} is already on ${input.commitSha.slice(0, 7)} from ${input.branch}`);
   }
 
-  // Updates between the last synced commit and the selected one. When some of
-  // them are not in the theme yet, they are applied together with the selected
-  // commit (a theme never skips an update).
+  // Updates between the last synced commit and the selected one that are not in the theme yet.
   let since: Awaited<ReturnType<GitHubClient['listCommitsUntil']>> | null = null;
   let strategy: SyncStrategy = input.strategy;
   const warnings: string[] = [];
   if (last && last.commitSha !== input.commitSha && strategy !== 'full_snapshot') {
     since = await github.listCommitsUntil(input.owner, input.repo, input.commitSha, last.commitSha, 300);
     const earlier = since.found ? since.commits.length - 1 : 0;
-    if (strategy === 'commit_changes' && earlier > 0 && !(input.includePaths && input.includePaths.length > 0)) {
-      strategy = 'since_last_sync';
+    if (strategy === 'commit_changes' && earlier > 0) {
       warnings.push(
-        `${earlier} earlier update(s) on ${input.branch} are not in ${theme.name} yet, so they are applied together with this one.`,
+        `Only the selected commit is pushed: ${earlier} earlier update(s) on ${input.branch} that are not in ${theme.name} yet are left out. ` +
+          'Choose "From the last sync to the selected commit" to push them too.',
       );
     }
   }
@@ -489,6 +522,15 @@ export async function buildSyncPreview(
     }
     if (targetFiles.outside) warnings.push(`${targetFiles.outside} repository file(s) are not theme files and were ignored.`);
     warnings.push('Full snapshot never deletes theme files that are missing from the repository.');
+  }
+
+  // Which of the included commits changed each file, so the preview shows where every file comes from.
+  if (strategy === 'commit_changes') {
+    const short = input.commitSha.slice(0, 7);
+    ops = ops.map((op) => ({ ...op, commits: [short] }));
+  } else if (strategy === 'since_last_sync' && commitsIncluded.length > 0) {
+    const fromCommits = await filesPerCommit(github, input, commitsIncluded);
+    ops = ops.map((op) => ({ ...op, commits: fromCommits.get(op.path) ?? [] }));
   }
 
   if (input.includePaths && input.includePaths.length > 0) {

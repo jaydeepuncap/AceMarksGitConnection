@@ -93,7 +93,8 @@ export interface SyncPreferences {
 }
 
 export const DEFAULT_SYNC_PREFERENCES: SyncPreferences = {
-  strategy: 'commit_changes',
+  // Push everything from the theme's last synced commit to the selected one.
+  strategy: 'since_last_sync',
   allowDeletes: false,
   themeRoot: '',
   // Merchant customizations live in settings_data.json; overwriting it from Git
@@ -310,6 +311,8 @@ export interface SyncPlanOperation {
   size: number | null;
   blobSha: string | null;
   skipReason: string | null;
+  /** Preview only: short SHAs of the included commits that changed this file (oldest first). */
+  commits?: string[];
 }
 
 export interface SyncPreviewSummary {

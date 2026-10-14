@@ -123,7 +123,7 @@ export default function Settings() {
   const [repository, setRepository] = useState('');
   const [branch, setBranch] = useState('');
   const [themeId, setThemeId] = useState('');
-  const [strategy, setStrategy] = useState<SyncStrategy>('commit_changes');
+  const [strategy, setStrategy] = useState<SyncStrategy>('since_last_sync');
   const [allowDeletes, setAllowDeletes] = useState(false);
   const [themeRoot, setThemeRoot] = useState('');
   const [ignoreText, setIgnoreText] = useState('');
@@ -251,13 +251,24 @@ export default function Settings() {
       <s-section heading="Sync preferences">
         <s-stack gap="base">
           <s-choice-list
-            label="Strategy"
+            label="When you click Sync, push"
             values={[strategy]}
-            onChange={(event) => setStrategy((event.currentTarget.values[0] as SyncStrategy) ?? 'commit_changes')}
+            onChange={(event) => setStrategy((event.currentTarget.values[0] as SyncStrategy) ?? 'since_last_sync')}
           >
+            <s-choice value="since_last_sync" selected={strategy === 'since_last_sync'}>
+              From the last sync to the selected commit (recommended)
+              <s-text slot="details">
+                Pushes the selected commit together with every earlier commit on the branch that is not in the theme yet.
+                The preview lists every file and the commit it comes from. A theme that was never synced gets the
+                complete theme at the selected commit.
+              </s-text>
+            </s-choice>
             <s-choice value="commit_changes" selected={strategy === 'commit_changes'}>
-              Commit changes
-              <s-text slot="details">Apply only the files changed in the selected commit.</s-text>
+              Only the selected commit
+              <s-text slot="details">
+                Pushes only the files changed in the selected commit. Earlier commits that are not in the theme yet are
+                left out.
+              </s-text>
             </s-choice>
             <s-choice value="full_snapshot" selected={strategy === 'full_snapshot'}>
               Full snapshot
@@ -268,7 +279,7 @@ export default function Settings() {
           </s-choice-list>
           <s-checkbox
             label="Allow deletions"
-            details="Delete theme files that the commit removed or renamed. Protected files (layout/theme.liquid, config/*) are never deleted."
+            details="Delete theme files that the pushed commits removed or renamed. Protected files (layout/theme.liquid, config/*) are never deleted."
             checked={allowDeletes}
             onChange={(event) => setAllowDeletes(event.currentTarget.checked)}
           />

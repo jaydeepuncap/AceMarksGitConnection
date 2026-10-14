@@ -25,6 +25,8 @@ import {
 } from '../../drizzle/schema';
 import {
   DEFAULT_SYNC_PREFERENCES,
+  SYNC_STRATEGY_VALUES,
+  type SyncStrategy,
   type AppSettings,
   type GithubConnectionInfo,
   type IncludedCommit,
@@ -176,7 +178,9 @@ export async function deleteExpiredSessions(db: Database, before = new Date()): 
 export function normalizePreferences(raw: unknown): SyncPreferences {
   const value = (raw && typeof raw === 'object' ? raw : {}) as Partial<SyncPreferences>;
   return {
-    strategy: value.strategy === 'full_snapshot' ? 'full_snapshot' : DEFAULT_SYNC_PREFERENCES.strategy,
+    strategy: SYNC_STRATEGY_VALUES.includes(value.strategy as SyncStrategy)
+      ? (value.strategy as SyncStrategy)
+      : DEFAULT_SYNC_PREFERENCES.strategy,
     allowDeletes: typeof value.allowDeletes === 'boolean' ? value.allowDeletes : DEFAULT_SYNC_PREFERENCES.allowDeletes,
     themeRoot: typeof value.themeRoot === 'string' ? value.themeRoot : DEFAULT_SYNC_PREFERENCES.themeRoot,
     ignorePatterns: Array.isArray(value.ignorePatterns)

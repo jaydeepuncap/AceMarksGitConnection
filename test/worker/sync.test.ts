@@ -103,7 +103,7 @@ describe('sync workflow', () => {
   };
 
   const preview = (body: Record<string, unknown>) =>
-    api<SyncPreview>('POST', '/api/sync/preview', { commitSha: SHA_B, themeId: THEME_DEV.id, ...body });
+    api<SyncPreview>('POST', '/api/sync/preview', { commitSha: SHA_B, themeId: THEME_DEV.id, strategy: 'commit_changes', ...body });
 
   /** Drains the queue like the Cloudflare consumer would. */
   async function drainQueue() {
