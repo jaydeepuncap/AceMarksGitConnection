@@ -185,7 +185,6 @@ The screens follow the client guide (*Theme Sync Client Guide v1.1*):
 | Updates (step 02) | `/updates` | Commits newest first, marked **NEW** / **CURRENT**, with `+a ~m −r` counts; expand a commit to see its files |
 | Checks + Review (03–04) | `/updates/:id` | Code check, direct edit detection, every included update with its files, totals, *Confirm update to Staging* |
 | Progress + result (05–06, 08) | `/updates/:id` | Backup, file-by-file progress, *Preview Staging in Shopify*, *Publish to Live*; for incomplete runs *Retry failed files*, *Run full update again*, *Restore backup* |
-| Publish to Live (07) | `/publish` | Only the Staging-verified update; choose the Live theme (published theme selected by default) |
 | Go back (09) | `/go-back` | Return Staging or Live to an earlier update |
 | Roll out | `/rollout` | One update to the Staging themes of several stores (needs `STORE_GROUP`) |
 | Update history (10) | `/history` | Every run per theme: date, theme, what, updated to, status |
@@ -215,7 +214,7 @@ The screens follow the client guide (*Theme Sync Client Guide v1.1*):
 
 ### Publishing to Live
 
-*Publish to Live* only offers the update Staging fully completed (**Staging-verified**). The publish uses the same plan, checks (including "Live matches its last synced update"), backup and honest status, and is recorded in the history. Theme Sync **never changes which theme is published** in Shopify; it only updates the files of the theme you choose.
+*Publish to Live* is started from the Overview banner, the Staging result (*Publish to Live →*) or the Live theme's page (*Publish from Staging →*), and only for the update Staging fully completed (**Staging-verified**). The publish uses the same plan, checks (including "Live matches its last synced update"), backup and honest status, and is recorded in the history. Theme Sync **never changes which theme is published** in Shopify; it only updates the files of the theme you choose.
 
 ### Recovery
 

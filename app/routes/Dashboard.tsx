@@ -6,6 +6,7 @@ import { PublishedBadge } from '../components/ThemeBadges';
 import { api } from '../lib/api-client';
 import { firstLine, formatDate, plural, STATUS_BADGE } from '../lib/format';
 import { useApiQuery, useNavigateHandler } from '../lib/hooks';
+import { usePublishFromStaging } from '../lib/publish';
 import type { ThemeLineState } from '../lib/types';
 
 function LineCard({ state, onOpen, action }: { state: ThemeLineState; onOpen: (e?: Event) => void; action: string }) {
@@ -69,6 +70,7 @@ function LineCard({ state, onOpen, action }: { state: ThemeLineState; onOpen: (e
 export default function Dashboard() {
   const go = useNavigateHandler();
   const overview = useApiQuery(() => api.overview(), []);
+  const publish = usePublishFromStaging();
 
   if (overview.loading && !overview.data) return <LoadingState title="Theme Sync" />;
   const data = overview.data;
@@ -79,7 +81,12 @@ export default function Dashboard() {
       subtitle="Staging first. Live when you say so."
       primaryAction={{ content: 'Choose an update', onAction: () => go('/updates')(), disabled: !data || data.setupMissing.length > 0 }}
       secondaryActions={[{ content: 'Refresh', onAction: overview.reload, loading: overview.loading }]}
-      banners={<ErrorBanner error={overview.error} onRetry={overview.reload} />}
+      banners={
+        <>
+          <ErrorBanner error={overview.error} onRetry={overview.reload} />
+          <ErrorBanner error={publish.error} heading="The publish could not be prepared" onDismiss={publish.clearError} />
+        </>
+      }
     >
       {data && (
         <>
@@ -111,7 +118,7 @@ export default function Dashboard() {
                   <s-paragraph>
                     {`${firstLine(data.publishable.message)} fully completed on Staging. Test it there, then publish it to Live.`}
                   </s-paragraph>
-                  <s-button slot="secondary-actions" onClick={go('/publish')}>
+                  <s-button slot="secondary-actions" loading={publish.pending} onClick={() => publish.start(data.publishable!.sha)}>
                     Publish to Live
                   </s-button>
                 </s-banner>
@@ -127,8 +134,12 @@ export default function Dashboard() {
             />
             <LineCard
               state={data.live}
-              action={data.live.activeRun ? 'View progress' : 'Publish from Staging'}
-              onOpen={data.live.activeRun ? go(`/updates/${data.live.activeRun.id}`) : go('/publish')}
+              action={data.live.activeRun ? 'View progress' : 'Open Live theme'}
+              onOpen={
+                data.live.activeRun
+                  ? go(`/updates/${data.live.activeRun.id}`)
+                  : go(`/themes/${(data.live.configured?.id ?? '').split('/').pop()}`)
+              }
             />
           </s-grid>
 

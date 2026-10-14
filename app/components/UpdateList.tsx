@@ -101,8 +101,8 @@ export function UpdateList({ mode, line = 'staging', themeId, branch, canApply =
           {!canApply && (
             <s-banner tone="info" heading="Staging before Live">
               <s-paragraph>
-                The Live theme only receives updates that fully completed on Staging. Update Staging, test it, then use
-                Publish to Live.
+                The Live theme only receives updates that fully completed on Staging. Update Staging and test it;
+                a verified update can then be published from the Overview or this page.
               </s-paragraph>
             </s-banner>
           )}

@@ -8,6 +8,7 @@ import { api } from '../lib/api-client';
 import { showToast } from '../lib/app-bridge';
 import { firstLine, formatDate, formatDay, KIND_LABEL, LINE_LABEL, plural, runTitle, STATUS_BADGE } from '../lib/format';
 import { useApiQuery, useMutation } from '../lib/hooks';
+import { usePublishFromStaging } from '../lib/publish';
 import type { UpdateFile, UpdateRunDetail } from '../lib/types';
 
 const POLL_MS = 2500;
@@ -449,6 +450,7 @@ export default function UpdateRun() {
   const [acceptedEdits, setAcceptedEdits] = useState(false);
   const [pending, setPending] = useState<'retry' | 'rerun' | 'restore' | null>(null);
   const confirm = useMutation(api.updates.confirm);
+  const publish = usePublishFromStaging();
   const cancel = useMutation(api.updates.cancel);
   const action = useMutation(async (kind: 'retry' | 'rerun' | 'restore') => api.updates[kind](id));
 
@@ -478,7 +480,7 @@ export default function UpdateRun() {
     const result = await cancel.run(id);
     if (result) {
       showToast('Update cancelled. Nothing changed.');
-      navigate(!run ? '/updates' : run.kind === 'publish' ? '/publish' : run.line === 'staging' ? '/updates' : `/themes/${run.theme.id.split('/').pop()}`);
+      navigate(!run ? '/updates' : run.line === 'staging' ? '/updates' : `/themes/${run.theme.id.split('/').pop()}`);
     }
   };
   const doAction = async (kind: 'retry' | 'rerun' | 'restore') => {
@@ -523,6 +525,7 @@ export default function UpdateRun() {
           <ErrorBanner error={query.error} onRetry={query.reload} />
           <ErrorBanner error={confirm.error} heading="The update did not start" onDismiss={confirm.clearError} />
           <ErrorBanner error={cancel.error ?? action.error} onDismiss={action.clearError} />
+          <ErrorBanner error={publish.error} heading="The publish could not be prepared" onDismiss={publish.clearError} />
         </>
       }
     >
@@ -612,7 +615,7 @@ export default function UpdateRun() {
               run={run}
               shopDomain={shopDomain}
               liveSummary={liveSummary}
-              onPublish={() => navigate('/publish')}
+              onPublish={() => run.target && publish.start(run.target.sha)}
               onRestore={() => doAction('restore')}
               restoring={pending === 'restore'}
             />
