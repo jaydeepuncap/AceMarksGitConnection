@@ -184,7 +184,8 @@ The screens follow the client guide (*Theme Sync Client Guide v1.1*):
 | Checks + Review | `/updates/:id` | Code check, direct edit detection, every included update with its files, totals, confirm |
 | Progress + result | `/updates/:id` | Backup, file-by-file progress, preview link, *Publish to Live →*; for incomplete runs *Retry failed files*, *Run full update again*, *Restore backup* |
 | Roll out | `/rollout` | One update to a chosen test (unpublished) theme in several stores (needs `STORE_GROUP`) |
-| Update history | `/history` | Every run (filter by theme): date, theme (Live marked), what, updated to, branch, status |
+| Commits | `/commits` | Commits of a branch: message, SHA, author, date, changed-file count with Added / Modified / Renamed / Deleted counts, the changed-file list with statuses, commit selection and *Preview sync* to a chosen theme |
+| Sync history | `/history` | Every sync (filter by theme and status): commit SHA, repository and branch, Shopify theme, status, number of changed files, started/finished timestamps, error details, *Retry* (with confirmation) when the run is safe to retry |
 | Settings | `/settings` | GitHub, master repository/branch, protected files, ignored files, *Test connection* |
 
 **Test before Live.** The published theme is the Live theme. It never receives a commit directly: apply the commit to any unpublished theme first; once that update fully completes the commit is **Tested** and can be published to Live from the published theme's page or from the update result.
@@ -436,6 +437,7 @@ Status codes: `400` validation, `401` session (with `X-Shopify-Retry-Invalid-Ses
 | `GET /api/themes` | `?refresh=1` | `ShopifyTheme[]` |
 | `GET /api/themes/overview` | `?refresh=1` | Every theme with its line and last synced update |
 | `GET /api/themes/:id` | – | One theme (numeric ID or GID) with its last synced update and runs |
+| `GET /api/commits` | `?branch&page&perPage&withFiles=1` | Commits with `fileStats` (total, added, modified, renamed, removed) |
 | `GET /api/commits/:sha/files` | `?page&perPage` | Files of one commit with their theme paths |
 | `GET /api/updates` | `?line=staging\|live&themeId&branch&ref=branch\|current&page&perPage` | Updates with `new`/`current`/`older`, counts, waiting |
 | `POST /api/updates/plan` | `{ kind: "update"\|"publish"\|"rollback", targetSha, themeId?, line?, branch? }` | `201 UpdateRun` (checks + review) |

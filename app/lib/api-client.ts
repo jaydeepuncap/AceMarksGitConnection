@@ -14,6 +14,7 @@ import type {
   ApiResponse,
   BaselineRequest,
   CommitFilesResponse,
+  CommitListItem,
   ConfirmUpdateRequest,
   ConnectionTestResponse,
   CreateGithubConnectionRequest,
@@ -37,6 +38,7 @@ import type {
   UpdateRunDetail,
   UpdatesResponse,
   UpdateSelectionRequest,
+  UpdateStatus,
   UpdateSettingsRequest,
 } from './types';
 import { getSessionToken, redirectTopLevel } from './app-bridge';
@@ -178,6 +180,8 @@ export const api = {
       apiRequest<{ written: boolean }>('POST', `/api/themes/${encodeURIComponent(id)}/sync-file`, { body: {} }),
   },
   commits: {
+    list: (query: { branch?: string; page?: number; perPage?: number; withFiles?: boolean } = {}) =>
+      apiRequest<Paginated<CommitListItem>>('GET', '/api/commits', { query }),
     files: (sha: string, query: { page?: number; perPage?: number } = {}) =>
       apiRequest<CommitFilesResponse>('GET', `/api/commits/${encodeURIComponent(sha)}/files`, { query }),
   },
@@ -200,7 +204,15 @@ export const api = {
       apiRequest<UpdateRun>('POST', `/api/updates/${encodeURIComponent(id)}/selection`, { body }),
   },
   history: (
-    query: { page?: number; perPage?: number; line?: ThemeLine; themeId?: string; branch?: string; includeUnknownBranch?: boolean } = {},
+    query: {
+      page?: number;
+      perPage?: number;
+      line?: ThemeLine;
+      themeId?: string;
+      branch?: string;
+      includeUnknownBranch?: boolean;
+      status?: UpdateStatus;
+    } = {},
   ) =>
     apiRequest<Paginated<UpdateRun>>('GET', '/api/history', { query }),
   rollout: {

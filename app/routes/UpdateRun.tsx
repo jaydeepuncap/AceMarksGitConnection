@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { AppLayout } from '../components/AppLayout';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import { ErrorBanner } from '../components/ErrorBanner';
 import { FileList, type FileListItem } from '../components/FileList';
 import { LoadingState } from '../components/LoadingState';
@@ -518,6 +519,8 @@ export default function UpdateRun() {
   const query = useApiQuery(() => api.updates.get(id), [id]);
   const overview = useApiQuery(() => api.overview(), [query.data?.status === 'succeeded']);
   const [acceptedEdits, setAcceptedEdits] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const previousStatus = useRef<string | null>(null);
   const [pending, setPending] = useState<'retry' | 'rerun' | 'restore' | null>(null);
   const confirm = useMutation(api.updates.confirm);
   const publish = usePublishToLive();
@@ -526,6 +529,18 @@ export default function UpdateRun() {
 
   const run = query.data;
   const active = run?.status === 'queued' || run?.status === 'running';
+
+  // Success / failure feedback when a run finishes while the page is open.
+  useEffect(() => {
+    const status = run?.status ?? null;
+    const was = previousStatus.current;
+    previousStatus.current = status;
+    if (!run || !(was === 'queued' || was === 'running')) return;
+    if (status === 'succeeded') showToast(`${run.theme.name} is up to date: ${run.progress.succeeded} file(s) synced`);
+    else if (status === 'partially_failed' || status === 'failed') {
+      showToast(`Sync incomplete: ${run.progress.failed} file(s) failed`, { isError: true });
+    }
+  }, [run]);
   useEffect(() => {
     if (!active) return;
     const timer = setInterval(() => {
@@ -541,6 +556,7 @@ export default function UpdateRun() {
   const doConfirm = async () => {
     if (!run) return;
     const result = await confirm.run(id, { acceptDirectEdits: acceptedEdits || undefined });
+    setConfirmOpen(false);
     if (result) {
       showToast(run.line === 'live' ? 'Publishing to Live' : `Updating ${run.theme.name}`);
       query.reload();
@@ -667,7 +683,7 @@ export default function UpdateRun() {
                       <s-button loading={cancel.pending} disabled={confirm.pending} onClick={doCancel}>
                         Cancel
                       </s-button>
-                      <s-button variant="primary" loading={confirm.pending} disabled={!run.actions.canConfirm} onClick={doConfirm}>
+                      <s-button variant="primary" loading={confirm.pending} disabled={!run.actions.canConfirm} onClick={() => setConfirmOpen(true)}>
                         {confirmLabel}
                       </s-button>
                     </s-stack>
@@ -696,6 +712,31 @@ export default function UpdateRun() {
           {(run.status === 'failed' || run.status === 'partially_failed') && (
             <Incomplete run={run} pending={pending} onRetry={() => doAction('retry')} onRerun={() => doAction('rerun')} onRestore={() => doAction('restore')} />
           )}
+          <ConfirmDialog
+            id="confirm-sync-dialog"
+            open={confirmOpen}
+            heading={confirmLabel}
+            confirmLabel={run.line === 'live' ? 'Publish now' : 'Sync now'}
+            tone={run.line === 'live' ? 'critical' : 'auto'}
+            pending={confirm.pending}
+            onConfirm={doConfirm}
+            onClose={() => setConfirmOpen(false)}
+          >
+            <s-paragraph>
+              {`${run.target ? `Commit ${run.target.shortSha} ${firstLine(run.target.message)}` : 'The saved backup'} will be applied to ${run.theme.name}${
+                run.line === 'live' ? ', the published theme customers see' : ''
+              }.`}
+            </s-paragraph>
+            <s-stack direction="inline" gap="small-200">
+              <s-badge tone="success">{`${run.totals.added} new`}</s-badge>
+              <s-badge tone="caution">{`${run.totals.updated} updated`}</s-badge>
+              <s-badge tone="critical">{`${run.totals.removed} removed`}</s-badge>
+              {run.selection.skippedPaths.length > 0 && <s-badge tone="neutral">{`${run.selection.skippedPaths.length} skipped by you`}</s-badge>}
+            </s-stack>
+            <s-paragraph color="subdued">
+              A backup of every affected file is saved first, so the theme can be restored. Protected files are not replaced.
+            </s-paragraph>
+          </ConfirmDialog>
           {run.files.length > 0 && <FileTable key={run.status} run={run} onChanged={query.reload} />}
         </>
       )}

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { ThemeOverviewItem, UpdateRun, UpdateRunDetail, UpdatesResponse, OverviewResponse, PublishOptionsResponse, Paginated } from '../../shared/api-types';
+import type { CommitListItem, ThemeOverviewItem, UpdateRun, UpdateRunDetail, UpdatesResponse, OverviewResponse, PublishOptionsResponse, Paginated } from '../../shared/api-types';
 import { app } from '../../worker/index';
 import { createLogger } from '../../worker/lib/logger';
 import { handleSyncMessage } from '../../worker/sync/dispatch';
@@ -493,6 +493,19 @@ describe('Theme Sync workflow', () => {
       expect(theme.syncFile).toMatchObject({ present: false, matchesRecord: false });
       expect((await api('POST', '/api/themes/111/sync-file', {})).status).toBe(200);
       expect(JSON.parse(text(staging(), 'assets/theme-sync.json')!)).toMatchObject({ lastSyncedUpdate: C2, branch: 'main' });
+    });
+  });
+
+  describe('commits page', () => {
+    it('lists commits with changed-file counts by status', async () => {
+      await setup();
+      const res = await api<Paginated<CommitListItem>>('GET', '/api/commits?branch=main&withFiles=1');
+      expect(res.status).toBe(200);
+      expect(res.body.data.items.map((i) => [i.shortSha, i.authorName, i.fileStats])).toEqual([
+        [C3.slice(0, 7), 'Dev', { total: 5, added: 2, modified: 2, renamed: 0, removed: 1, truncated: false }],
+        [C2.slice(0, 7), 'Dev', { total: 4, added: 1, modified: 2, renamed: 0, removed: 1, truncated: false }],
+        [C1.slice(0, 7), 'Dev', { total: 10, added: 10, modified: 0, renamed: 0, removed: 0, truncated: false }],
+      ]);
     });
   });
 

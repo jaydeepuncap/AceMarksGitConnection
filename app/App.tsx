@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { Link, Route, Routes, useNavigate } from 'react-router-dom';
 import { NavMenu } from '@shopify/app-bridge-react';
+import Commits from './routes/Commits';
 import History from './routes/History';
 import Rollout from './routes/Rollout';
 import Settings from './routes/Settings';
@@ -48,8 +49,9 @@ export default function App() {
           Themes
         </Link>
         <Link to="/themes">Themes</Link>
+        <Link to="/commits">Commits</Link>
+        <Link to="/history">Sync history</Link>
         <Link to="/rollout">Roll out</Link>
-        <Link to="/history">Update history</Link>
         <Link to="/settings">Settings</Link>
       </NavMenu>
       <Routes>
@@ -58,7 +60,9 @@ export default function App() {
         <Route path="/themes/:id" element={<ThemeDetail />} />
         <Route path="/updates/:id" element={<UpdateRun />} />
         <Route path="/rollout" element={<Rollout />} />
+        <Route path="/commits" element={<Commits />} />
         <Route path="/history" element={<History />} />
+        <Route path="/sync-history" element={<History />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="*" element={<Themes />} />
       </Routes>

@@ -88,6 +88,10 @@ export const commitsQuerySchema = paginationSchema.extend({
   repository: repositorySchema.optional(),
   branch: branchSchema.optional(),
   path: z.string().trim().max(255).optional(),
+  withFiles: z
+    .enum(['true', 'false', '1', '0'])
+    .optional()
+    .transform((v) => v === 'true' || v === '1'),
 });
 
 export const commitQuerySchema = z.object({

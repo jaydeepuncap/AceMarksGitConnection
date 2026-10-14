@@ -212,6 +212,22 @@ export interface CommitSummary {
   parents: string[];
 }
 
+/** Changed-file counts of one commit (GitHub statuses). */
+export interface CommitFileStats {
+  total: number;
+  added: number;
+  modified: number;
+  renamed: number;
+  removed: number;
+  /** GitHub stopped listing files (more than 3000). */
+  truncated: boolean;
+}
+
+export interface CommitListItem extends CommitSummary {
+  /** Present when the list was requested with withFiles=1. */
+  fileStats: CommitFileStats | null;
+}
+
 export interface CommitDetail extends CommitSummary {
   stats: { additions: number; deletions: number; total: number };
   /** Number of files GitHub returned (GitHub caps a single commit at 3000 files). */

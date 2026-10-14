@@ -6,6 +6,7 @@ import { LoadingState } from '../../app/components/LoadingState';
 import { ApiClientError } from '../../app/lib/api-client';
 import type * as ApiClientModule from '../../app/lib/api-client';
 import type { UpdateRunDetail, UpdatesResponse } from '../../app/lib/types';
+import Commits from '../../app/routes/Commits';
 import History from '../../app/routes/History';
 import UpdateRun from '../../app/routes/UpdateRun';
 import { UpdateList } from '../../app/components/UpdateList';
@@ -20,7 +21,8 @@ vi.mock('../../app/lib/api-client', async (importOriginal) => {
       stores: vi.fn(),
       history: vi.fn(),
       settings: { get: vi.fn(), update: vi.fn() },
-      commits: { files: vi.fn() },
+      commits: { files: vi.fn(), list: vi.fn() },
+      github: { branches: vi.fn().mockResolvedValue({ items: [], page: 1, perPage: 100, hasNextPage: false }) },
       themes: { list: vi.fn(), overview: vi.fn(), get: vi.fn() },
       updates: { list: vi.fn(), get: vi.fn(), plan: vi.fn(), confirm: vi.fn(), cancel: vi.fn(), retry: vi.fn() },
     },
@@ -168,8 +170,8 @@ describe('update screens', () => {
     await waitFor(() => expect(screen.getByText('Confirm update to Staging')).toBeInTheDocument());
     expect(screen.getByText('No Liquid or JSON errors in 7 files')).toBeInTheDocument();
     expect(screen.getByText('snippets/cart-item.liquid')).toBeInTheDocument();
-    expect(screen.getByText('2 new')).toBeInTheDocument();
-    expect(screen.getByText('2 removed')).toBeInTheDocument();
+    expect(screen.getAllByText('2 new').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('2 removed').length).toBeGreaterThan(0);
     expect(screen.getByText(/Checks passed/)).toBeInTheDocument();
   });
 
@@ -239,8 +241,50 @@ describe('update screens', () => {
     mocked.themes.list.mockResolvedValue([{ id: 'x', name: 'Live', isLive: true }]);
     wrap(<History />, '/history');
     await waitFor(() => expect(screen.getAllByText('Live').length).toBeGreaterThan(0));
-    expect(screen.getByText('Complete')).toBeInTheDocument();
-    expect(screen.getByText('Publish to Live')).toBeInTheDocument();
+    expect(screen.getAllByText('Complete').length).toBeGreaterThan(0);
+    expect(screen.getByText(/Publish to Live ·/)).toBeInTheDocument();
     expect(screen.getByText('3333333')).toBeInTheDocument();
+  });
+});
+
+describe('commits page', () => {
+  it('lists commits with SHA, author, date, file counts and a preview action', async () => {
+    const m = api as unknown as {
+      settings: { get: Fn };
+      github?: { branches: Fn };
+      themes: { list: Fn };
+      commits: { list: Fn };
+    };
+    m.settings.get.mockResolvedValue({ shop: {}, settings: { branch: 'main' } });
+    m.themes.list.mockResolvedValue([
+      { id: 'gid://shopify/OnlineStoreTheme/1', name: 'Dawn', isLive: false, writable: true },
+      { id: 'gid://shopify/OnlineStoreTheme/2', name: 'Live', isLive: true, writable: true },
+    ]);
+    (m.commits as unknown as { list: Fn }).list.mockResolvedValue({
+      items: [
+        {
+          sha: C3, shortSha: '3333333', message: 'Update cart functionality\n\nbody', authorName: 'Dhruvi', authorLogin: null,
+          authorAvatarUrl: null, date: '2026-10-06T10:00:00Z', htmlUrl: '', parents: [],
+          fileStats: { total: 5, added: 2, modified: 2, renamed: 0, removed: 1, truncated: false },
+        },
+      ],
+      page: 1, perPage: 20, hasNextPage: false,
+    });
+    wrap(<Commits />, '/commits');
+    await waitFor(() => expect(screen.getByText('Update cart functionality')).toBeInTheDocument());
+    expect(screen.getByText(/3333333 · Dhruvi/)).toBeInTheDocument();
+    expect(screen.getByText('5 files')).toBeInTheDocument();
+    expect(screen.getByText('2 added')).toBeInTheDocument();
+    expect(screen.getByText('1 deleted')).toBeInTheDocument();
+    expect(screen.getByText('Select')).toBeInTheDocument();
+  });
+
+  it('shows an empty state when the branch has no commits', async () => {
+    const m = api as unknown as { settings: { get: Fn }; themes: { list: Fn }; commits: { list: Fn } };
+    m.settings.get.mockResolvedValue({ shop: {}, settings: { branch: 'main' } });
+    m.themes.list.mockResolvedValue([]);
+    m.commits.list.mockResolvedValue({ items: [], page: 1, perPage: 20, hasNextPage: false });
+    wrap(<Commits />, '/commits');
+    await waitFor(() => expect(document.querySelector('s-empty-state[heading="No commits found"]')).not.toBeNull());
   });
 });
