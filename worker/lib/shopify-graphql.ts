@@ -15,7 +15,6 @@
  * extensions.cost.throttleStatus.
  */
 import type { ShopifyTheme, ThemeRole } from '../../shared/api-types';
-import { bytesToBase64 } from './crypto';
 import { fetchWithRetry, sleep } from './http';
 import type { Logger } from './logger';
 import { ApiError } from './response';
@@ -178,36 +177,10 @@ export const THEME_FILES_QUERY = `#graphql
     theme(id: $id) {
       id
       files(filenames: $filenames, first: $first, after: $after) {
-        nodes { filename size checksumMd5 updatedAt }
+        nodes { filename size checksumMd5 }
         pageInfo { hasNextPage endCursor }
       }
     }
-  }
-`;
-
-export const THEME_FILE_BODIES_QUERY = `#graphql
-  query AceThemeFileBodies($id: ID!, $filenames: [String!], $first: Int!) {
-    theme(id: $id) {
-      id
-      files(filenames: $filenames, first: $first) {
-        nodes {
-          filename
-          checksumMd5
-          body {
-            __typename
-            ... on OnlineStoreThemeFileBodyText { content }
-            ... on OnlineStoreThemeFileBodyBase64 { contentBase64 }
-            ... on OnlineStoreThemeFileBodyUrl { url }
-          }
-        }
-      }
-    }
-  }
-`;
-
-export const SHOP_QUERY = `#graphql
-  query AceShop {
-    shop { name myshopifyDomain }
   }
 `;
 
@@ -288,13 +261,12 @@ export interface ThemeFileInfo {
   filename: string;
   size: number | null;
   checksumMd5: string | null;
-  updatedAt: string | null;
 }
 
 interface ThemeFilesPage {
   theme: {
     files: {
-      nodes: { filename: string; size: string | number | null; checksumMd5: string | null; updatedAt?: string | null }[];
+      nodes: { filename: string; size: string | number | null; checksumMd5: string | null }[];
       pageInfo: { hasNextPage: boolean; endCursor: string | null };
     } | null;
   } | null;
@@ -326,7 +298,6 @@ async function collectFiles(
         filename: node.filename,
         size: node.size === null ? null : Number(node.size),
         checksumMd5: node.checksumMd5,
-        updatedAt: node.updatedAt ?? null,
       });
     }
     if (!files.pageInfo.hasNextPage) break;
@@ -349,7 +320,7 @@ export async function getThemeFilesMetadata(
   return result;
 }
 
-/** Lists every file in the theme (used when a theme receives its first update). */
+/** Lists every file in the theme (used by the full_snapshot preview). */
 export async function listAllThemeFiles(client: ShopifyGraphqlClient, themeId: string): Promise<ThemeFileInfo[]> {
   return collectFiles(client, themeId, null, 40);
 }
@@ -464,72 +435,4 @@ export async function waitForJob(
     await sleep(intervalMs);
   }
   return false;
-}
-
-export type ThemeFileBodyContent = { type: 'TEXT' | 'BASE64'; value: string };
-
-interface RawBody {
-  __typename: string;
-  content?: string;
-  contentBase64?: string;
-  url?: string;
-}
-
-/**
- * Current contents of `filenames` in the theme (used for backups and to read
- * assets/theme-sync.json). Files that do not exist are absent from the map.
- * Large binary files are returned by Shopify as a URL and downloaded here.
- */
-export async function getThemeFileBodies(
-  client: ShopifyGraphqlClient,
-  themeId: string,
-  filenames: string[],
-  fetchImpl: typeof fetch = fetch,
-): Promise<Map<string, ThemeFileBodyContent & { checksumMd5: string | null }>> {
-  const result = new Map<string, ThemeFileBodyContent & { checksumMd5: string | null }>();
-  for (let i = 0; i < filenames.length; i += FILENAME_LOOKUP_BATCH) {
-    const batch = filenames.slice(i, i + FILENAME_LOOKUP_BATCH);
-    const data = await client.request<{
-      theme: { files: { nodes: { filename: string; checksumMd5: string | null; body: RawBody | null }[] } | null } | null;
-    }>(THEME_FILE_BODIES_QUERY, { id: themeId, filenames: batch, first: batch.length });
-    if (!data.theme) throw new ApiError(404, 'NOT_FOUND', 'Theme not found in this store');
-    for (const node of data.theme.files?.nodes ?? []) {
-      const body = node.body;
-      if (!body) continue;
-      if (typeof body.content === 'string') {
-        result.set(node.filename, { type: 'TEXT', value: body.content, checksumMd5: node.checksumMd5 });
-      } else if (typeof body.contentBase64 === 'string') {
-        result.set(node.filename, { type: 'BASE64', value: body.contentBase64, checksumMd5: node.checksumMd5 });
-      } else if (typeof body.url === 'string') {
-        const response = await fetchWithRetry(body.url, { method: 'GET' }, { timeoutMs: 30_000, idempotent: true, retries: 2, fetchImpl });
-        if (!response.ok) throw new ApiError(502, 'SHOPIFY_ERROR', `Could not download ${node.filename} for the backup`);
-        const bytes = new Uint8Array(await response.arrayBuffer());
-        result.set(node.filename, { type: 'BASE64', value: bytesToBase64(bytes), checksumMd5: node.checksumMd5 });
-      }
-    }
-  }
-  return result;
-}
-
-export async function getShopDetails(client: ShopifyGraphqlClient): Promise<{ name: string; myshopifyDomain: string }> {
-  const data = await client.request<{ shop: { name: string; myshopifyDomain: string } }>(SHOP_QUERY);
-  return data.shop;
-}
-
-const WRITE_PROBE_FILE = 'assets/theme-sync-write-check.txt';
-
-/**
- * Checks whether Shopify lets this app change theme files, without changing
- * anything: it asks Shopify to delete a file that does not exist. Without the
- * theme-modification exemption Shopify answers ACCESS_DENIED; with it, the
- * answer is "file not found".
- */
-export async function canWriteThemeFiles(client: ShopifyGraphqlClient, themeId: string): Promise<{ allowed: boolean; message: string }> {
-  try {
-    await deleteThemeFiles(client, themeId, [WRITE_PROBE_FILE]);
-    return { allowed: true, message: 'Shopify allows this app to update theme files.' };
-  } catch (err) {
-    if (err instanceof ApiError && err.code === 'THEME_WRITE_NOT_PERMITTED') return { allowed: false, message: err.message };
-    throw err;
-  }
 }

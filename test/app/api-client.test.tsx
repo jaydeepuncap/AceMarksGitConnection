@@ -25,7 +25,7 @@ describe('api client', () => {
       )
       .mockResolvedValueOnce(respond(200, { success: true, data: 'second' }));
     vi.stubGlobal('fetch', fetchMock);
-    await expect(apiRequest('POST', '/api/updates/plan', { body: {} })).resolves.toBe('second');
+    await expect(apiRequest('POST', '/api/sync', { body: {} })).resolves.toBe('second');
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(window.shopify.idToken).toHaveBeenCalledTimes(2);
   });
@@ -37,7 +37,7 @@ describe('api client', () => {
         respond(429, { success: false, error: { code: 'RATE_LIMITED', message: 'slow down', requestId: 'r-1' } }, { 'Retry-After': '60' }),
       ),
     );
-    const err = (await apiRequest('POST', '/api/updates/plan', { body: {} }).catch((e) => e)) as ApiClientError;
+    const err = (await apiRequest('POST', '/api/sync', { body: {} }).catch((e) => e)) as ApiClientError;
     expect(err).toBeInstanceOf(ApiClientError);
     expect(err).toMatchObject({ status: 429, code: 'RATE_LIMITED', message: 'slow down', requestId: 'r-1', retryAfter: 60 });
   });
@@ -45,7 +45,7 @@ describe('api client', () => {
   it('never auto-retries failed writes on 5xx', async () => {
     const fetchMock = vi.fn(async () => respond(500, { success: false, error: { code: 'INTERNAL_ERROR', message: 'boom' } }));
     vi.stubGlobal('fetch', fetchMock);
-    await expect(apiRequest('POST', '/api/updates/plan', { body: {} })).rejects.toMatchObject({ status: 500 });
+    await expect(apiRequest('POST', '/api/sync', { body: {} })).rejects.toMatchObject({ status: 500 });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 

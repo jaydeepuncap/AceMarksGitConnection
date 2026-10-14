@@ -1,38 +1,28 @@
 /**
- * Applies a confirmed run in bounded, resumable chunks.
+ * Executes a confirmed sync in bounded chunks with durable, retry-safe state.
  *
- * Phases (all state is in D1, so any chunk can stop and the next one resumes):
- *   1. Backup  – the current version of every affected file is saved to KV
- *                (or recorded as "did not exist") before any file changes.
- *   2. Apply   – files are written / removed in batches of up to 50. Content
- *                from GitHub is pinned to the commit SHA, verified against its
- *                Git blob SHA and code-checked before it is sent to Shopify.
- *   3. Finish  – only when every file succeeded: assets/theme-sync.json is
- *                written last and the theme's "last synced update" is saved.
- *                Otherwise the theme keeps its previous last synced update.
+ * State lives in D1 (sync_history + sync_operations), not in memory, so any
+ * chunk can crash or time out and the next chunk resumes from the remaining
+ * `pending` operations. Writes are idempotent: an upsert always writes the
+ * content of the same blob from the same commit SHA, and deleting a file that is
+ * already gone counts as success. Re-delivered queue messages therefore cannot
+ * corrupt a theme.
  *
- * Writes are idempotent (same content for the same path; deleting a missing
- * file counts as done), so re-delivered queue messages cannot corrupt a theme.
+ * Per chunk: up to 50 operations (Shopify's per-mutation file limit), with an
+ * additional ~4 MB request-body budget per upsert mutation.
  */
-import type { SyncHistoryRow, SyncOperationRow, SyncStatus } from '../../drizzle/schema';
-import { THEME_SYNC_MARKER_PATH } from '../../shared/theme-paths';
+import type { SyncStatus } from '../../drizzle/schema';
 import type { Env } from '../env';
 import { createAdminClientForShop, createGithubClientForShop } from '../lib/clients';
-import { bytesToBase64, gitBlobSha } from '../lib/crypto';
+import { gitBlobSha, bytesToBase64 } from '../lib/crypto';
 import {
   countOperations,
-  deleteFileChecksums,
   findShopById,
   getDb,
-  getMarkerOperation,
   getSyncRun,
-  getThemeState,
-  listOperationsNeedingBackup,
   listPendingOperations,
-  saveFileChecksums,
   transitionSyncRun,
   updateOperations,
-  upsertThemeState,
   type Database,
 } from '../lib/database';
 import type { GitHubClient } from '../lib/github-client';
@@ -42,23 +32,21 @@ import {
   THEME_WRITE_BATCH_LIMIT,
   deleteThemeFiles,
   getTheme,
-  getThemeFileBodies,
-  getThemeFilesMetadata,
   upsertThemeFiles,
   waitForJob,
   type ShopifyGraphqlClient,
   type ThemeFileBody,
 } from '../lib/shopify-graphql';
 import { splitRepository } from '../lib/validators';
-import { checkThemeFile } from './code-check';
-import { BACKUP_TTL_SECONDS, MAX_FILE_BYTES, type RunOptions } from './plan';
+import { MAX_FILE_BYTES } from './planner';
+import type { SyncOperationRow } from '../../drizzle/schema';
 
 const MAX_OPERATION_ATTEMPTS = 3;
 const MAX_UPSERT_PAYLOAD_BYTES = 4 * 1024 * 1024;
 
 export interface ChunkResult {
   done: boolean;
-  /** Suggested delay before the next chunk (rate limits, temporary Shopify issues). */
+  /** Suggested delay before the next chunk (rate limits). */
   retryAfterSeconds?: number;
 }
 
@@ -79,8 +67,6 @@ export function encodeBody(bytes: Uint8Array): ThemeFileBody {
   }
 }
 
-export const backupKey = (shopId: string, syncId: string, opId: string) => `backup:${shopId}:${syncId}:${opId}`;
-
 function isTransient(err: unknown): boolean {
   return (
     err instanceof ApiError &&
@@ -89,127 +75,62 @@ function isTransient(err: unknown): boolean {
 }
 
 function errorMessage(err: unknown): string {
-  if (err instanceof ApiError) return err.message;
+  if (err instanceof ApiError) return `${err.code}: ${err.message}`;
   return err instanceof Error ? err.message : String(err);
 }
 
-/** Shopify rejects files with Liquid/JSON problems through userErrors. */
-function classifyUserError(message: string): 'code' | 'other' {
-  return /liquid|syntax|json|schema|parse|unexpected|invalid/i.test(message) ? 'code' : 'other';
-}
-
-interface Ctx {
-  db: Database;
-  shopId: string;
-  run: SyncHistoryRow;
-  admin: ShopifyGraphqlClient;
-  github: () => Promise<GitHubClient>;
-  kv: KVNamespace;
-  logger: Logger;
-  fetchImpl?: typeof fetch;
-  /** Set when a temporary problem asked for a pause before the next chunk. */
-  backoff: number;
-}
-
-async function failOrRetry(ctx: Ctx, ops: SyncOperationRow[], err: unknown) {
+async function failOrRetry(db: Database, shopId: string, ops: SyncOperationRow[], err: unknown) {
   const message = errorMessage(err).slice(0, 1000);
   const transient = isTransient(err);
-  if (transient) ctx.backoff = Math.max(ctx.backoff, err instanceof ApiError ? (err.retryAfter ?? 10) : 10);
   const exhausted = ops.filter((op) => !transient || op.attempts + 1 >= MAX_OPERATION_ATTEMPTS);
   const retry = ops.filter((op) => !exhausted.includes(op));
-  await updateOperations(ctx.db, ctx.shopId, exhausted.map((o) => o.id), {
-    status: 'failed',
-    error: message,
-    errorKind: transient ? 'transient' : 'other',
-    incrementAttempts: true,
-  });
-  await updateOperations(ctx.db, ctx.shopId, retry.map((o) => o.id), { error: message, incrementAttempts: true });
+  await updateOperations(db, shopId, exhausted.map((o) => o.id), { status: 'failed', error: message, incrementAttempts: true });
+  await updateOperations(db, shopId, retry.map((o) => o.id), { error: message, incrementAttempts: true });
 }
 
-// ---------------------------------------------------------------------------
-// Phase 1: backup
-// ---------------------------------------------------------------------------
-async function backupBatch(ctx: Ctx, ops: SyncOperationRow[]): Promise<void> {
-  const bodies = await getThemeFileBodies(ctx.admin, ctx.run.themeId, ops.map((o) => o.path), ctx.fetchImpl);
-  for (const op of ops) {
-    const body = bodies.get(op.path);
-    if (!body) {
-      await updateOperations(ctx.db, ctx.shopId, [op.id], { backupState: 'absent' });
-      continue;
-    }
-    const key = backupKey(ctx.shopId, ctx.run.id, op.id);
-    await ctx.kv.put(key, JSON.stringify({ path: op.path, type: body.type, value: body.value }), {
-      expirationTtl: BACKUP_TTL_SECONDS,
-    });
-    await updateOperations(ctx.db, ctx.shopId, [op.id], { backupState: 'saved', backupKey: key });
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Phase 2: apply
-// ---------------------------------------------------------------------------
-async function contentFor(ctx: Ctx, op: SyncOperationRow): Promise<{ body: ThemeFileBody; bytes: number }> {
-  if (op.contentSource === 'backup') {
-    const saved = op.contentKey ? await ctx.kv.get<{ type: 'TEXT' | 'BASE64'; value: string }>(op.contentKey, 'json') : null;
-    if (!saved) throw new ApiError(410, 'BACKUP_UNAVAILABLE', 'The saved copy of this file is no longer available');
-    return { body: { type: saved.type, value: saved.value }, bytes: saved.value.length };
-  }
-  const { owner, repo } = splitRepository(ctx.run.repository);
-  const commitSha = op.sourceCommitSha ?? ctx.run.commitSha;
-  const github = await ctx.github();
+async function fetchVerifiedContent(
+  github: GitHubClient,
+  repository: string,
+  commitSha: string,
+  op: SyncOperationRow,
+): Promise<Uint8Array> {
+  const { owner, repo } = splitRepository(repository);
+  const sourcePath = op.sourcePath ?? op.path;
   // Exact commit: Contents API with ref=<full SHA>, never a branch name.
-  const bytes = await github.getFileAtCommit(owner, repo, op.sourcePath ?? op.path, commitSha);
+  const bytes = await github.getFileAtCommit(owner, repo, sourcePath, commitSha);
   if (bytes.byteLength > MAX_FILE_BYTES) {
-    throw new ApiError(422, 'VALIDATION_ERROR', `File is ${bytes.byteLength} bytes; the limit is ${MAX_FILE_BYTES}`);
+    throw new ApiError(422, 'VALIDATION_ERROR', `File is ${bytes.byteLength} bytes; the sync limit is ${MAX_FILE_BYTES}`);
   }
-  if (op.blobSha && (await gitBlobSha(bytes)) !== op.blobSha) {
-    throw new ApiError(409, 'CONFLICT', `Integrity check failed: the content does not match update ${commitSha.slice(0, 7)}`);
+  if (op.blobSha) {
+    const actual = await gitBlobSha(bytes);
+    if (actual !== op.blobSha) {
+      throw new ApiError(
+        409,
+        'CONFLICT',
+        `Integrity check failed: content of ${sourcePath} does not match blob ${op.blobSha.slice(0, 7)} at ${commitSha.slice(0, 7)}`,
+      );
+    }
   }
-  const issues = checkThemeFile(op.path, bytes);
-  if (issues.length > 0) {
-    const first = issues[0]!;
-    throw Object.assign(new ApiError(422, 'CODE_ERRORS', `Code error${first.line ? ` on line ${first.line}` : ''}: ${first.message}`), {
-      codeError: true,
-    });
-  }
-  return { body: encodeBody(bytes), bytes: bytes.byteLength };
+  return bytes;
 }
 
-async function recordChecksums(ctx: Ctx, paths: string[], commitSha: string | null) {
-  if (paths.length === 0) return;
-  try {
-    const meta = await getThemeFilesMetadata(ctx.admin, ctx.run.themeId, paths);
-    await saveFileChecksums(
-      ctx.db,
-      ctx.shopId,
-      ctx.run.themeId,
-      paths.map((path) => ({ path, checksumMd5: meta.get(path)?.checksumMd5 ?? null, commitSha })),
-    );
-  } catch (err) {
-    // Only used for direct edit detection; never fail a run over it.
-    ctx.logger.warn('update.checksum_record_failed', { error: errorMessage(err) });
-  }
-}
-
-async function processUpserts(ctx: Ctx, ops: SyncOperationRow[]): Promise<void> {
+async function processUpserts(
+  ctx: { db: Database; shopId: string; github: GitHubClient; admin: ShopifyGraphqlClient; logger: Logger },
+  run: { repository: string; commitSha: string; themeId: string },
+  ops: SyncOperationRow[],
+): Promise<void> {
+  const { db, shopId, github, admin, logger } = ctx;
   const ready: { op: SyncOperationRow; body: ThemeFileBody; bytes: number }[] = [];
+
   for (const op of ops) {
     try {
-      ready.push({ op, ...(await contentFor(ctx, op)) });
+      const bytes = await fetchVerifiedContent(github, run.repository, run.commitSha, op);
+      ready.push({ op, body: encodeBody(bytes), bytes: bytes.byteLength });
     } catch (err) {
       // Rate limits abort the chunk so the dispatcher can back off; nothing was written.
       if (err instanceof ApiError && err.code === 'GITHUB_RATE_LIMITED') throw err;
-      if ((err as { codeError?: boolean }).codeError) {
-        await updateOperations(ctx.db, ctx.shopId, [op.id], {
-          status: 'failed',
-          error: errorMessage(err).slice(0, 1000),
-          errorKind: 'code',
-          incrementAttempts: true,
-        });
-        continue;
-      }
-      ctx.logger.warn('update.fetch_failed', { path: op.path, error: errorMessage(err) });
-      await failOrRetry(ctx, [op], err);
+      logger.warn('sync.fetch_failed', { path: op.path, error: errorMessage(err) });
+      await failOrRetry(db, shopId, [op], err);
     }
   }
 
@@ -232,215 +153,104 @@ async function processUpserts(ctx: Ctx, ops: SyncOperationRow[]): Promise<void> 
   for (const batch of batches) {
     const batchOps = batch.map((b) => b.op);
     try {
-      const result = await upsertThemeFiles(ctx.admin, ctx.run.themeId, batch.map((b) => ({ filename: b.op.path, body: b.body })));
-      if (result.jobId && !result.jobDone && !(await waitForJob(ctx.admin, result.jobId))) {
-        // Accepted but still processing: retry later; re-upserting the same content is harmless.
-        await failOrRetry(ctx, batchOps, new ApiError(504, 'UPSTREAM_TIMEOUT', 'Shopify did not finish processing these files in time'));
-        continue;
+      const result = await upsertThemeFiles(
+        admin,
+        run.themeId,
+        batch.map((b) => ({ filename: b.op.path, body: b.body })),
+      );
+      if (result.jobId && !result.jobDone) {
+        const finished = await waitForJob(admin, result.jobId);
+        if (!finished) {
+          // Accepted but still processing: retry later; re-upserting the same content is harmless.
+          await failOrRetry(
+            db,
+            shopId,
+            batchOps,
+            new ApiError(504, 'UPSTREAM_TIMEOUT', 'Shopify did not finish processing these files in time'),
+          );
+          continue;
+        }
       }
       const byName = new Map(batchOps.map((o) => [o.path, o]));
-      const succeeded = result.succeeded.map((n) => byName.get(n)).filter((o): o is SyncOperationRow => !!o);
-      await updateOperations(ctx.db, ctx.shopId, succeeded.map((o) => o.id), {
-        status: 'succeeded',
-        error: null,
-        errorKind: null,
-        incrementAttempts: true,
-      });
+      await updateOperations(
+        db,
+        shopId,
+        result.succeeded.map((n) => byName.get(n)?.id).filter((id): id is string => !!id),
+        { status: 'succeeded', error: null, incrementAttempts: true },
+      );
       for (const failure of result.failed) {
         const op = byName.get(failure.filename);
-        if (!op) continue;
-        await updateOperations(ctx.db, ctx.shopId, [op.id], {
-          status: 'failed',
-          error: failure.message.slice(0, 1000),
-          errorKind: classifyUserError(failure.message),
-          incrementAttempts: true,
-        });
+        if (op) {
+          await updateOperations(db, shopId, [op.id], {
+            status: 'failed',
+            error: `${failure.code ?? 'ERROR'}: ${failure.message}`.slice(0, 1000),
+            incrementAttempts: true,
+          });
+        }
       }
-      await recordChecksums(
-        ctx,
-        succeeded.filter((o) => o.contentSource !== 'marker').map((o) => o.path),
-        ctx.run.kind === 'restore' ? null : ctx.run.commitSha,
-      );
     } catch (err) {
-      if (err instanceof ApiError && (err.code === 'THEME_WRITE_NOT_PERMITTED' || err.code === 'SHOPIFY_REAUTH_REQUIRED')) throw err;
-      ctx.logger.warn('update.upsert_batch_failed', { files: batchOps.length, error: errorMessage(err) });
-      await failOrRetry(ctx, batchOps, err);
+      if (err instanceof ApiError && (err.code === 'THEME_WRITE_NOT_PERMITTED' || err.code === 'SHOPIFY_REAUTH_REQUIRED')) {
+        throw err;
+      }
+      logger.warn('sync.upsert_batch_failed', { files: batchOps.length, error: errorMessage(err) });
+      await failOrRetry(db, shopId, batchOps, err);
     }
   }
 }
 
-async function processDeletes(ctx: Ctx, ops: SyncOperationRow[]): Promise<void> {
+async function processDeletes(
+  ctx: { db: Database; shopId: string; admin: ShopifyGraphqlClient; logger: Logger },
+  themeId: string,
+  ops: SyncOperationRow[],
+): Promise<void> {
+  const { db, shopId, admin, logger } = ctx;
   try {
-    const result = await deleteThemeFiles(ctx.admin, ctx.run.themeId, ops.map((o) => o.path));
+    const result = await deleteThemeFiles(admin, themeId, ops.map((o) => o.path));
     const byName = new Map(ops.map((o) => [o.path, o]));
     await updateOperations(
-      ctx.db,
-      ctx.shopId,
+      db,
+      shopId,
       result.succeeded.map((n) => byName.get(n)?.id).filter((id): id is string => !!id),
-      { status: 'succeeded', error: null, errorKind: null, incrementAttempts: true },
+      { status: 'succeeded', error: null, incrementAttempts: true },
     );
     for (const failure of result.failed) {
       const op = byName.get(failure.filename);
       if (op) {
-        await updateOperations(ctx.db, ctx.shopId, [op.id], {
+        await updateOperations(db, shopId, [op.id], {
           status: 'failed',
-          error: failure.message.slice(0, 1000),
-          errorKind: 'other',
+          error: `${failure.code ?? 'ERROR'}: ${failure.message}`.slice(0, 1000),
           incrementAttempts: true,
         });
       }
     }
-    await deleteFileChecksums(ctx.db, ctx.shopId, ctx.run.themeId, result.succeeded);
   } catch (err) {
-    if (err instanceof ApiError && (err.code === 'THEME_WRITE_NOT_PERMITTED' || err.code === 'SHOPIFY_REAUTH_REQUIRED')) throw err;
-    ctx.logger.warn('update.delete_batch_failed', { files: ops.length, error: errorMessage(err) });
-    await failOrRetry(ctx, ops, err);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Phase 3: finish
-// ---------------------------------------------------------------------------
-const LINE_LABEL = { staging: 'Staging', live: 'Live', other: 'Theme' } as const;
-
-/**
- * assets/theme-sync.json: the theme's own record of its last synced update.
- * It travels with the theme (a duplicated theme keeps it), so Theme Sync can
- * tell which commit any theme runs.
- */
-export function buildMarker(fields: {
-  sha: string;
-  message: string | null;
-  line: SyncHistoryRow['line'];
-  syncedAt: Date;
-  verifiedOnStagingAt: Date | null;
-  repository: string | null;
-  branch: string | null;
-}): string {
-  return `${JSON.stringify(
-    {
-      app: 'Theme Sync',
-      lastSyncedUpdate: fields.sha,
-      description: (fields.message ?? '').split('\n')[0] ?? '',
-      themeRole: LINE_LABEL[fields.line],
-      verifiedOnStaging: fields.verifiedOnStagingAt ? fields.verifiedOnStagingAt.toISOString() : null,
-      syncedOn: fields.syncedAt.toISOString(),
-      repository: fields.repository,
-      branch: fields.branch,
-    },
-    null,
-    2,
-  )}\n`;
-}
-
-export function markerContent(run: SyncHistoryRow, syncedAt: Date, verifiedOnStagingAt: Date | null): string {
-  return buildMarker({
-    sha: run.commitSha,
-    message: run.commitMessage,
-    line: run.line,
-    syncedAt,
-    verifiedOnStagingAt,
-    repository: run.repository,
-    branch: run.branch,
-  });
-}
-
-/** Saves the theme's last synced update (only called when every file succeeded). */
-async function recordLastSynced(ctx: Ctx, completedAt: Date, verifiedAt: Date | null): Promise<void> {
-  const { db, shopId, run } = ctx;
-  if (run.kind === 'restore') {
-    // The theme is back where it was before the restored run: put its record back too.
-    const source = run.restoredFromId ? await getSyncRun(db, shopId, run.restoredFromId) : undefined;
-    const previous = (source?.options as RunOptions | null)?.previousState;
-    if (source?.status === 'succeeded' && previous !== undefined) {
-      await upsertThemeState(db, shopId, run.themeId, {
-        lastSyncedSha: previous?.lastSyncedSha ?? null,
-        lastSyncedMessage: previous?.lastSyncedMessage ?? null,
-        lastSyncedBranch: previous?.lastSyncedBranch ?? null,
-        lastSyncedAt: previous?.lastSyncedAt ? new Date(previous.lastSyncedAt) : null,
-        lastSyncId: previous?.lastSyncId ?? null,
-        verifiedOnStagingAt: previous?.verifiedOnStagingAt ? new Date(previous.verifiedOnStagingAt) : null,
-      });
+    if (err instanceof ApiError && (err.code === 'THEME_WRITE_NOT_PERMITTED' || err.code === 'SHOPIFY_REAUTH_REQUIRED')) {
+      throw err;
     }
-    return;
+    logger.warn('sync.delete_batch_failed', { files: ops.length, error: errorMessage(err) });
+    await failOrRetry(db, shopId, ops, err);
   }
-  const before = await getThemeState(db, shopId, run.themeId);
-  const options = (run.options ?? {}) as RunOptions;
-  await transitionSyncRun(db, shopId, run.id, ['running'], 'running', {
-    options: {
-      ...options,
-      previousState: before
-        ? {
-            lastSyncedSha: before.lastSyncedSha,
-            lastSyncedMessage: before.lastSyncedMessage,
-            lastSyncedBranch: before.lastSyncedBranch,
-            lastSyncedAt: before.lastSyncedAt?.getTime() ?? null,
-            lastSyncId: before.lastSyncId,
-            verifiedOnStagingAt: before.verifiedOnStagingAt?.getTime() ?? null,
-          }
-        : null,
-    },
-  });
-  await upsertThemeState(db, shopId, run.themeId, {
-    lastSyncedSha: run.commitSha,
-    lastSyncedMessage: run.commitMessage,
-    lastSyncedBranch: run.branch,
-    lastSyncedAt: completedAt,
-    lastSyncId: run.id,
-    verifiedOnStagingAt: verifiedAt,
-  });
 }
 
-/** Recomputes counters and, when nothing is pending, finishes the run. */
-export async function finalizeIfComplete(ctx: Ctx): Promise<SyncStatus | null> {
-  const { db, shopId, run } = ctx;
-  const counts = await countOperations(db, shopId, run.id);
-  const progress = { filesSucceeded: counts.succeeded, filesFailed: counts.failed, filesSkipped: counts.skipped };
+/** Recomputes counters and, when nothing is pending, the final status. */
+export async function finalizeIfComplete(db: Database, shopId: string, syncId: string): Promise<SyncStatus | null> {
+  const counts = await countOperations(db, shopId, syncId);
+  const progress = {
+    filesSucceeded: counts.succeeded,
+    filesFailed: counts.failed,
+    filesSkipped: counts.skipped,
+  };
   if (counts.pending > 0) {
-    await transitionSyncRun(db, shopId, run.id, ['running'], 'running', progress);
+    await transitionSyncRun(db, shopId, syncId, ['running'], 'running', progress);
     return null;
   }
-
-  const marker = await getMarkerOperation(db, shopId, run.id);
-  if (counts.failed === 0) {
-    const completedAt = new Date();
-    const verifiedAt = run.line !== 'live' ? completedAt : run.verifiedOnStagingAt;
-    if (marker && marker.status === 'pending') {
-      // Written last, only after every other file succeeded.
-      try {
-        const result = await upsertThemeFiles(ctx.admin, run.themeId, [
-          { filename: THEME_SYNC_MARKER_PATH, body: { type: 'TEXT', value: markerContent(run, completedAt, verifiedAt) } },
-        ]);
-        if (result.failed.length > 0) throw new ApiError(502, 'SHOPIFY_ERROR', result.failed[0]!.message);
-        await updateOperations(db, shopId, [marker.id], { status: 'succeeded', error: null, incrementAttempts: true });
-      } catch (err) {
-        if (err instanceof ApiError && (err.code === 'THEME_WRITE_NOT_PERMITTED' || err.code === 'SHOPIFY_REAUTH_REQUIRED')) throw err;
-        await failOrRetry(ctx, [marker], err);
-        const latest = await getMarkerOperation(db, shopId, run.id);
-        if (latest?.status !== 'failed') return null;
-      }
-    }
-    const markerFailed = (await getMarkerOperation(db, shopId, run.id))?.status === 'failed';
-    if (!markerFailed) await recordLastSynced(ctx, completedAt, verifiedAt);
-    const status: SyncStatus = markerFailed ? 'partially_failed' : 'succeeded';
-    await transitionSyncRun(db, shopId, run.id, ['running', 'queued'], status, {
-      ...progress,
-      completedAt,
-      errorDetails: markerFailed
-        ? { code: 'MARKER_FAILED', message: 'Every file was updated, but the update record (assets/theme-sync.json) could not be written' }
-        : null,
-    });
-    return status;
-  }
-
-  if (marker && marker.status === 'pending') {
-    await updateOperations(db, shopId, [marker.id], { status: 'skipped', skipReason: 'Not written because some files failed' });
-  }
-  const status: SyncStatus = counts.succeeded > 0 ? 'partially_failed' : 'failed';
-  await transitionSyncRun(db, shopId, run.id, ['running', 'queued'], status, {
+  const status: SyncStatus =
+    counts.failed === 0 ? 'succeeded' : counts.succeeded > 0 ? 'partially_failed' : 'failed';
+  await transitionSyncRun(db, shopId, syncId, ['running', 'queued'], status, {
     ...progress,
     completedAt: new Date(),
-    errorDetails: { code: 'FILES_FAILED', message: `${counts.succeeded} of ${counts.succeeded + counts.failed} files updated` },
+    errorDetails:
+      counts.failed > 0 ? { code: 'FILES_FAILED', message: `${counts.failed} file(s) failed to sync` } : null,
   });
   return status;
 }
@@ -457,8 +267,8 @@ async function failRun(db: Database, shopId: string, syncId: string, code: strin
 }
 
 /**
- * Processes one run until it is finished or the deadline passes. Safe to call
- * concurrently or repeatedly for the same run.
+ * Processes pending operations of one sync until none remain or the deadline
+ * passes. Safe to call concurrently or repeatedly for the same sync.
  */
 export async function processSyncChunk(
   env: Env,
@@ -479,81 +289,62 @@ export async function processSyncChunk(
     return { done: true };
   }
 
-  const started = await transitionSyncRun(db, shopId, syncId, ['queued', 'running'], 'running', {
+  await transitionSyncRun(db, shopId, syncId, ['queued', 'running'], 'running', {
     startedAt: run.startedAt ?? new Date(),
   });
-  if (!started) return { done: true };
 
   let admin: ShopifyGraphqlClient;
+  let github: GitHubClient;
   try {
     admin = await createAdminClientForShop(env, db, shop, logger, { fetchImpl: options.fetchImpl });
-    // The theme must still exist and be writable; Staging must not have become the published theme.
+    ({ client: github } = await createGithubClientForShop(env, db, shop, logger, { fetchImpl: options.fetchImpl }));
+
+    // The theme must still exist in this shop and be writable; a theme published
+    // after the preview must not be modified without live-theme confirmation.
     const theme = await getTheme(admin, run.themeId);
-    if (!theme) throw new ApiError(404, 'NOT_FOUND', 'The theme no longer exists in this store');
-    if (!theme.writable) throw new ApiError(409, 'THEME_NOT_WRITABLE', `The theme is ${theme.role} and cannot be changed`);
-    if (theme.isLive && run.line !== 'live') {
-      throw new ApiError(409, 'THEME_NOT_WRITABLE', 'This theme was published after the update was confirmed; the published theme only receives tested updates');
+    if (!theme) throw new ApiError(404, 'NOT_FOUND', 'The target theme no longer exists');
+    if (!theme.writable) throw new ApiError(409, 'THEME_NOT_WRITABLE', `The theme is ${theme.role} and cannot be modified`);
+    const confirmedLive = (run.options as { confirmedLive?: boolean } | null)?.confirmedLive === true;
+    if (theme.isLive && !confirmedLive) {
+      throw new ApiError(
+        409,
+        'LIVE_THEME_CONFIRMATION_REQUIRED',
+        'The theme became the live theme after this sync was confirmed. Preview again to confirm.',
+      );
     }
   } catch (err) {
-    if (isTransient(err)) return { done: false, retryAfterSeconds: err instanceof ApiError ? (err.retryAfter ?? 30) : 30 };
-    await failRun(db, shopId, syncId, err instanceof ApiError ? err.code : 'INTERNAL_ERROR', errorMessage(err));
-    logger.error('update.setup_failed', { error: errorMessage(err) });
+    if (isTransient(err)) {
+      return { done: false, retryAfterSeconds: err instanceof ApiError ? (err.retryAfter ?? 30) : 30 };
+    }
+    const apiErr = err instanceof ApiError ? err : null;
+    await failRun(db, shopId, syncId, apiErr?.code ?? 'INTERNAL_ERROR', errorMessage(err));
+    logger.error('sync.setup_failed', { error: errorMessage(err) });
     return { done: true };
   }
 
-  let githubPromise: Promise<GitHubClient> | null = null;
-  const ctx: Ctx = {
-    db,
-    shopId,
-    run: started,
-    admin,
-    kv: env.KV,
-    logger,
-    fetchImpl: options.fetchImpl,
-    backoff: 0,
-    github: () =>
-      (githubPromise ??= createGithubClientForShop(env, db, shop, logger, { fetchImpl: options.fetchImpl }).then((g) => g.client)),
-  };
-
+  const ctx = { db, shopId, github, admin, logger };
   try {
-    // Phase 1: save every affected file before any file changes.
     while (Date.now() < options.deadline) {
-      const ops = await listOperationsNeedingBackup(db, shopId, syncId, THEME_WRITE_BATCH_LIMIT);
-      if (ops.length === 0) break;
-      await backupBatch(ctx, ops);
-    }
-    if ((await listOperationsNeedingBackup(db, shopId, syncId, 1)).length > 0) return { done: false };
-
-    // Phase 2: apply.
-    while (Date.now() < options.deadline && ctx.backoff === 0) {
       const pending = await listPendingOperations(db, shopId, syncId, THEME_WRITE_BATCH_LIMIT);
       if (pending.length === 0) break;
-      const upserts = pending.filter((op) => op.action === 'upsert');
       const deletes = pending.filter((op) => op.action === 'delete');
-      if (upserts.length > 0) await processUpserts(ctx, upserts);
-      if (deletes.length > 0) await processDeletes(ctx, deletes);
+      const upserts = pending.filter((op) => op.action === 'upsert');
+      if (upserts.length > 0) await processUpserts(ctx, run, upserts);
+      if (deletes.length > 0) await processDeletes(ctx, run.themeId, deletes);
     }
   } catch (err) {
     if (err instanceof ApiError && err.code === 'GITHUB_RATE_LIMITED') {
-      logger.warn('update.github_rate_limited', { retryAfter: err.retryAfter });
+      logger.warn('sync.github_rate_limited', { retryAfter: err.retryAfter });
+      await finalizeIfComplete(db, shopId, syncId);
       return { done: false, retryAfterSeconds: err.retryAfter ?? 60 };
     }
-    if (isTransient(err)) return { done: false, retryAfterSeconds: err instanceof ApiError ? (err.retryAfter ?? 30) : 30 };
     // Permission / auth problems apply to every remaining file: stop the run.
     await failRun(db, shopId, syncId, err instanceof ApiError ? err.code : 'INTERNAL_ERROR', errorMessage(err));
-    logger.error('update.run_failed', { error: errorMessage(err) });
+    logger.error('sync.run_failed', { error: errorMessage(err) });
     return { done: true };
   }
 
-  try {
-    const status = await finalizeIfComplete(ctx);
-    if (status) {
-      logger.info('update.completed', { status, kind: run.kind, line: run.line });
-      return { done: true };
-    }
-  } catch (err) {
-    await failRun(db, shopId, syncId, err instanceof ApiError ? err.code : 'INTERNAL_ERROR', errorMessage(err));
-    return { done: true };
-  }
-  return { done: false, retryAfterSeconds: ctx.backoff || undefined };
+  const status = await finalizeIfComplete(db, shopId, syncId);
+  if (status) logger.info('sync.completed', { status });
+  return { done: status !== null };
 }

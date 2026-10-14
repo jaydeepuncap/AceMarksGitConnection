@@ -11,12 +11,7 @@ const HINTS: Partial<Record<string, string>> = {
     'Shopify requires an approved theme-modification exemption (plus write_themes) before apps can edit theme files.',
   SHOPIFY_REAUTH_REQUIRED: 'Reload the app from Shopify Admin to re-authorize it.',
   RATE_LIMITED: 'Too many requests. Wait a few seconds and try again.',
-  PREVIEW_EXPIRED: 'Reviews are valid for 30 minutes. Choose the update again on the theme page.',
-  NOT_VERIFIED_ON_STAGING: 'Apply the update to an unpublished theme first; once it fully completes it can be published to Live.',
-  CODE_ERRORS: 'Ask your developer to fix the files listed in the code check and save a new update.',
-  DIRECT_EDITS_FOUND: 'Some files were edited in Shopify. Review them and choose "Replace and continue" to replace them.',
-  UPDATE_IN_PROGRESS: 'Another update is running on this theme. Wait for it to finish.',
-  SETUP_INCOMPLETE: 'Finish the setup in Settings (GitHub connection and master repository).',
+  PREVIEW_EXPIRED: 'Previews are valid for 30 minutes. Generate a new preview.',
   SERVER_MISCONFIGURED:
     'The app server is missing required secrets. An administrator must set them with `wrangler secret put` and redeploy.',
   DATABASE_NOT_MIGRATED:

@@ -1,13 +1,12 @@
 import { useEffect } from 'react';
 import { Link, Route, Routes, useNavigate } from 'react-router-dom';
 import { NavMenu } from '@shopify/app-bridge-react';
-import Commits from './routes/Commits';
-import History from './routes/History';
-import Rollout from './routes/Rollout';
+import Dashboard from './routes/Dashboard';
 import Settings from './routes/Settings';
-import ThemeDetail from './routes/ThemeDetail';
+import Repositories from './routes/Repositories';
 import Themes from './routes/Themes';
-import UpdateRun from './routes/UpdateRun';
+import Commits from './routes/Commits';
+import SyncHistory from './routes/SyncHistory';
 import { isEmbedded } from './lib/app-bridge';
 
 /**
@@ -28,7 +27,7 @@ function useAppBridgeNavigation() {
 
 function NotEmbedded() {
   return (
-    <s-page heading="Theme Sync">
+    <s-page heading="Ace Marks Git Connection">
       <s-banner tone="warning" heading="Open this app from Shopify Admin">
         <s-paragraph>
           This is an embedded Shopify app. Open it from your store's Apps section so it can authenticate securely.
@@ -46,25 +45,22 @@ export default function App() {
     <>
       <NavMenu>
         <Link to="/" rel="home">
-          Themes
+          Dashboard
         </Link>
-        <Link to="/themes">Themes</Link>
         <Link to="/commits">Commits</Link>
-        <Link to="/history">Sync history</Link>
-        <Link to="/rollout">Roll out</Link>
+        <Link to="/sync-history">Sync history</Link>
+        <Link to="/themes">Themes</Link>
+        <Link to="/repositories">Repositories</Link>
         <Link to="/settings">Settings</Link>
       </NavMenu>
       <Routes>
-        <Route path="/" element={<Themes />} />
-        <Route path="/themes" element={<Themes />} />
-        <Route path="/themes/:id" element={<ThemeDetail />} />
-        <Route path="/updates/:id" element={<UpdateRun />} />
-        <Route path="/rollout" element={<Rollout />} />
-        <Route path="/commits" element={<Commits />} />
-        <Route path="/history" element={<History />} />
-        <Route path="/sync-history" element={<History />} />
+        <Route path="/" element={<Dashboard />} />
         <Route path="/settings" element={<Settings />} />
-        <Route path="*" element={<Themes />} />
+        <Route path="/repositories" element={<Repositories />} />
+        <Route path="/themes" element={<Themes />} />
+        <Route path="/commits" element={<Commits />} />
+        <Route path="/sync-history" element={<SyncHistory />} />
+        <Route path="*" element={<Dashboard />} />
       </Routes>
     </>
   );

@@ -1,110 +1,108 @@
-import { useNavigate } from 'react-router-dom';
 import { AppLayout } from '../components/AppLayout';
 import { ErrorBanner } from '../components/ErrorBanner';
 import { LoadingState } from '../components/LoadingState';
-import { StoreHeader } from '../components/StoreHeader';
-import { PublishedBadge } from '../components/ThemeBadges';
 import { api } from '../lib/api-client';
-import { firstLine, formatDate, STATUS_BADGE } from '../lib/format';
-import { useApiQuery } from '../lib/hooks';
-import type { ThemeOverviewItem } from '../lib/types';
+import { showToast } from '../lib/app-bridge';
+import { formatDate, THEME_ROLE_BADGE } from '../lib/format';
+import { useApiQuery, useMutation, useNavigateHandler } from '../lib/hooks';
 
-export const themePath = (themeId: string) => `/themes/${themeId.split('/').pop()}`;
-
-/** The published theme is the Live theme; every other theme is a test theme. */
-export function RoleText({ theme }: { theme: ThemeOverviewItem['theme'] }) {
-  return <s-text color="subdued">{theme.isLive ? 'Live · customers see this' : 'Test theme'}</s-text>;
-}
-
-/** Step 01 — every theme of the store with the update it last synced. */
 export default function Themes() {
-  const navigate = useNavigate();
-  const overview = useApiQuery(() => api.overview(), []);
-  const themes = useApiQuery(() => api.themes.overview(), []);
+  const go = useNavigateHandler();
+  const themes = useApiQuery(() => api.themes.list(), []);
+  const settings = useApiQuery(() => api.settings.get(), []);
+  const select = useMutation(api.settings.update);
 
   if (themes.loading && !themes.data) return <LoadingState title="Themes" />;
-  const refresh = () => api.themes.overview(true).then(themes.setData).catch(() => themes.reload());
+
+  const current = settings.data?.settings.defaultThemeId;
+  const items = themes.data ?? [];
+
+  const choose = async (id: string, name: string) => {
+    const result = await select.run({ defaultThemeId: id });
+    if (result) {
+      settings.setData(result);
+      showToast(`Target theme set to ${name}`);
+    }
+  };
 
   return (
     <AppLayout
       title="Themes"
-      secondaryActions={[{ content: 'Refresh', onAction: refresh, loading: themes.loading }]}
-      banners={<ErrorBanner error={themes.error} onRetry={themes.reload} />}
-    >
-      <s-section>
-        <s-stack gap="base">
-          <StoreHeader store={overview.data?.store ?? null} />
-          {!!overview.data?.setupMissing.length && (
-            <s-banner tone="info" heading="Finish the one-time setup">
-              <s-unordered-list>
-                {overview.data.setupMissing.map((step) => (
-                  <s-list-item key={step}>{step}</s-list-item>
-                ))}
-              </s-unordered-list>
-              <s-button slot="secondary-actions" onClick={() => navigate('/settings')}>
-                Open settings
-              </s-button>
+      subtitle="Pick the theme that syncs write to by default"
+      secondaryActions={[{ content: 'Refresh', onAction: () => themes.reload() }]}
+      banners={
+        <>
+          <ErrorBanner error={themes.error} onRetry={themes.reload} />
+          <ErrorBanner error={select.error} heading="Theme could not be selected" onDismiss={select.clearError} />
+          {settings.data && !settings.data.shop.canWriteThemes && (
+            <s-banner tone="warning" heading="Theme write access not granted">
+              <s-paragraph>
+                The app can list themes but cannot modify files until the write_themes scope is granted.
+              </s-paragraph>
             </s-banner>
           )}
-          <s-table>
+        </>
+      }
+    >
+      <s-section padding="none" accessibilityLabel="Themes">
+        {items.length === 0 ? (
+          <s-box padding="base">
+            <s-paragraph color="subdued">This store has no online store themes.</s-paragraph>
+          </s-box>
+        ) : (
+          <s-table variant="auto">
             <s-table-header-row>
               <s-table-header listSlot="primary">Theme</s-table-header>
-              <s-table-header listSlot="inline">Status</s-table-header>
-              <s-table-header listSlot="secondary">Last synced</s-table-header>
-              <s-table-header>Last update</s-table-header>
-              <s-table-header>Action</s-table-header>
+              <s-table-header listSlot="inline">Role</s-table-header>
+              <s-table-header listSlot="labeled">Updated</s-table-header>
+              <s-table-header>Actions</s-table-header>
             </s-table-header-row>
             <s-table-body>
-              {(themes.data ?? []).map((item) => (
-                <s-table-row key={item.theme.id} clickDelegate={`open-${item.theme.numericId}`}>
-                  <s-table-cell>
-                    <s-stack gap="small-300">
-                      <s-text type="strong">{item.theme.name}</s-text>
-                      <RoleText theme={item.theme} />
-                    </s-stack>
-                  </s-table-cell>
-                  <s-table-cell>
-                    <s-stack direction="inline" gap="small-200">
-                      <PublishedBadge theme={item.theme} />
-                      {item.theme.processing && <s-badge tone="caution">Processing</s-badge>}
-                    </s-stack>
-                  </s-table-cell>
-                  <s-table-cell>
-                    {item.lastSynced ? (
-                      <s-stack gap="small-300">
-                        <s-text>
-                          <s-text type="strong">{item.lastSynced.shortSha}</s-text> {firstLine(item.lastSynced.message)}
-                        </s-text>
-                        <s-text color="subdued">{formatDate(item.lastSynced.syncedAt)}</s-text>
+              {items.map((theme) => {
+                const role = THEME_ROLE_BADGE[theme.role];
+                return (
+                  <s-table-row key={theme.id}>
+                    <s-table-cell>
+                      <s-stack gap="none">
+                        <s-stack direction="inline" gap="small-200" alignItems="center">
+                          <s-text type="strong">{theme.name}</s-text>
+                          {current === theme.id && <s-badge tone="success">Default target</s-badge>}
+                          {theme.processing && <s-badge tone="caution">Processing</s-badge>}
+                          {theme.processingFailed && <s-badge tone="critical">Processing failed</s-badge>}
+                        </s-stack>
+                        <s-text color="subdued">ID {theme.numericId}</s-text>
                       </s-stack>
-                    ) : (
-                      <s-text color="subdued">No sync yet</s-text>
-                    )}
-                  </s-table-cell>
-                  <s-table-cell>
-                    {item.activeRun ? (
-                      <s-badge tone="info">{`Updating ${item.activeRun.progress.succeeded}/${item.activeRun.progress.total}`}</s-badge>
-                    ) : item.lastRun ? (
-                      <s-badge tone={STATUS_BADGE[item.lastRun.status].tone}>{STATUS_BADGE[item.lastRun.status].label}</s-badge>
-                    ) : (
-                      <s-text color="subdued">—</s-text>
-                    )}
-                  </s-table-cell>
-                  <s-table-cell>
-                    <s-button id={`open-${item.theme.numericId}`} variant="tertiary" onClick={() => navigate(themePath(item.theme.id))}>
-                      Open →
-                    </s-button>
-                  </s-table-cell>
-                </s-table-row>
-              ))}
+                    </s-table-cell>
+                    <s-table-cell>
+                      <s-badge tone={role.tone}>{role.label}</s-badge>
+                    </s-table-cell>
+                    <s-table-cell>{formatDate(theme.updatedAt)}</s-table-cell>
+                    <s-table-cell>
+                      <s-stack direction="inline" gap="small-200">
+                        <s-button
+                          disabled={!theme.writable || current === theme.id}
+                          loading={select.pending}
+                          tone={theme.isLive ? 'critical' : 'auto'}
+                          accessibilityLabel={`Use ${theme.name} as target theme`}
+                          onClick={() => choose(theme.id, theme.name)}
+                        >
+                          {theme.isLive ? 'Target live theme' : 'Use as target'}
+                        </s-button>
+                        <s-button
+                          variant="tertiary"
+                          disabled={!theme.writable}
+                          onClick={go(`/commits?themeId=${encodeURIComponent(theme.id)}`)}
+                        >
+                          Sync a commit
+                        </s-button>
+                      </s-stack>
+                    </s-table-cell>
+                  </s-table-row>
+                );
+              })}
             </s-table-body>
           </s-table>
-          <s-text color="subdued">
-            Test an update on any unpublished theme; once it fully completes it can be published to the Live (published)
-            theme. Each theme records its last synced update in assets/theme-sync.json. Theme Sync never changes which theme
-            is published in Shopify.
-          </s-text>
-        </s-stack>
+        )}
       </s-section>
     </AppLayout>
   );

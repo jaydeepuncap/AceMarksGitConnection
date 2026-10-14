@@ -4,7 +4,7 @@
  * clause, so a request authenticated for shop A can never read or modify rows
  * that belong to shop B, even with a guessed record ID.
  */
-import { and, desc, eq, inArray, isNotNull, isNull, ne, or, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, ne, sql } from 'drizzle-orm';
 import { drizzle, type DrizzleD1Database } from 'drizzle-orm/d1';
 import * as schema from '../../drizzle/schema';
 import {
@@ -14,24 +14,20 @@ import {
   shops,
   syncHistory,
   syncOperations,
-  themeFileChecksums,
-  themeStates,
   type AppSettingsRow,
   type GithubConnection,
   type Shop,
   type SyncHistoryRow,
   type SyncOperationRow,
   type SyncStatus,
-  type ThemeLine,
-  type ThemeStateRow,
 } from '../../drizzle/schema';
 import {
-  DEFAULT_PROTECTED_PATTERNS,
   DEFAULT_SYNC_PREFERENCES,
   type AppSettings,
   type GithubConnectionInfo,
+  type SyncOperation,
   type SyncPreferences,
-  type SyncedUpdate,
+  type SyncRun,
 } from '../../shared/api-types';
 
 export type Database = DrizzleD1Database<typeof schema>;
@@ -138,15 +134,6 @@ export async function markShopUninstalled(db: Database, shopDomain: string): Pro
     .where(eq(shops.shopDomain, shopDomain));
 }
 
-export async function findShopsByDomains(db: Database, domains: string[]): Promise<Shop[]> {
-  if (domains.length === 0) return [];
-  return db.select().from(shops).where(inArray(shops.shopDomain, domains));
-}
-
-export async function updateShopName(db: Database, shopId: string, shopName: string): Promise<void> {
-  await db.update(shops).set({ shopName }).where(eq(shops.id, shopId));
-}
-
 export async function updateShopScopes(db: Database, shopDomain: string, scopes: string): Promise<void> {
   await db.update(shops).set({ scopes }).where(eq(shops.shopDomain, shopDomain));
 }
@@ -182,31 +169,25 @@ export async function deleteExpiredSessions(db: Database, before = new Date()): 
 // ---------------------------------------------------------------------------
 // Settings
 // ---------------------------------------------------------------------------
-const strings = (value: unknown): string[] | null =>
-  Array.isArray(value) ? value.filter((p): p is string => typeof p === 'string') : null;
-
 export function normalizePreferences(raw: unknown): SyncPreferences {
-  const value = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
-  const ignore = strings(value.ignorePatterns);
-  const protectedPatterns = strings(value.protectedPatterns);
+  const value = (raw && typeof raw === 'object' ? raw : {}) as Partial<SyncPreferences>;
   return {
+    strategy: value.strategy === 'full_snapshot' ? 'full_snapshot' : DEFAULT_SYNC_PREFERENCES.strategy,
+    allowDeletes: typeof value.allowDeletes === 'boolean' ? value.allowDeletes : DEFAULT_SYNC_PREFERENCES.allowDeletes,
     themeRoot: typeof value.themeRoot === 'string' ? value.themeRoot : DEFAULT_SYNC_PREFERENCES.themeRoot,
-    protectedPatterns: protectedPatterns ?? [...DEFAULT_PROTECTED_PATTERNS],
-    // Settings saved before protected files existed excluded settings_data.json via the
-    // ignore list; it is a protected file now.
-    ignorePatterns: protectedPatterns
-      ? (ignore ?? [])
-      : (ignore ?? []).filter((p) => p !== 'config/settings_data.json'),
+    ignorePatterns: Array.isArray(value.ignorePatterns)
+      ? value.ignorePatterns.filter((p): p is string => typeof p === 'string')
+      : [...DEFAULT_SYNC_PREFERENCES.ignorePatterns],
   };
 }
 
 function toSettingsDto(row: AppSettingsRow | undefined): AppSettings {
   return {
-    repository: row?.defaultRepository ?? null,
-    branch: row?.defaultBranch ?? null,
-    stagingTheme: row?.stagingThemeId ? { id: row.stagingThemeId, name: row.stagingThemeName ?? 'Staging' } : null,
-    liveTheme: row?.liveThemeId ? { id: row.liveThemeId, name: row.liveThemeName ?? 'Live' } : null,
-    preferences: normalizePreferences(row?.syncPreferences),
+    defaultRepository: row?.defaultRepository ?? null,
+    defaultBranch: row?.defaultBranch ?? null,
+    defaultThemeId: row?.defaultThemeId ?? null,
+    defaultThemeName: row?.defaultThemeName ?? null,
+    syncPreferences: normalizePreferences(row?.syncPreferences),
     updatedAt: iso(row?.updatedAt),
   };
 }
@@ -219,10 +200,8 @@ export async function getSettings(db: Database, shopId: string): Promise<AppSett
 export interface SettingsWrite {
   defaultRepository?: string | null;
   defaultBranch?: string | null;
-  stagingThemeId?: string | null;
-  stagingThemeName?: string | null;
-  liveThemeId?: string | null;
-  liveThemeName?: string | null;
+  defaultThemeId?: string | null;
+  defaultThemeName?: string | null;
   syncPreferences?: SyncPreferences;
 }
 
@@ -301,90 +280,7 @@ export function toGithubConnectionDto(row: GithubConnection): GithubConnectionIn
 }
 
 // ---------------------------------------------------------------------------
-// Theme states ("last synced update") and file checksums
-// ---------------------------------------------------------------------------
-export function toSyncedUpdate(row: ThemeStateRow | undefined | null): SyncedUpdate | null {
-  if (!row?.lastSyncedSha) return null;
-  return {
-    sha: row.lastSyncedSha,
-    shortSha: row.lastSyncedSha.slice(0, 7),
-    message: row.lastSyncedMessage,
-    branch: row.lastSyncedBranch,
-    syncedAt: iso(row.lastSyncedAt),
-    verifiedOnStagingAt: iso(row.verifiedOnStagingAt),
-  };
-}
-
-export async function getThemeState(db: Database, shopId: string, themeId: string): Promise<ThemeStateRow | undefined> {
-  return db.query.themeStates.findFirst({ where: and(eq(themeStates.shopId, shopId), eq(themeStates.themeId, themeId)) });
-}
-
-export async function getThemeStates(db: Database, shopId: string, themeIds: string[]): Promise<Map<string, ThemeStateRow>> {
-  if (themeIds.length === 0) return new Map();
-  const rows = await db
-    .select()
-    .from(themeStates)
-    .where(and(eq(themeStates.shopId, shopId), inArray(themeStates.themeId, themeIds)));
-  return new Map(rows.map((r) => [r.themeId, r]));
-}
-
-export type ThemeStateWrite = Omit<typeof themeStates.$inferInsert, 'id' | 'shopId' | 'themeId' | 'createdAt' | 'updatedAt'>;
-
-export async function upsertThemeState(db: Database, shopId: string, themeId: string, values: ThemeStateWrite): Promise<void> {
-  await db
-    .insert(themeStates)
-    .values({ shopId, themeId, ...values })
-    .onConflictDoUpdate({ target: [themeStates.shopId, themeStates.themeId], set: { ...values, updatedAt: new Date() } });
-}
-
-export async function getFileChecksums(
-  db: Database,
-  shopId: string,
-  themeId: string,
-  paths: string[],
-): Promise<Map<string, string | null>> {
-  const out = new Map<string, string | null>();
-  for (const part of chunk(paths, 90)) {
-    const rows = await db
-      .select({ path: themeFileChecksums.path, checksum: themeFileChecksums.checksumMd5 })
-      .from(themeFileChecksums)
-      .where(
-        and(eq(themeFileChecksums.shopId, shopId), eq(themeFileChecksums.themeId, themeId), inArray(themeFileChecksums.path, part)),
-      );
-    for (const row of rows) out.set(row.path, row.checksum);
-  }
-  return out;
-}
-
-export async function saveFileChecksums(
-  db: Database,
-  shopId: string,
-  themeId: string,
-  entries: { path: string; checksumMd5: string | null; commitSha: string | null }[],
-): Promise<void> {
-  for (const part of chunk(entries, 15)) {
-    await db
-      .insert(themeFileChecksums)
-      .values(part.map((e) => ({ shopId, themeId, ...e })))
-      .onConflictDoUpdate({
-        target: [themeFileChecksums.shopId, themeFileChecksums.themeId, themeFileChecksums.path],
-        set: { checksumMd5: sql`excluded.checksum_md5`, commitSha: sql`excluded.commit_sha`, updatedAt: new Date() },
-      });
-  }
-}
-
-export async function deleteFileChecksums(db: Database, shopId: string, themeId: string, paths: string[]): Promise<void> {
-  for (const part of chunk(paths, 90)) {
-    await db
-      .delete(themeFileChecksums)
-      .where(
-        and(eq(themeFileChecksums.shopId, shopId), eq(themeFileChecksums.themeId, themeId), inArray(themeFileChecksums.path, part)),
-      );
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Runs (sync_history) & operations
+// Sync history & operations
 // ---------------------------------------------------------------------------
 export type NewSyncRun = Omit<typeof syncHistory.$inferInsert, 'id' | 'shopId' | 'status'> & { id: string };
 export type NewSyncOperation = Omit<
@@ -393,17 +289,16 @@ export type NewSyncOperation = Omit<
 >;
 
 // Upper bound on columns bound per sync_operations row (incl. defaulted ones).
-const OPERATION_COLUMNS = 23;
+const OPERATION_COLUMNS = 16;
 
-/** Persists a run (status "previewed" unless given) plus one row per planned file. */
-export async function createRun(
+/** Persists a preview: the run row (status "previewed") plus one row per planned file. */
+export async function createSyncPreview(
   db: Database,
   shopId: string,
   run: NewSyncRun,
   operations: NewSyncOperation[],
-  status: SyncStatus = 'previewed',
 ): Promise<void> {
-  await db.insert(syncHistory).values({ ...run, shopId, status });
+  await db.insert(syncHistory).values({ ...run, shopId, status: 'previewed' });
   try {
     const rows = operations.map((op) => ({ ...op, id: crypto.randomUUID(), syncId: run.id, shopId }));
     const statements = chunk(rows, Math.floor(D1_MAX_PARAMS / OPERATION_COLUMNS)).map((part) =>
@@ -425,87 +320,24 @@ export async function getSyncRun(db: Database, shopId: string, syncId: string): 
   });
 }
 
-/** Update history: confirmed runs only (previews that were never confirmed are not history). */
-export async function listHistory(
+export async function listSyncRuns(
   db: Database,
   shopId: string,
-  opts: {
-    page: number;
-    perPage: number;
-    line?: ThemeLine;
-    themeId?: string;
-    status?: SyncStatus;
-    /** Only runs whose update came from this branch. */
-    branch?: string;
-    /** Also include runs recorded without a branch (they used the store's default branch). */
-    includeUnknownBranch?: boolean;
-  },
+  opts: { page: number; perPage: number; status?: SyncStatus; includePreviews?: boolean },
 ): Promise<{ rows: SyncHistoryRow[]; hasNextPage: boolean }> {
-  const filters = [eq(syncHistory.shopId, shopId), isNotNull(syncHistory.confirmedAt)];
-  if (opts.line) filters.push(eq(syncHistory.line, opts.line));
-  if (opts.themeId) filters.push(eq(syncHistory.themeId, opts.themeId));
-  if (opts.branch) {
-    filters.push(
-      opts.includeUnknownBranch
-        ? (or(eq(syncHistory.branch, opts.branch), isNull(syncHistory.branch)) as ReturnType<typeof eq>)
-        : eq(syncHistory.branch, opts.branch),
-    );
-  }
+  const filters = [eq(syncHistory.shopId, shopId)];
   if (opts.status) filters.push(eq(syncHistory.status, opts.status));
+  else if (!opts.includePreviews) {
+    filters.push(ne(syncHistory.status, 'previewed'), ne(syncHistory.status, 'expired'));
+  }
   const rows = await db
     .select()
     .from(syncHistory)
     .where(and(...filters))
-    .orderBy(desc(syncHistory.confirmedAt))
+    .orderBy(desc(syncHistory.initiatedAt))
     .limit(opts.perPage + 1)
     .offset((opts.page - 1) * opts.perPage);
   return { rows: rows.slice(0, opts.perPage), hasNextPage: rows.length > opts.perPage };
-}
-
-/** Which of `shas` were fully applied to the theme (completed update, publish, go back or baseline). */
-export async function appliedCommits(db: Database, shopId: string, themeId: string, shas: string[]): Promise<Set<string>> {
-  if (shas.length === 0) return new Set();
-  const rows = await db
-    .selectDistinct({ sha: syncHistory.commitSha })
-    .from(syncHistory)
-    .where(
-      and(
-        eq(syncHistory.shopId, shopId),
-        eq(syncHistory.themeId, themeId),
-        eq(syncHistory.status, 'succeeded'),
-        inArray(syncHistory.kind, ['update', 'publish', 'rollback', 'baseline']),
-        inArray(syncHistory.commitSha, shas.slice(0, 90)),
-      ),
-    );
-  return new Set(rows.map((r) => r.sha));
-}
-
-/** Which of `shas` fully completed on an unpublished theme (can be published to Live). */
-export async function verifiedCommits(db: Database, shopId: string, shas: string[]): Promise<Set<string>> {
-  if (shas.length === 0) return new Set();
-  const rows = await db
-    .selectDistinct({ sha: syncHistory.commitSha })
-    .from(syncHistory)
-    .where(
-      and(
-        eq(syncHistory.shopId, shopId),
-        eq(syncHistory.status, 'succeeded'),
-        inArray(syncHistory.kind, ['update', 'rollback']),
-        inArray(syncHistory.line, ['staging', 'other']),
-        inArray(syncHistory.commitSha, shas.slice(0, 90)),
-      ),
-    );
-  return new Set(rows.map((r) => r.sha));
-}
-
-export async function latestRunForTheme(db: Database, shopId: string, themeId: string): Promise<SyncHistoryRow | undefined> {
-  const [row] = await db
-    .select()
-    .from(syncHistory)
-    .where(and(eq(syncHistory.shopId, shopId), eq(syncHistory.themeId, themeId), isNotNull(syncHistory.confirmedAt)))
-    .orderBy(desc(syncHistory.confirmedAt))
-    .limit(1);
-  return row;
 }
 
 export async function listSyncOperations(db: Database, shopId: string, syncId: string): Promise<SyncOperationRow[]> {
@@ -516,7 +348,6 @@ export async function listSyncOperations(db: Database, shopId: string, syncId: s
     .orderBy(syncOperations.path);
 }
 
-/** Pending file writes, excluding the assets/theme-sync.json marker (written last). */
 export async function listPendingOperations(
   db: Database,
   shopId: string,
@@ -527,48 +358,10 @@ export async function listPendingOperations(
     .select()
     .from(syncOperations)
     .where(
-      and(
-        eq(syncOperations.syncId, syncId),
-        eq(syncOperations.shopId, shopId),
-        eq(syncOperations.status, 'pending'),
-        ne(syncOperations.contentSource, 'marker'),
-      ),
+      and(eq(syncOperations.syncId, syncId), eq(syncOperations.shopId, shopId), eq(syncOperations.status, 'pending')),
     )
     .orderBy(syncOperations.action, syncOperations.path)
     .limit(limit);
-}
-
-/** Operations whose current theme file has not been saved to the backup yet. */
-export async function listOperationsNeedingBackup(
-  db: Database,
-  shopId: string,
-  syncId: string,
-  limit: number,
-): Promise<SyncOperationRow[]> {
-  return db
-    .select()
-    .from(syncOperations)
-    .where(
-      and(
-        eq(syncOperations.syncId, syncId),
-        eq(syncOperations.shopId, shopId),
-        eq(syncOperations.status, 'pending'),
-        eq(syncOperations.backupState, 'pending'),
-      ),
-    )
-    .orderBy(syncOperations.path)
-    .limit(limit);
-}
-
-export async function getMarkerOperation(db: Database, shopId: string, syncId: string): Promise<SyncOperationRow | undefined> {
-  const [row] = await db
-    .select()
-    .from(syncOperations)
-    .where(
-      and(eq(syncOperations.syncId, syncId), eq(syncOperations.shopId, shopId), eq(syncOperations.contentSource, 'marker')),
-    )
-    .limit(1);
-  return row;
 }
 
 /** Atomic state transition. Returns the updated row, or undefined if the run was not in an allowed state. */
@@ -588,23 +381,11 @@ export async function transitionSyncRun(
   return row;
 }
 
-/** True when the database refused a second active run for the same theme. */
-export function isActiveRunConflict(err: unknown): boolean {
-  for (let e: unknown = err, depth = 0; e instanceof Error && depth < 4; e = e.cause, depth++) {
-    if (/UNIQUE constraint failed: sync_history\.shop_id, sync_history\.theme_id|sync_history_one_active_per_theme/i.test(e.message)) {
-      return true;
-    }
-  }
-  return false;
-}
-
 export async function updateOperations(
   db: Database,
   shopId: string,
   ids: string[],
-  values: Partial<Pick<SyncOperationRow, 'status' | 'error' | 'errorKind' | 'backupState' | 'backupKey' | 'skipReason'>> & {
-    incrementAttempts?: boolean;
-  },
+  values: Partial<Pick<SyncOperationRow, 'status' | 'error'>> & { incrementAttempts?: boolean },
 ): Promise<void> {
   if (ids.length === 0) return;
   const { incrementAttempts, ...rest } = values;
@@ -620,20 +401,16 @@ export async function updateOperations(
   }
 }
 
-/** Resets failed files (and the marker) to pending so a retry re-applies only them. */
+/** Resets failed operations to pending so a retry re-applies them (idempotent writes). */
 export async function resetFailedOperations(db: Database, shopId: string, syncId: string): Promise<number> {
   const rows = await db
     .update(syncOperations)
-    .set({ status: 'pending', error: null, errorKind: null, skipReason: null, updatedAt: new Date() })
+    .set({ status: 'pending', error: null, updatedAt: new Date() })
     .where(
-      and(
-        eq(syncOperations.syncId, syncId),
-        eq(syncOperations.shopId, shopId),
-        sql`(${syncOperations.status} = 'failed' or ${syncOperations.contentSource} = 'marker')`,
-      ),
+      and(eq(syncOperations.syncId, syncId), eq(syncOperations.shopId, shopId), eq(syncOperations.status, 'failed')),
     )
-    .returning({ id: syncOperations.id, source: syncOperations.contentSource });
-  return rows.filter((r) => r.source !== 'marker').length;
+    .returning({ id: syncOperations.id });
+  return rows.length;
 }
 
 export interface OperationCounts {
@@ -641,32 +418,20 @@ export interface OperationCounts {
   succeeded: number;
   failed: number;
   skipped: number;
-  /** Files whose previous version is saved (or that did not exist before). */
-  backedUp: number;
-  /** Files that need a backup before they are changed. */
-  backupTotal: number;
 }
 
-/** Counts file operations (the theme-sync.json marker is not a file of the update). */
 export async function countOperations(db: Database, shopId: string, syncId: string): Promise<OperationCounts> {
   const rows = await db
-    .select({ status: syncOperations.status, backup: syncOperations.backupState, count: sql<number>`count(*)` })
+    .select({ status: syncOperations.status, count: sql<number>`count(*)` })
     .from(syncOperations)
-    .where(
-      and(eq(syncOperations.syncId, syncId), eq(syncOperations.shopId, shopId), ne(syncOperations.contentSource, 'marker')),
-    )
-    .groupBy(syncOperations.status, syncOperations.backupState);
-  const counts: OperationCounts = { pending: 0, succeeded: 0, failed: 0, skipped: 0, backedUp: 0, backupTotal: 0 };
-  for (const row of rows) {
-    const n = Number(row.count);
-    counts[row.status] += n;
-    if (row.backup) counts.backupTotal += n;
-    if (row.backup === 'saved' || row.backup === 'absent') counts.backedUp += n;
-  }
+    .where(and(eq(syncOperations.syncId, syncId), eq(syncOperations.shopId, shopId)))
+    .groupBy(syncOperations.status);
+  const counts: OperationCounts = { pending: 0, succeeded: 0, failed: 0, skipped: 0 };
+  for (const row of rows) counts[row.status] = Number(row.count);
   return counts;
 }
 
-/** Is another run already writing to this theme? */
+/** Is another run already writing to this theme? (prevents concurrent conflicting writes) */
 export async function findActiveSyncForTheme(
   db: Database,
   shopId: string,
@@ -686,4 +451,47 @@ export async function findActiveSyncForTheme(
     )
     .limit(1);
   return rows[0];
+}
+
+const RETRYABLE_STATUSES: SyncStatus[] = ['failed', 'partially_failed'];
+
+export function toSyncRunDto(row: SyncHistoryRow): SyncRun {
+  const details = row.errorDetails as { code?: string; message?: string } | null;
+  return {
+    id: row.id,
+    repository: row.repository,
+    branch: row.branch,
+    commitSha: row.commitSha,
+    commitMessage: row.commitMessage,
+    themeId: row.themeId,
+    themeName: row.themeName,
+    themeRole: row.themeRole,
+    strategy: row.strategy,
+    status: row.status,
+    filesChanged: row.filesChanged,
+    filesSucceeded: row.filesSucceeded,
+    filesFailed: row.filesFailed,
+    filesSkipped: row.filesSkipped,
+    errorDetails: details?.message ? { code: details.code ?? 'ERROR', message: details.message } : null,
+    attempt: row.attempt,
+    initiatedAt: iso(row.initiatedAt) ?? new Date(0).toISOString(),
+    startedAt: iso(row.startedAt),
+    completedAt: iso(row.completedAt),
+    canRetry: RETRYABLE_STATUSES.includes(row.status),
+  };
+}
+
+export function toSyncOperationDto(row: SyncOperationRow): SyncOperation {
+  return {
+    id: row.id,
+    path: row.path,
+    sourcePath: row.sourcePath,
+    previousPath: row.previousPath,
+    action: row.action,
+    changeType: row.changeType,
+    status: row.status,
+    skipReason: row.skipReason,
+    attempts: row.attempts,
+    error: row.error,
+  };
 }

@@ -22,7 +22,3 @@ ENCRYPTION_KEY="replace-with-base64-32-byte-key"
 # enters in Settings. It is stored encrypted in D1, so no GitHub secret is needed here.
 # To use GitHub Enterprise Server, override the API base URL:
 # GITHUB_API_BASE_URL="https://github.example.com/api/v3"
-
-# Optional: GitHub token with read access to the master repository, shared by all
-# stores that have not saved their own token (Settings → Master repository).
-# GITHUB_TOKEN="github_pat_..."

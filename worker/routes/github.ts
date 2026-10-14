@@ -47,11 +47,9 @@ import {
 export const githubRoutes = new Hono<AppEnv>()
   .get('/connection', async (c) => {
     const connection = await getGithubConnection(getDb(c.env.DB), c.get('auth').shop.id);
-    const shared = !!c.env.GITHUB_TOKEN?.trim();
     return ok<GithubConnectionResponse>(c, {
-      connected: !!connection || shared,
+      connected: !!connection,
       connection: connection ? toGithubConnectionDto(connection) : null,
-      usingSharedToken: !connection && shared,
     });
   })
   .post('/connection', async (c) => {
@@ -91,7 +89,7 @@ export const githubRoutes = new Hono<AppEnv>()
 
     if (repo) {
       const settings = await getSettings(db, shop.id);
-      if (!settings.repository) {
+      if (!settings.defaultRepository) {
         await upsertSettings(db, shop.id, { defaultRepository: repo.fullName, defaultBranch: repo.defaultBranch });
       }
     }
@@ -99,7 +97,7 @@ export const githubRoutes = new Hono<AppEnv>()
     logger.info('github.connected', { account: user.login, authType: connection.authType, repository: repo?.fullName });
     return ok<GithubConnectionResponse>(
       c,
-      { connected: true, connection: toGithubConnectionDto(connection), usingSharedToken: false },
+      { connected: true, connection: toGithubConnectionDto(connection) },
       'GitHub connected',
       201,
     );
@@ -108,12 +106,7 @@ export const githubRoutes = new Hono<AppEnv>()
     const removed = await deleteGithubConnection(getDb(c.env.DB), c.get('auth').shop.id);
     if (!removed) throw new ApiError(404, 'NOT_FOUND', 'No GitHub connection to remove');
     c.get('logger').info('github.disconnected');
-    const shared = !!c.env.GITHUB_TOKEN?.trim();
-    return ok<GithubConnectionResponse>(
-      c,
-      { connected: shared, connection: null, usingSharedToken: shared },
-      'GitHub disconnected',
-    );
+    return ok<GithubConnectionResponse>(c, { connected: false, connection: null }, 'GitHub disconnected');
   })
   .get('/repositories', async (c) => {
     const query = parseOrThrow(repositoriesQuerySchema, c.req.query());
@@ -121,7 +114,7 @@ export const githubRoutes = new Hono<AppEnv>()
     const { client, connection } = await githubClient(c);
     const page = await cached(
       c.env.KV,
-      cacheKeys.repos(shop.id, connection ? `${connection.id}:${connection.updatedAt.getTime()}` : 'shared', query.page, query.perPage),
+      cacheKeys.repos(shop.id, `${connection.id}:${connection.updatedAt.getTime()}`, query.page, query.perPage),
       120,
       () => client.listRepositories(query.page, query.perPage),
       c.get('logger'),

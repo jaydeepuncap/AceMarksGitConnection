@@ -151,18 +151,3 @@ export function isIgnored(path: string, patterns: readonly string[]): string | n
   }
   return null;
 }
-
-/** Written by Theme Sync after every fully completed update; never taken from the repository. */
-export const THEME_SYNC_MARKER_PATH = 'assets/theme-sync.json';
-
-export function isProtected(path: string, patterns: readonly string[]): string | null {
-  return isIgnored(path, patterns);
-}
-
-/** Plain-language description of a protected pattern for the Settings screen. */
-export function describeProtectedPattern(pattern: string): string {
-  if (pattern === 'config/settings_data.json') return 'Brand colors, type, theme settings';
-  if (/^templates\//.test(pattern) || /-group\.json$/.test(pattern)) return 'Content edited in the theme editor';
-  if (/^locales\//.test(pattern)) return 'Store text edited in Shopify';
-  return 'Never replaced';
-}

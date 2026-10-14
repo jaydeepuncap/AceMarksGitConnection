@@ -28,24 +28,12 @@ export interface Env {
   SHOPIFY_SCOPES: string;
   SHOPIFY_APP_URL?: string;
   GITHUB_API_BASE_URL?: string;
-  /** Master theme repository (`owner/name`) used by stores that have not chosen one. */
-  MASTER_REPOSITORY?: string;
-  MASTER_BRANCH?: string;
-  /**
-   * Comma-separated *.myshopify.com domains of the stores that share the master
-   * repository (the Ace Marks Collection). Staff of any store in the group can
-   * see the group and roll an update out to the other stores' Staging themes.
-   * Empty = every store works on its own.
-   */
-  STORE_GROUP?: string;
 
   // Secrets (wrangler secret put / .dev.vars)
   SHOPIFY_API_KEY: string;
   SHOPIFY_API_SECRET: string;
   ENCRYPTION_KEY: string;
   ENCRYPTION_KEY_PREVIOUS?: string;
-  /** Optional GitHub token with read access to the master repository, used by stores without their own token. */
-  GITHUB_TOKEN?: string;
 }
 
 /** Identity established by worker/middleware/shopify-session-token.ts. */

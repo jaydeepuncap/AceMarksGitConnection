@@ -3,6 +3,7 @@
  * shop domains, GitHub names, commit SHAs and Shopify theme IDs.
  */
 import { z } from 'zod';
+import { SYNC_STRATEGY_VALUES } from '../../shared/api-types';
 import { normalizeThemeRoot, validateThemePath } from '../../shared/theme-paths';
 import { badRequest } from './response';
 
@@ -88,10 +89,6 @@ export const commitsQuerySchema = paginationSchema.extend({
   repository: repositorySchema.optional(),
   branch: branchSchema.optional(),
   path: z.string().trim().max(255).optional(),
-  withFiles: z
-    .enum(['true', 'false', '1', '0'])
-    .optional()
-    .transform((v) => v === 'true' || v === '1'),
 });
 
 export const commitQuerySchema = z.object({
@@ -103,35 +100,14 @@ export const commitFilesQuerySchema = paginationSchema.extend({
   perPage: z.coerce.number().int().min(1).max(300).default(100),
 });
 
-export const lineSchema = z.enum(['staging', 'live', 'other']);
-
 export const historyQuerySchema = paginationSchema.extend({
-  line: lineSchema.optional(),
-  themeId: themeIdSchema.optional(),
-  status: z.enum(['queued', 'running', 'succeeded', 'partially_failed', 'failed', 'cancelled']).optional(),
-  branch: branchSchema.optional(),
-  includeUnknownBranch: z
+  status: z
+    .enum(['previewed', 'queued', 'running', 'succeeded', 'partially_failed', 'failed', 'cancelled', 'expired'])
+    .optional(),
+  includePreviews: z
     .enum(['true', 'false', '1', '0'])
     .optional()
     .transform((v) => v === 'true' || v === '1'),
-});
-
-export const updatesQuerySchema = z.object({
-  line: lineSchema.default('staging'),
-  /** Any theme of the store (overrides `line`). */
-  themeId: themeIdSchema.optional(),
-  /** Branch to list (defaults to the store's branch). */
-  branch: branchSchema.optional(),
-  /** branch – newest updates first; current – the theme's update and earlier ones (going back). */
-  ref: z.enum(['branch', 'current']).default('branch'),
-  page: z.coerce.number().int().min(1).max(50).default(1),
-  perPage: z.coerce.number().int().min(1).max(50).default(20),
-});
-
-export const rolloutQuerySchema = z.object({
-  sha: commitShaSchema.optional(),
-  /** Chosen test theme per store: "shop.myshopify.com:123,other.myshopify.com:456". */
-  themes: z.string().max(2000).optional(),
 });
 
 export const uuidSchema = z.string().uuid('Invalid ID');
@@ -148,6 +124,8 @@ const ignorePatternSchema = z
 
 export const syncPreferencesPatchSchema = z
   .object({
+    strategy: z.enum(SYNC_STRATEGY_VALUES).optional(),
+    allowDeletes: z.boolean().optional(),
     themeRoot: z
       .string()
       .max(200)
@@ -160,18 +138,16 @@ export const syncPreferencesPatchSchema = z
         return r.root;
       })
       .optional(),
-    protectedPatterns: z.array(ignorePatternSchema).max(50).optional(),
     ignorePatterns: z.array(ignorePatternSchema).max(50).optional(),
   })
   .strict();
 
 export const updateSettingsSchema = z
   .object({
-    repository: repositorySchema.nullable().optional(),
-    branch: branchSchema.nullable().optional(),
-    stagingThemeId: themeIdSchema.nullable().optional(),
-    liveThemeId: themeIdSchema.nullable().optional(),
-    preferences: syncPreferencesPatchSchema.optional(),
+    defaultRepository: repositorySchema.nullable().optional(),
+    defaultBranch: branchSchema.nullable().optional(),
+    defaultThemeId: themeIdSchema.nullable().optional(),
+    syncPreferences: syncPreferencesPatchSchema.optional(),
   })
   .strict();
 
@@ -187,62 +163,31 @@ export const createGithubConnectionSchema = z
   })
   .strict();
 
-export const createPlanSchema = z
+export const syncPreviewSchema = z
   .object({
-    kind: z.enum(['update', 'publish', 'rollback']),
-    targetSha: commitShaSchema,
-    themeId: themeIdSchema.optional(),
-    line: lineSchema.optional(),
+    repository: repositorySchema.optional(),
     branch: branchSchema.optional(),
+    commitSha: commitShaSchema,
+    themeId: themeIdSchema,
+    strategy: z.enum(SYNC_STRATEGY_VALUES).optional(),
+    allowDeletes: z.boolean().optional(),
+    includePaths: z.array(themePathSchema).max(3000).optional(),
   })
   .strict();
 
-export const updateSelectionSchema = z
+export const confirmSyncSchema = z
   .object({
-    allowDeletes: z.boolean(),
-    skippedPaths: z.array(themePathSchema).max(5000),
+    syncId: uuidSchema,
+    confirm: z.literal(true, { message: 'Explicit confirmation (confirm: true) is required' }),
+    confirmLiveTheme: z.boolean().optional(),
+    confirmThemeName: z.string().max(200).optional(),
   })
   .strict();
 
-export const confirmUpdateSchema = z
+export const retrySyncSchema = z
   .object({
-    acceptDirectEdits: z.boolean().optional(),
-  })
-  .strict();
-
-export const baselineSchema = z
-  .object({
-    line: lineSchema,
-    sha: commitShaSchema,
-    themeId: themeIdSchema.optional(),
-    branch: branchSchema.optional(),
-  })
-  .strict();
-
-export const rolloutPreviewSchema = z
-  .object({
-    sha: commitShaSchema,
-    targets: z
-      .array(z.object({ shopDomain: z.string().trim().min(1).max(255), themeId: themeIdSchema }).strict())
-      .min(1)
-      .max(20),
-  })
-  .strict();
-
-export const rolloutConfirmSchema = z
-  .object({
-    runs: z
-      .array(
-        z
-          .object({
-            shopDomain: z.string().trim().min(1).max(255),
-            runId: uuidSchema,
-            acceptDirectEdits: z.boolean().optional(),
-          })
-          .strict(),
-      )
-      .min(1)
-      .max(20),
+    confirmLiveTheme: z.boolean().optional(),
+    confirmThemeName: z.string().max(200).optional(),
   })
   .strict();
 

@@ -1,6 +1,6 @@
-# Theme Sync (Ace Marks Git Connection)
+# Ace Marks Git Connection
 
-**Staging first. Live when you say so.** Theme Sync is the custom Shopify app that keeps every store of the Ace Marks Collection on the same theme code. Developers save work in the master GitHub repository; a merchant picks an update, sees every file each commit changes, applies it to the store's **Staging** theme, tests it, and then publishes the same update to the **Live** theme. Nothing changes in any store until someone reviews and confirms it.
+A Shopify embedded app that connects a store to a GitHub repository. You can browse commits, inspect changed files, and sync the contents of **one exact commit** to a Shopify theme. Every sync goes through a preview and an explicit confirmation first.
 
 - **Runtime:** Cloudflare Workers + Hono, D1 (SQLite via Drizzle ORM), KV, Queues, static assets binding
 - **Admin UI:** React 19 + TypeScript + Vite, [Polaris web components](https://shopify.dev/docs/api/app-home/polaris-web-components), App Bridge v4, React Router
@@ -14,7 +14,7 @@
 2. [Authentication: three separate mechanisms](#authentication-three-separate-mechanisms)
 3. [Shopify scopes and theme write access](#shopify-scopes-and-theme-write-access)
 4. [Data model and migrations](#data-model-and-migrations)
-5. [Theme Sync workflow](#theme-sync-workflow)
+5. [Sync workflow](#sync-workflow)
 6. [Setup](#setup)
 7. [Local development](#local-development)
 8. [Testing](#testing)
@@ -48,9 +48,8 @@ Cloudflare Worker (Hono) ── one origin serves API + static assets
 ```
 ace-marks-git-connection/
 ├── app/                     React admin UI (Vite root)
-│   ├── components/          AppLayout, LoadingState, ErrorBanner, FileList, CommitFiles, StoreHeader, ThemeBadges
-│   ├── routes/              Dashboard (overview), Themes, Updates (+ go back), UpdateRun (checks, review,
-│   │                        progress, result), Publish, Rollout, History, Settings
+│   ├── components/          AppLayout, LoadingState, ErrorBanner, ConfirmSyncModal
+│   ├── routes/              Dashboard, Settings, Repositories, Themes, Commits, SyncHistory
 │   ├── lib/                 app-bridge.ts, api-client.ts, types.ts, validation.ts, hooks.ts, format.ts
 │   ├── App.tsx  main.tsx  index.html  vite-env.d.ts
 ├── shared/                  API contract + theme-path rules imported by BOTH app and worker
@@ -60,12 +59,10 @@ ace-marks-git-connection/
 │   ├── index.ts             Hono app, route mounting, document serving, queue + cron handlers
 │   ├── env.ts               Bindings (Env) and request context types
 │   ├── middleware/          shopify-session-token.ts, shopify-oauth.ts, error-handler.ts
-│   ├── routes/              health, oauth, overview, settings, github, themes, commits, updates (+ history),
-│   │                        rollout, webhooks
-│   ├── lib/                 shopify-graphql, github-client, database, sessions, crypto, md5, store-group,
+│   ├── routes/              health, oauth, settings, github, themes, commits, sync, webhooks
+│   ├── lib/                 shopify-graphql, github-client, database, sessions, crypto,
 │   │                        validators, response, logger, http, cache, clients
-│   └── sync/                plan.ts (tree diff, checks, review), code-check.ts, executor.ts (backup → apply →
-│                            theme-sync.json), runs.ts (confirm/retry), runtime.ts, dispatch.ts
+│   └── sync/                planner.ts (preview), executor.ts (chunked writes), dispatch.ts
 ├── drizzle/schema.ts        Drizzle schema (source of truth for migrations)
 ├── migrations/              Generated SQL migrations (the ONLY migrations directory)
 ├── extensions/              Reserved for future Shopify app extensions
@@ -144,11 +141,9 @@ The schema lives in `drizzle/schema.ts`:
 | `shops` | One row per store: status, granted scopes, **encrypted** offline + refresh tokens, `token_version` |
 | `sessions` | Shopify admin sessions seen via session tokens (`sid`, user ID), used for audit only. Tokens are never stored. |
 | `github_connections` | Per-shop GitHub credential (**encrypted** PAT), account, verified repository |
-| `app_settings` | Master repository and branch, the **Staging** and **Live** theme of the store, preferences (theme folder, protected files, ignored files) |
-| `theme_states` | The **last synced update** of each theme — saved only when every file of an update succeeded |
-| `theme_file_checksums` | Shopify's checksum of every file the app wrote, used to detect files edited directly in Shopify |
-| `sync_history` | One row per run (update, publish, go back, restore, recorded baseline): base and target commit, included commits (JSON), check results (JSON), status, counters, timestamps. A partial unique index allows only one queued/running run per theme. |
-| `sync_operations` | Durable per-file job state: action, content source, backup state/KV key, status, attempts, error kind |
+| `app_settings` | Default repository, branch, theme, sync preferences (JSON) |
+| `sync_history` | One row per preview/sync: repo, exact commit SHA, theme, status, counters, error details, timestamps |
+| `sync_operations` | Durable per-file job state (`pending`/`succeeded`/`failed`/`skipped`, attempts, error) |
 
 Every tenant table has a `shop_id` foreign key with `ON DELETE CASCADE`, plus indexes for the access paths (`shop_id, initiated_at`, `shop_id, status`, `sync_id, path` unique, …).
 
@@ -173,65 +168,32 @@ npm run db:migrate:remote    # production D1 (--env production)
 
 ---
 
-## Theme Sync workflow
+## Sync workflow
 
-The screens follow the client guide (*Theme Sync Client Guide v1.1*):
+1. Pick a **theme** (Themes page or Settings).
+2. Pick a **commit** (Commits page). The full 40-character SHA is the source of truth from here on.
+3. The app shows the commit's changed files with added/modified/renamed/removed status and the theme path each one maps to, or why it can't be synced.
+4. **Preview** (`POST /api/sync/preview`). The backend:
+   - verifies the theme exists *in this shop* and is writable (not `LOCKED`, `DEMO`, `ARCHIVED` or processing);
+   - loads the commit's files: the diff for `commit_changes`, or the full tree for `full_snapshot`;
+   - validates every path, rejecting traversal (`..`), absolute paths, backslashes, control characters and anything outside `assets/ blocks/ config/ layout/ locales/ sections/ snippets/ templates/`;
+   - applies the theme root and ignore patterns (`config/settings_data.json` is ignored by default to protect theme-editor customizations);
+   - checks which target files already exist (create vs update) without downloading content;
+   - stores the plan as a `previewed` run, valid for 30 minutes. **The theme is not touched.**
+5. **Confirm** in the modal (`POST /api/sync` with `confirm: true`). For the **live theme** you must also tick a checkbox and type the theme name exactly. The server re-reads the theme at confirmation time, so a theme that was published after the preview still requires this. Only one active sync per theme is allowed, and the `previewed → queued` transition is atomic, so a double-submit cannot start two runs.
+6. **Execute** in the background, in chunks of up to 50 operations, the per-mutation limit for `themeFilesUpsert`/`themeFilesDelete`. Each upsert batch is also capped at about 4 MB of payload:
+   - Each file is fetched from GitHub with `GET /repos/{o}/{r}/contents/{path}?ref=<commit SHA>`. The Git blob SHA of the downloaded bytes is recomputed and must equal the blob SHA GitHub reported for that file in the selected commit. Any mismatch fails that file.
+     *Example: a file changed in commits B and D, and you selected B → the bytes from B are uploaded, never the bytes from D or HEAD.*
+   - UTF-8 files are sent as `TEXT`, binary files (images, fonts) as `BASE64`. Files over 10 MB are rejected.
+   - Asynchronous Shopify jobs are polled until done.
+   - Per-file `userErrors` mark only that file as failed. Throttling, 5xx and timeouts are retried up to 3 attempts. A missing permission or authorization stops the whole run.
+7. **Record.** Status ends as `succeeded`, `partially_failed` or `failed`, with per-file errors. **Retry** (`POST /api/sync/history/:id/retry`) resets only failed files. It's safe because every write is idempotent: the same blob from the same SHA, and deleting an already-missing file counts as success.
 
-| Screen | Route | What it does |
-|---|---|---|
-| Themes (home) | `/`, `/themes` | **Every theme** of the store with its published status, last synced update (from `assets/theme-sync.json`) and last run; setup checklist |
-| Theme page | `/themes/:id` | One theme: last synced update, **branch** picker, that branch's commits (**New** / **Current** / **Added** / **Tested**, files per commit) with *Update to this →*, *Go back to this →*, *Already running this*; on the published theme *Publish to Live →* for tested commits; the theme's full update history with branch |
-| Checks + Review | `/updates/:id` | Code check, direct edit detection, every included update with its files, totals, confirm |
-| Progress + result | `/updates/:id` | Backup, file-by-file progress, preview link, *Publish to Live →*; for incomplete runs *Retry failed files*, *Run full update again*, *Restore backup* |
-| Roll out | `/rollout` | One update to a chosen test (unpublished) theme in several stores (needs `STORE_GROUP`) |
-| Commits | `/commits` | Commits of a branch: message, SHA, author, date, changed-file count with Added / Modified / Renamed / Deleted counts, the changed-file list with statuses, commit selection and *Preview sync* to a chosen theme |
-| Sync history | `/history` | Every sync (filter by theme and status): commit SHA, repository and branch, Shopify theme, status, number of changed files, started/finished timestamps, error details, *Retry* (with confirmation) when the run is safe to retry |
-| Settings | `/settings` | GitHub, master repository/branch, protected files, ignored files, *Test connection* |
+**Deletions** are off by default. When you enable them, the app deletes only files the commit removed or renamed away, and only if they exist in the theme. It never deletes `layout/theme.liquid`, `config/settings_schema.json` or `config/settings_data.json`. `full_snapshot` never deletes anything.
 
-**Test before Live.** The published theme is the Live theme. It never receives a commit directly: apply the commit to any unpublished theme first; once that update fully completes the commit is **Tested** and can be published to Live from the published theme's page or from the update result.
+**Background jobs.** The primary path is **Cloudflare Queues**. The consumer processes chunks and re-enqueues itself, with backoff on rate limits. Job state lives in D1, so redelivery is harmless. Without a queue binding (for example on the Workers Free plan), the app runs chunks in `ctx.waitUntil()` for about 25 seconds. If work remains, the next poll from the Sync History page resumes it.
 
-**Sync options on the review page** (like the earlier flow): every file of the update is listed with a checkbox — untick a file to skip it (it stays as it is in the theme) — and *Allow deletions* decides whether files the update removes are removed from the theme. Checks follow the selection (skipping a file with a code error unblocks the update). During the run the same table shows each file's progress and, for failures, the error and whether it *can be retried* or *needs a developer fix*.
-
-**Last synced per theme and branch.** The theme page shows the last synced commit, the branch it came from and the state of `assets/theme-sync.json`; the commit list marks **Last synced**, **Pending sync**, **Synced** and **Tested** for the selected branch. `assets/theme-sync.json` (written after every complete update, and by *Already running this*) holds the last synced commit, its branch and date; a duplicated theme keeps it, so Theme Sync recognises the copy. *Save sync file to theme* writes it again when it is missing.
-
-**Protected vs. ignored files.** *Protected* files are files the store edits in Shopify (brand settings, theme-editor content): if the file already exists in a theme it is never replaced or removed, so those edits are kept; if it does not exist yet (a new template) it is created once. *Ignored* files are repository files that must never go to Shopify: they are skipped completely — never created, changed or removed.
-
-### One-time setup (per store)
-
-1. **Connect GitHub** — a fine-grained token per store, or one shared `GITHUB_TOKEN` Worker secret for all stores; choose the master repository (or set `MASTER_REPOSITORY`).
-2. **Themes.** The published theme is Live automatically; any unpublished theme can be used to test updates.
-3. **Confirm protected files.** Defaults: `config/settings_data.json` (brand colors, type, theme settings), `templates/**/*.json` and `sections/*-group.json` (content edited in the theme editor). A protected file that already exists in a theme is **never replaced or removed**; a new one (for example a new template) is created.
-4. **Record where each theme starts.** A theme with no last synced update can either be marked *Already running this* (records the update without changing files) or receive a first update, which writes the complete theme from that update and removes nothing. Themes that carry `assets/theme-sync.json` (for example a duplicate) are picked up automatically.
-5. **Test connection** checks GitHub, Shopify and whether Shopify lets the app change theme files (theme-modification exemption) — without changing anything.
-
-### Updating a theme
-
-1. **Choose an update.** Updates are listed from the branch, newest first. **Selecting the newest applies every update before it, in order**, so no developer work is left out.
-2. **Plan** (`POST /api/updates/plan`) — nothing changes in the theme. The backend:
-   - compares the repository **trees** of the theme's last synced update (base) and the selected update (target). That gives the exact files to add, change and remove, independent of commit sizes, merges and files changed back in between;
-   - lists the included updates (base → target) with the files each one changed, and which update last touched each file;
-   - applies the theme folder, ignored files, protected files and the never-removed required files (`layout/theme.liquid`, `config/settings_*.json`); `assets/theme-sync.json` is reserved;
-   - **code check:** every `.liquid` / `.json` file is downloaded at the exact commit, its Git blob SHA verified, and checked: JSON must parse (Shopify's comment headers are allowed); Liquid tags/output must be closed, block tags (`if`/`for`/`case`/`capture`/`form`/…) balanced, raw blocks ended and `{% schema %}` valid JSON. Errors **block** the update;
-   - **direct edit detection:** each file the update replaces or removes is compared with what was last synced — Shopify's checksum recorded after the last write, or the MD5 of the file at the base commit. Edited files are listed with the date Shopify reports, and the update needs *Replace and continue*;
-   - stores the plan as a `previewed` run (valid 30 minutes).
-3. **Confirm.** Every rule is checked again: the plan has not expired, the code check passed, direct edits were accepted, the Staging theme is still unpublished, the theme is still on the plan's base update, and no other run is active on the theme (enforced by the database).
-4. **Backup, then apply** (Queues, or `waitUntil` with resume-on-poll). First the current version of every affected file is saved to KV for 30 days (or recorded as "did not exist"). Then files are written in batches of up to 50 — content pinned to the commit SHA and blob-verified, code-checked again, UTF-8 as `TEXT`, binaries as `BASE64` — and removed files deleted.
-5. **Honest status.** Only when **every** file succeeded is `assets/theme-sync.json` written (last) and the theme's last synced update saved. Otherwise the theme keeps its previous last synced update, an incomplete Staging update cannot be published, and each failed file says whether it *can be retried* or *needs a developer fix*.
-
-### Publishing to Live
-
-*Publish to Live* is started from the Overview banner, the Staging result (*Publish to Live →*) or the Live theme's page (*Publish from Staging →*), and only for the update Staging fully completed (**Staging-verified**). The publish uses the same plan, checks (including "Live matches its last synced update"), backup and honest status, and is recorded in the history. Theme Sync **never changes which theme is published** in Shopify; it only updates the files of the theme you choose.
-
-### Recovery
-
-- **Retry failed files** — only the failed files are tried again (writes are idempotent).
-- **Run full update again** — a fresh plan with fresh checks.
-- **Restore backup** — puts back exactly the files the run changed, from its backup (files it created are removed), and restores the theme's previous last synced update. Allowed for the most recent run on a theme, within 30 days.
-- **Go back** — return Staging or Live to any earlier update; every change after it is undone with the same review, checks and backup. Live can only go back to updates that were verified on Staging or ran on that theme before.
-
-### Rolling out across stores
-
-Set `STORE_GROUP` to the stores' `*.myshopify.com` domains and install the app on each. From any store in the group, *Roll out* shows for every store a **test theme** (any unpublished theme; the one that last received an update is preselected) and the published **Live** theme, with their state for the chosen update. It checks the selected stores (each with its own settings and tokens) and updates their test themes. Live is always published from each store's own Theme Sync, one store at a time.
+---
 
 ## Setup
 
@@ -286,7 +248,7 @@ The connection model is a **fine-grained personal access token** per shop, store
 - **Repository access:** only the theme repository
 - **Repository permissions:** *Contents: Read-only* and *Metadata: Read-only*
 
-Then paste it in **Settings → Master repository**. Alternatively set one `GITHUB_TOKEN` Worker secret with read access to the master repository; stores without their own token use it. The app verifies it with `GET /user`, and with `GET /repos/{o}/{r}` plus a commits read when you enter a repository. Classic tokens (`ghp_…`, `repo` scope) also work but grant much more access. GitHub returns `404` for private repositories the token can't see, so the app checks access explicitly and never assumes it.
+Then paste it in **Settings → GitHub connection**. The app verifies it with `GET /user`, and with `GET /repos/{o}/{r}` plus a commits read when you enter a repository. Classic tokens (`ghp_…`, `repo` scope) also work but grant much more access. GitHub returns `404` for private repositories the token can't see, so the app checks access explicitly and never assumes it.
 
 The GitHub client is modular (`worker/lib/github-client.ts`), so you can add a GitHub App installation token later by adding an `auth_type` and a token provider.
 
@@ -396,10 +358,7 @@ For CI, set `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`, plus `SHOPIFY_CL
 | `SHOPIFY_API_KEY` (client ID) | `.dev.vars` locally; Worker secret in prod | Public value, but kept out of `[vars]` to avoid a var/secret name clash. Injected into `index.html` at serve time. |
 | `SHOPIFY_API_SECRET` | `.dev.vars`; Worker secret | Verifies session tokens and HMACs, used in token requests |
 | `ENCRYPTION_KEY` / `ENCRYPTION_KEY_PREVIOUS` | `.dev.vars`; Worker secrets | 32-byte base64 AES key / rotation key |
-| `SHOPIFY_API_VERSION`, `SHOPIFY_SCOPES`, `SHOPIFY_APP_URL`, `GITHUB_API_BASE_URL`, `LOG_LEVEL`, `APP_ENV` | `wrangler.toml [vars]` | Non-secret. `.dev.vars` can override them locally. |
-| `MASTER_REPOSITORY`, `MASTER_BRANCH` | `wrangler.toml [vars]` (optional) | Default master repository/branch for stores that have not chosen one |
-| `STORE_GROUP` | `wrangler.toml [vars]` (optional) | Comma-separated store domains of the collection; enables the store selector and roll-out. Staff of any listed store can see the others and update their **Staging** themes. |
-| `GITHUB_TOKEN` | Worker secret (optional) | Shared read-only GitHub token for stores without their own |
+| `SHOPIFY_API_VERSION`, `SHOPIFY_SCOPES`, `SHOPIFY_APP_URL`, `GITHUB_API_BASE_URL`, `LOG_LEVEL`, `APP_ENV` | `wrangler.toml [vars]` / `[env.production.vars]` | Non-secret. `.dev.vars` can override them locally. |
 | `DB` | `wrangler.toml [[d1_databases]]` | D1 binding. No connection strings or env vars. |
 | `KV` | `wrangler.toml [[kv_namespaces]]` | Cache, OAuth state, webhook de-dup, session-seen markers |
 | `SYNC_QUEUE` | `wrangler.toml [[queues.*]]` | Optional; enables background jobs |
@@ -422,47 +381,81 @@ Responses always use one of these envelopes:
 { "success": false, "error": { "code": "VALIDATION_ERROR", "message": "The request contains invalid parameters", "details": [ { "path": "commitSha", "message": "…" } ], "requestId": "…" } }
 ```
 
-Status codes: `400` validation, `401` session (with `X-Shopify-Retry-Invalid-Session-Request: 1`) or re-auth, `403` permission, `404` not found or another shop's resource, `409` conflict/state, `410` review expired or backup unavailable, `422` blocked by checks (`CODE_ERRORS`, `DIRECT_EDITS_FOUND`, `NOT_VERIFIED_ON_STAGING`), `429` rate limited (with `Retry-After`), `502`/`504` upstream.
+Status codes: `400` validation, `401` session (with `X-Shopify-Retry-Invalid-Session-Request: 1`) or re-auth, `403` permission, `404` not found or another shop's resource, `409` conflict/state, `410` preview expired, `422` live-theme confirmation required, `429` rate limited (with `Retry-After`), `502`/`504` upstream.
 
 | Method & path | Body / query | Returns |
 |---|---|---|
 | `GET /api/health` | – | `{ status: "ok", time }` |
-| `GET /api/overview` | `?refresh=1` | Store, repository, Staging/Live state (last synced update, waiting, active/last run), publishable update |
-| `GET /api/stores` | – | Stores of the group (or just this one) with Admin URLs |
-| `GET /api/settings` | – | `{ shop, settings, masterRepository }` |
-| `PUT /api/settings` | `{ repository?, branch?, stagingThemeId?, liveThemeId?, preferences?: { themeRoot?, protectedPatterns?, ignorePatterns? } }` | `{ shop, settings }` (repository/branch verified on GitHub, themes in this store) |
-| `POST /api/settings/test` | – | `{ github, shopify, themeWrites }` — changes nothing |
-| `GET/POST/DELETE /api/github/connection` | `{ token }` | `{ connected, connection, usingSharedToken }` (never the token) |
-| `GET /api/github/branches` | `?repository&page&perPage` | `Paginated<GithubBranch>` |
-| `GET /api/themes` | `?refresh=1` | `ShopifyTheme[]` |
-| `GET /api/themes/overview` | `?refresh=1` | Every theme with its line and last synced update |
-| `GET /api/themes/:id` | – | One theme (numeric ID or GID) with its last synced update and runs |
-| `GET /api/commits` | `?branch&page&perPage&withFiles=1` | Commits with `fileStats` (total, added, modified, renamed, removed) |
-| `GET /api/commits/:sha/files` | `?page&perPage` | Files of one commit with their theme paths |
-| `GET /api/updates` | `?line=staging\|live&themeId&branch&ref=branch\|current&page&perPage` | Updates with `new`/`current`/`older`, counts, waiting |
-| `POST /api/updates/plan` | `{ kind: "update"\|"publish"\|"rollback", targetSha, themeId?, line?, branch? }` | `201 UpdateRun` (checks + review) |
-| `POST /api/updates/baseline` | `{ line, sha }` | `201 UpdateRun` — records the update a theme already runs |
-| `GET /api/updates/publish-options` | – | Staging-verified update and Live theme choices |
-| `GET /api/updates/:id` | – | `UpdateRunDetail` (run + files); resumes stalled runs without Queues |
-| `POST /api/updates/:id/confirm` | `{ acceptDirectEdits? }` | `202 UpdateRun` |
-| `POST /api/updates/:id/retry` · `/rerun` · `/restore` · `/cancel` | – | Retry failed files · new plan · restore plan · cancel a plan |
-| `GET /api/history` | `?page&perPage&line&themeId&status` | `Paginated<UpdateRun>` (confirmed runs) |
-| `GET /api/rollout` | `?sha` | Group stores' Staging/Live state for an update |
-| `POST /api/rollout/preview` | `{ sha, shops }` | Per-store plans (nothing changes) |
-| `POST /api/rollout/confirm` | `{ runs: [{ shopDomain, runId, acceptDirectEdits? }] }` | Per-store result |
+| `GET /api/settings` | – | `{ shop, settings }` |
+| `PUT /api/settings` | `{ defaultRepository?, defaultBranch?, defaultThemeId?, syncPreferences?: { strategy?, allowDeletes?, themeRoot?, ignorePatterns? } }` | `{ shop, settings }`. The repository/branch are verified on GitHub and the theme in this shop. |
+| `GET /api/github/connection` | – | `{ connected, connection }` (never the token) |
+| `POST /api/github/connection` | `{ token, repository? }` | `201 { connected: true, connection }` |
+| `DELETE /api/github/connection` | – | `{ connected: false }` |
+| `GET /api/github/repositories` | `?page&perPage&q` | `Paginated<GithubRepository>` |
+| `GET /api/github/branches` | `?repository=owner/name&page&perPage` | `Paginated<GithubBranch>` |
+| `GET /api/themes` | `?refresh=1` | `ShopifyTheme[]` (`id`, `name`, `role`, `processing`, `isLive`, `writable`) |
+| `GET /api/commits` | `?repository&branch&path&page&perPage` | `Paginated<CommitSummary>` |
+| `GET /api/commits/:sha` | `?repository` | `CommitDetail` (`filesCount`, `filesTruncated`) |
+| `GET /api/commits/:sha/files` | `?repository&page&perPage` (≤300) | `Paginated<CommitFile>` with `themePath`/`themePathError` |
+| `POST /api/sync/preview` | `{ commitSha, themeId, repository?, branch?, strategy?, allowDeletes?, includePaths? }` | `201 SyncPreview` |
+| `POST /api/sync` | `{ syncId, confirm: true, confirmLiveTheme?, confirmThemeName? }` | `202 SyncRun` |
+| `GET /api/sync/history` | `?page&perPage&status&includePreviews` | `Paginated<SyncRun>` |
+| `GET /api/sync/history/:id` | – | `SyncRunDetail` (run + operations) |
+| `POST /api/sync/history/:id/retry` | `{ confirmLiveTheme?, confirmThemeName? }` | `202 SyncRun` |
+
+Example: preview.
+
+```http
+POST /api/sync/preview
+Authorization: Bearer eyJhbGciOiJIUzI1NiJ9…
+Content-Type: application/json
+
+{ "commitSha": "4f2c9e0d8a7b6c5d4e3f2a1b0c9d8e7f6a5b4c3d", "themeId": "gid://shopify/OnlineStoreTheme/123456789" }
+```
+
+```json
+{
+  "success": true,
+  "message": "Preview generated. No changes were made to the theme.",
+  "data": {
+    "syncId": "6a0d2c4e-…",
+    "expiresAt": "2026-10-12T10:30:00.000Z",
+    "repository": "acme/storefront-theme",
+    "commit": { "sha": "4f2c9e0d…", "message": "Update header" },
+    "theme": { "id": "gid://shopify/OnlineStoreTheme/123456789", "name": "Dev copy", "role": "UNPUBLISHED", "isLive": false, "writable": true },
+    "strategy": "commit_changes",
+    "summary": { "creates": 1, "updates": 2, "deletes": 0, "skipped": 1, "total": 4 },
+    "operations": [
+      { "path": "sections/header.liquid", "action": "upsert", "changeType": "modified", "existsInTheme": true, "blobSha": "9b1c…", "skipReason": null },
+      { "path": "config/settings_data.json", "action": "skip", "changeType": "modified", "skipReason": "Matches ignore pattern \"config/settings_data.json\"" }
+    ],
+    "warnings": [],
+    "requiresLiveConfirmation": false
+  }
+}
+```
+
+Example: confirm a sync to the live theme.
+
+```json
+POST /api/sync
+{ "syncId": "6a0d2c4e-…", "confirm": true, "confirmLiveTheme": true, "confirmThemeName": "Dawn" }
+
+→ 202 { "success": true, "message": "Sync started", "data": { "id": "6a0d2c4e-…", "status": "queued", "filesChanged": 3, "canRetry": false } }
+```
+
+---
 
 ## Limits and known constraints
 
 - **Theme writes need Shopify's exemption** in addition to `write_themes` (see above).
-- **What changes is computed from repository trees**, so per-commit file limits (3000 files) and merge commits do not affect what is applied. If GitHub truncates a tree (more than 100k entries or 7 MB), set the theme folder. Per-commit file lists in the review show at most 40 included updates.
-- **Code check** covers up to 150 files while planning; the rest are checked as they are applied (a failing file stops there and is marked *needs developer fix*).
-- **Backups** are kept in KV for 30 days.
+- **GitHub lists at most 3000 changed files per commit.** The app flags this (`filesTruncated`) and recommends `full_snapshot`, which reads the recursive tree. If GitHub truncates the tree too (more than 100k entries or 7 MB), set a theme root folder.
+- **Merge commits** list changes against the first parent. The preview warns about this.
 - **The Contents API** raw media type supports files up to 100 MB. The app caps synced files at 10 MB.
 - **D1** allows 100 bound parameters per statement, so inserts are chunked. Very large plans (5000+ files) are rejected with guidance to narrow them.
 - **Worker limits.** One request never processes an unbounded sync: work runs in chunks via Queues, or via the `waitUntil` fallback with resume-on-poll.
 - **KV is eventually consistent.** It only caches immutable data (commit files by SHA) or data that may be briefly stale (theme list, 60 s). Writes always re-read the theme from Shopify.
-- **No automatic publishing**, no theme switching, and no writes outside the reviewed plan.
-- **Who approved an update is not tracked**; the history shows date, store, theme, update and status.
+- **No automatic publishing**, and no writes outside the previewed plan.
 
 ---
 
@@ -473,11 +466,8 @@ Status codes: `400` validation, `401` session (with `X-Shopify-Retry-Invalid-Ses
 | UI says *Open this app from Shopify Admin* | Open it through the store admin. App Bridge only works embedded. |
 | `401` loops on every request | `SHOPIFY_API_KEY`/`SECRET` in `.dev.vars` or the Worker secrets don't match the app's client credentials |
 | `THEME_WRITE_NOT_PERMITTED` | The theme-file exemption isn't approved yet, or `write_themes` hasn't been granted |
-| `SHOPIFY_REAUTH_REQUIRED` on a background update | Open the app once (token exchange re-authorizes), then press **Retry failed files** |
+| `SHOPIFY_REAUTH_REQUIRED` on a background sync | Open the app once (token exchange re-authorizes), then press **Retry** |
 | `GITHUB_NOT_FOUND` for a repo you can see in the browser | The token isn't granted that repository. Fine-grained tokens must list it explicitly. |
 | `GITHUB_RATE_LIMITED` | Wait for `retryAfter`. Background syncs back off and resume automatically. |
-| Update stuck in *Queued* without Queues | Keep the update page open. Polling resumes stalled runs. |
-| *Test connection* says theme updates are not allowed | Shopify has not approved the theme-modification exemption for this app yet |
-| `DIRECT_EDITS_FOUND` | Files were edited in Shopify since the last sync: choose *Replace and continue*, or ask the developer to bring the change into the repository |
-| `NOT_VERIFIED_ON_STAGING` | Update Staging to that update first; only fully completed Staging updates can be published |
+| Sync stuck in *Queued* without Queues | Keep the Sync History detail page open. Polling resumes stalled runs. |
 | `wrangler dev` requests hang behind a corporate proxy | Start it with `HTTPS_PROXY`/`HTTP_PROXY` unset for the local server |

@@ -12,7 +12,7 @@
  */
 import { type Context, Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { and, inArray, isNull, lt } from 'drizzle-orm';
+import { and, inArray, lt } from 'drizzle-orm';
 import { syncHistory } from '../drizzle/schema';
 import type { AppEnv, Env, HonoEnv, SyncJobMessage } from './env';
 import { deleteExpiredSessions, getDb, transitionSyncRun } from './lib/database';
@@ -31,11 +31,9 @@ import { commitsRoutes } from './routes/commits';
 import { githubRoutes } from './routes/github';
 import { healthRoutes } from './routes/health';
 import { appBaseUrl, decodeAdminHost, oauthRoutes } from './routes/oauth';
-import { overviewRoutes } from './routes/overview';
-import { rolloutRoutes } from './routes/rollout';
 import { settingsRoutes } from './routes/settings';
+import { syncRoutes } from './routes/sync';
 import { themesRoutes } from './routes/themes';
-import { historyRoutes, updatesRoutes } from './routes/updates';
 import { webhookRoutes } from './routes/webhooks';
 import { handleSyncMessage } from './sync/dispatch';
 
@@ -71,10 +69,7 @@ app.route('/api/settings', settingsRoutes);
 app.route('/api/github', githubRoutes);
 app.route('/api/themes', themesRoutes);
 app.route('/api/commits', commitsRoutes);
-app.route('/api', overviewRoutes);
-app.route('/api/updates', updatesRoutes);
-app.route('/api/history', historyRoutes);
-app.route('/api/rollout', rolloutRoutes);
+app.route('/api/sync', syncRoutes);
 app.all('/api/*', notFoundHandler);
 
 // ---------------------------------------------------------------------------
@@ -175,14 +170,12 @@ export default {
       .update(syncHistory)
       .set({ status: 'expired' })
       .where(and(inArray(syncHistory.status, ['previewed']), lt(syncHistory.previewExpiresAt, now)));
-    // Reviews that were never confirmed (expired or cancelled) are deleted after 7 days,
-    // together with their planned operations. Confirmed runs are the update history and stay.
+    // Expired previews older than 7 days are deleted together with their planned operations.
     await db
       .delete(syncHistory)
       .where(
         and(
-          inArray(syncHistory.status, ['expired', 'cancelled']),
-          isNull(syncHistory.confirmedAt),
+          inArray(syncHistory.status, ['expired']),
           lt(syncHistory.initiatedAt, new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)),
         ),
       );
