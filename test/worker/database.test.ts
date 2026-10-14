@@ -51,18 +51,22 @@ describe('database helpers', () => {
     expect(await updateShopTokensIfVersion(db, shop.id, shop.tokenVersion, write)).toBeUndefined();
   });
 
-  it('settings default and merge sync preferences', async () => {
+  it('settings default and merge preferences; protected files default to brand settings and editor content', async () => {
     const { env } = createTestEnv();
     const db = getDb(env.DB);
-    const shop = await seedShop(env, 'a.myshopify.com', { github: false });
+    const shop = await seedShop(env, 'a.myshopify.com', { github: false, themes: false });
     const defaults = await getSettings(db, shop.id);
-    expect(defaults.syncPreferences.ignorePatterns).toEqual(['config/settings_data.json']);
+    expect(defaults.preferences.protectedPatterns).toEqual(['config/settings_data.json', 'templates/**/*.json', 'sections/*-group.json']);
+    expect(defaults.preferences.ignorePatterns).toEqual([]);
     const updated = await upsertSettings(db, shop.id, {
       defaultBranch: 'dev',
-      syncPreferences: { ...defaults.syncPreferences, allowDeletes: true },
+      syncPreferences: { ...defaults.preferences, themeRoot: 'theme' },
     });
-    expect(updated).toMatchObject({ defaultBranch: 'dev', syncPreferences: { allowDeletes: true } });
-    expect(normalizePreferences({ strategy: 'bogus' }).strategy).toBe('commit_changes');
+    expect(updated).toMatchObject({ branch: 'dev', preferences: { themeRoot: 'theme' } });
+    // Settings saved by the earlier version (settings_data.json in the ignore list) migrate to protected files.
+    const legacy = normalizePreferences({ strategy: 'commit_changes', ignorePatterns: ['config/settings_data.json', 'assets/x.js'] });
+    expect(legacy.ignorePatterns).toEqual(['assets/x.js']);
+    expect(legacy.protectedPatterns).toContain('config/settings_data.json');
   });
 
   it('deleting a shop cascades to its data', async () => {

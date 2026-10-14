@@ -57,6 +57,8 @@ export const shops = sqliteTable(
     /** Incremented on every token write; used as a compare-and-set guard on refresh. */
     tokenVersion: integer('token_version').notNull().default(0),
     installedAt: integer('installed_at', { mode: 'timestamp_ms' }),
+    /** Store name from Shopify (`shop { name }`), refreshed when the app loads. */
+    shopName: text('shop_name'),
     uninstalledAt: integer('uninstalled_at', { mode: 'timestamp_ms' }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -138,6 +140,12 @@ export const appSettings = sqliteTable(
     /** Shopify GID, e.g. gid://shopify/OnlineStoreTheme/123 */
     defaultThemeId: text('default_theme_id'),
     defaultThemeName: text('default_theme_name'),
+    /** Unpublished theme that receives every new update first. */
+    stagingThemeId: text('staging_theme_id'),
+    stagingThemeName: text('staging_theme_name'),
+    /** Theme that receives Staging-verified updates (normally the published theme). */
+    liveThemeId: text('live_theme_id'),
+    liveThemeName: text('live_theme_name'),
     /** JSON-encoded SyncPreferences (shared/api-types.ts). */
     syncPreferences: text('sync_preferences', { mode: 'json' }).notNull().default(sql`'{}'`),
     createdAt: createdAt(),
@@ -163,6 +171,19 @@ export type SyncStatus = (typeof SYNC_STATUSES)[number];
 
 export const SYNC_STRATEGIES = ['commit_changes', 'full_snapshot'] as const;
 export type SyncStrategy = (typeof SYNC_STRATEGIES)[number];
+
+/**
+ * update   – a new update applied to the Staging theme (includes every update in between)
+ * publish  – a Staging-verified update published to a Live theme
+ * rollback – a theme returned to an earlier update
+ * restore  – the files of an earlier run put back from its backup
+ * baseline – records which update a theme already runs, without changing files
+ */
+export const SYNC_KINDS = ['update', 'publish', 'rollback', 'restore', 'baseline'] as const;
+export type SyncKind = (typeof SYNC_KINDS)[number];
+
+export const THEME_LINES = ['staging', 'live'] as const;
+export type ThemeLine = (typeof THEME_LINES)[number];
 
 export const syncHistory = sqliteTable(
   'sync_history',
@@ -194,6 +215,23 @@ export const syncHistory = sqliteTable(
     initiatedBy: text('initiated_by'),
     attempt: integer('attempt').notNull().default(0),
     previewExpiresAt: integer('preview_expires_at', { mode: 'timestamp_ms' }),
+    kind: text('kind', { enum: SYNC_KINDS }).notNull().default('update'),
+    /** Which line of work the theme belongs to: Staging or Live. */
+    line: text('line', { enum: THEME_LINES }).notNull().default('staging'),
+    /** Update the theme was on when the plan was made ('' = no update recorded yet). */
+    baseSha: text('base_sha'),
+    baseMessage: text('base_message'),
+    /** JSON: IncludedCommit[] — every update applied (or undone) by this run, in order. */
+    commitsIncluded: text('commits_included', { mode: 'json' }),
+    /** JSON: UpdateChecks — code check and direct edit detection results. */
+    checks: text('checks', { mode: 'json' }),
+    /** For publish runs: when the update was verified on Staging. */
+    verifiedOnStagingAt: integer('verified_on_staging_at', { mode: 'timestamp_ms' }),
+    /** For restore runs: the run whose backup is put back. */
+    restoredFromId: text('restored_from_id'),
+    /** Set when a roll-out across stores created this run. */
+    rolloutId: text('rollout_id'),
+    confirmedAt: integer('confirmed_at', { mode: 'timestamp_ms' }),
     initiatedAt: integer('initiated_at', { mode: 'timestamp_ms' })
       .notNull()
       .default(sql`(unixepoch() * 1000)`),
@@ -205,6 +243,12 @@ export const syncHistory = sqliteTable(
     index('sync_history_shop_initiated_idx').on(t.shopId, t.initiatedAt),
     index('sync_history_shop_status_idx').on(t.shopId, t.status),
     index('sync_history_shop_commit_idx').on(t.shopId, t.commitSha),
+    index('sync_history_shop_theme_idx').on(t.shopId, t.themeId),
+    // One update at a time: a second run for the same theme cannot be queued
+    // while one is queued or running (enforced by the database, not just the API).
+    uniqueIndex('sync_history_one_active_per_theme')
+      .on(t.shopId, t.themeId)
+      .where(sql`status in ('queued', 'running')`),
   ],
 );
 
@@ -216,6 +260,18 @@ export type SyncOperationAction = (typeof SYNC_OPERATION_ACTIONS)[number];
 
 export const SYNC_OPERATION_STATUSES = ['pending', 'succeeded', 'failed', 'skipped'] as const;
 export type SyncOperationStatus = (typeof SYNC_OPERATION_STATUSES)[number];
+
+/** github – blob at the run's commit; backup – a saved copy (restore runs); marker – assets/theme-sync.json */
+export const CONTENT_SOURCES = ['github', 'backup', 'marker'] as const;
+export type ContentSource = (typeof CONTENT_SOURCES)[number];
+
+/** pending – not saved yet; saved – copy stored; absent – file did not exist before the run */
+export const BACKUP_STATES = ['pending', 'saved', 'absent'] as const;
+export type BackupState = (typeof BACKUP_STATES)[number];
+
+/** transient – can be retried; code – the file has a code error (needs a developer fix) */
+export const ERROR_KINDS = ['transient', 'code', 'other'] as const;
+export type ErrorKind = (typeof ERROR_KINDS)[number];
 
 export const syncOperations = sqliteTable(
   'sync_operations',
@@ -245,6 +301,17 @@ export const syncOperations = sqliteTable(
     skipReason: text('skip_reason'),
     attempts: integer('attempts').notNull().default(0),
     error: text('error'),
+    errorKind: text('error_kind', { enum: ERROR_KINDS }),
+    contentSource: text('content_source', { enum: CONTENT_SOURCES }).notNull().default('github'),
+    /** Commit whose content is written (differs from the run's commit for rollbacks). */
+    sourceCommitSha: text('source_commit_sha'),
+    /** Short SHA of the newest included update that changed this file (display only). */
+    introducedBy: text('introduced_by'),
+    backupState: text('backup_state', { enum: BACKUP_STATES }),
+    /** KV key of the content to write when contentSource is "backup" (restore runs). */
+    contentKey: text('content_key'),
+    /** KV key of the saved copy (backup state "saved"). */
+    backupKey: text('backup_key'),
     updatedAt: updatedAt(),
   },
   (t) => [
@@ -252,6 +319,49 @@ export const syncOperations = sqliteTable(
     index('sync_operations_sync_status_idx').on(t.syncId, t.status),
     index('sync_operations_shop_idx').on(t.shopId),
   ],
+);
+
+// ---------------------------------------------------------------------------
+// theme_states — the "last synced update" of each theme, saved only when an
+// update fully completes. Mirrored into the theme as assets/theme-sync.json.
+// ---------------------------------------------------------------------------
+export const themeStates = sqliteTable(
+  'theme_states',
+  {
+    id: id(),
+    shopId: text('shop_id')
+      .notNull()
+      .references(() => shops.id, { onDelete: 'cascade' }),
+    themeId: text('theme_id').notNull(),
+    lastSyncedSha: text('last_synced_sha'),
+    lastSyncedMessage: text('last_synced_message'),
+    lastSyncedAt: integer('last_synced_at', { mode: 'timestamp_ms' }),
+    lastSyncId: text('last_sync_id'),
+    verifiedOnStagingAt: integer('verified_on_staging_at', { mode: 'timestamp_ms' }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex('theme_states_shop_theme_unique').on(t.shopId, t.themeId)],
+);
+
+// ---------------------------------------------------------------------------
+// theme_file_checksums — Shopify's checksum of every file this app wrote, used
+// to detect files edited directly in Shopify since the last sync.
+// ---------------------------------------------------------------------------
+export const themeFileChecksums = sqliteTable(
+  'theme_file_checksums',
+  {
+    id: id(),
+    shopId: text('shop_id')
+      .notNull()
+      .references(() => shops.id, { onDelete: 'cascade' }),
+    themeId: text('theme_id').notNull(),
+    path: text('path').notNull(),
+    checksumMd5: text('checksum_md5'),
+    commitSha: text('commit_sha'),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex('theme_file_checksums_unique').on(t.shopId, t.themeId, t.path)],
 );
 
 // ---------------------------------------------------------------------------
@@ -292,3 +402,4 @@ export type GithubConnection = typeof githubConnections.$inferSelect;
 export type AppSettingsRow = typeof appSettings.$inferSelect;
 export type SyncHistoryRow = typeof syncHistory.$inferSelect;
 export type SyncOperationRow = typeof syncOperations.$inferSelect;
+export type ThemeStateRow = typeof themeStates.$inferSelect;

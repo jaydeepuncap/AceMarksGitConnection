@@ -266,6 +266,33 @@ export class GitHubClient {
     return { items: data.map(toCommitSummary), hasNextPage: hasNextLink(response.headers.get('link')) };
   }
 
+  /**
+   * Walks the history reachable from `ref` (newest first) until `stopSha` is
+   * found. Returns the commits before it and whether it was found within
+   * `maxCommits`. Used to list the updates between a theme's last synced update
+   * and a newer one.
+   */
+  async listCommitsUntil(
+    owner: string,
+    repo: string,
+    ref: string,
+    stopSha: string | null,
+    maxCommits = 300,
+  ): Promise<{ commits: CommitSummary[]; found: boolean; hasMore: boolean }> {
+    const commits: CommitSummary[] = [];
+    const perPage = 100;
+    for (let page = 1; commits.length < maxCommits; page++) {
+      const result = await this.listCommits(owner, repo, { ref, page, perPage });
+      for (const commit of result.items) {
+        if (stopSha && commit.sha === stopSha) return { commits, found: true, hasMore: false };
+        commits.push(commit);
+        if (commits.length >= maxCommits) return { commits, found: false, hasMore: true };
+      }
+      if (!result.hasNextPage) return { commits, found: false, hasMore: false };
+    }
+    return { commits, found: false, hasMore: true };
+  }
+
   /** Commit metadata plus one page of its changed files. */
   async getCommitPage(
     owner: string,

@@ -12,24 +12,29 @@ import type {
   ApiErrorBody,
   ApiErrorCode,
   ApiResponse,
-  AppSettings,
-  CommitDetail,
+  BaselineRequest,
   CommitFilesResponse,
-  CommitSummary,
-  ConfirmSyncRequest,
+  ConfirmUpdateRequest,
+  ConnectionTestResponse,
   CreateGithubConnectionRequest,
+  CreateUpdatePlanRequest,
   GithubBranch,
   GithubConnectionResponse,
-  GithubRepository,
+  OverviewResponse,
   Paginated,
-  RetrySyncRequest,
+  PublishOptionsResponse,
+  RolloutConfirmRequest,
+  RolloutConfirmResult,
+  RolloutPreviewRequest,
+  RolloutPreviewResult,
+  RolloutResponse,
   SettingsResponse,
   ShopifyTheme,
-  SyncPreview,
-  SyncPreviewRequest,
-  SyncRun,
-  SyncRunDetail,
-  SyncStatus,
+  StoreSummary,
+  ThemeLine,
+  UpdateRun,
+  UpdateRunDetail,
+  UpdatesResponse,
   UpdateSettingsRequest,
 } from './types';
 import { getSessionToken, redirectTopLevel } from './app-bridge';
@@ -147,17 +152,18 @@ export async function apiRequest<T>(method: Method, path: string, options: Reque
 
 /** Typed endpoint map — mirrors worker/routes/*. */
 export const api = {
+  overview: (refresh = false) => apiRequest<OverviewResponse>('GET', '/api/overview', { query: { refresh: refresh ? 1 : undefined } }),
+  stores: () => apiRequest<StoreSummary[]>('GET', '/api/stores'),
   settings: {
     get: () => apiRequest<SettingsResponse>('GET', '/api/settings'),
     update: (body: UpdateSettingsRequest) => apiRequest<SettingsResponse>('PUT', '/api/settings', { body }),
+    test: () => apiRequest<ConnectionTestResponse>('POST', '/api/settings/test', { body: {} }),
   },
   github: {
     connection: () => apiRequest<GithubConnectionResponse>('GET', '/api/github/connection'),
     connect: (body: CreateGithubConnectionRequest) =>
       apiRequest<GithubConnectionResponse>('POST', '/api/github/connection', { body }),
     disconnect: () => apiRequest<GithubConnectionResponse>('DELETE', '/api/github/connection'),
-    repositories: (query: { page?: number; perPage?: number; q?: string } = {}) =>
-      apiRequest<Paginated<GithubRepository>>('GET', '/api/github/repositories', { query }),
     branches: (query: { repository?: string; page?: number; perPage?: number } = {}) =>
       apiRequest<Paginated<GithubBranch>>('GET', '/api/github/branches', { query }),
   },
@@ -165,22 +171,28 @@ export const api = {
     list: (refresh = false) => apiRequest<ShopifyTheme[]>('GET', '/api/themes', { query: { refresh: refresh ? 1 : undefined } }),
   },
   commits: {
-    list: (query: { repository?: string; branch?: string; page?: number; perPage?: number; path?: string }) =>
-      apiRequest<Paginated<CommitSummary>>('GET', '/api/commits', { query }),
-    get: (sha: string, repository?: string) =>
-      apiRequest<CommitDetail>('GET', `/api/commits/${encodeURIComponent(sha)}`, { query: { repository } }),
-    files: (sha: string, query: { repository?: string; page?: number; perPage?: number } = {}) =>
+    files: (sha: string, query: { page?: number; perPage?: number } = {}) =>
       apiRequest<CommitFilesResponse>('GET', `/api/commits/${encodeURIComponent(sha)}/files`, { query }),
   },
-  sync: {
-    preview: (body: SyncPreviewRequest) => apiRequest<SyncPreview>('POST', '/api/sync/preview', { body }),
-    confirm: (body: ConfirmSyncRequest) => apiRequest<SyncRun>('POST', '/api/sync', { body }),
-    history: (query: { page?: number; perPage?: number; status?: SyncStatus } = {}) =>
-      apiRequest<Paginated<SyncRun>>('GET', '/api/sync/history', { query }),
-    get: (id: string) => apiRequest<SyncRunDetail>('GET', `/api/sync/history/${encodeURIComponent(id)}`),
-    retry: (id: string, body: RetrySyncRequest = {}) =>
-      apiRequest<SyncRun>('POST', `/api/sync/history/${encodeURIComponent(id)}/retry`, { body }),
+  updates: {
+    list: (query: { line?: ThemeLine; ref?: 'branch' | 'current'; page?: number; perPage?: number } = {}) =>
+      apiRequest<UpdatesResponse>('GET', '/api/updates', { query }),
+    plan: (body: CreateUpdatePlanRequest) => apiRequest<UpdateRun>('POST', '/api/updates/plan', { body }),
+    baseline: (body: BaselineRequest) => apiRequest<UpdateRun>('POST', '/api/updates/baseline', { body }),
+    publishOptions: () => apiRequest<PublishOptionsResponse>('GET', '/api/updates/publish-options'),
+    get: (id: string) => apiRequest<UpdateRunDetail>('GET', `/api/updates/${encodeURIComponent(id)}`),
+    confirm: (id: string, body: ConfirmUpdateRequest = {}) =>
+      apiRequest<UpdateRun>('POST', `/api/updates/${encodeURIComponent(id)}/confirm`, { body }),
+    retry: (id: string) => apiRequest<UpdateRun>('POST', `/api/updates/${encodeURIComponent(id)}/retry`, { body: {} }),
+    rerun: (id: string) => apiRequest<UpdateRun>('POST', `/api/updates/${encodeURIComponent(id)}/rerun`, { body: {} }),
+    restore: (id: string) => apiRequest<UpdateRun>('POST', `/api/updates/${encodeURIComponent(id)}/restore`, { body: {} }),
+    cancel: (id: string) => apiRequest<UpdateRun>('POST', `/api/updates/${encodeURIComponent(id)}/cancel`, { body: {} }),
+  },
+  history: (query: { page?: number; perPage?: number; line?: ThemeLine } = {}) =>
+    apiRequest<Paginated<UpdateRun>>('GET', '/api/history', { query }),
+  rollout: {
+    get: (sha?: string) => apiRequest<RolloutResponse>('GET', '/api/rollout', { query: { sha } }),
+    preview: (body: RolloutPreviewRequest) => apiRequest<RolloutPreviewResult[]>('POST', '/api/rollout/preview', { body }),
+    confirm: (body: RolloutConfirmRequest) => apiRequest<RolloutConfirmResult[]>('POST', '/api/rollout/confirm', { body }),
   },
 };
-
-export type { AppSettings };

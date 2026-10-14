@@ -21,14 +21,14 @@ import {
   commitsQuerySchema,
   parseOrThrow,
 } from '../lib/validators';
-import { annotateCommitFiles } from '../sync/planner';
+import { annotateCommitFiles } from '../sync/plan';
 
 export const commitsRoutes = new Hono<AppEnv>()
   .get('/', async (c) => {
     const query = parseOrThrow(commitsQuerySchema, c.req.query());
     const { client, connection } = await githubClient(c);
     const target = await resolveRepository(c, connection, query.repository);
-    const ref = query.branch ?? target.defaultBranch ?? undefined;
+    const ref = query.branch ?? target.branch ?? undefined;
     const result = await client.listCommits(target.owner, target.repo, {
       ref,
       path: query.path,
@@ -74,7 +74,7 @@ export const commitsRoutes = new Hono<AppEnv>()
     const start = (query.page - 1) * query.perPage;
     const pageItems = all.files.slice(start, start + query.perPage);
     return ok<CommitFilesResponse>(c, {
-      items: annotateCommitFiles(pageItems, settings.syncPreferences),
+      items: annotateCommitFiles(pageItems, settings.preferences),
       page: query.page,
       perPage: query.perPage,
       hasNextPage: start + query.perPage < all.files.length,

@@ -1,139 +1,150 @@
-import { useCallback } from 'react';
 import { AppLayout } from '../components/AppLayout';
 import { ErrorBanner } from '../components/ErrorBanner';
 import { LoadingState } from '../components/LoadingState';
+import { StoreHeader } from '../components/StoreHeader';
+import { PublishedBadge } from '../components/ThemeBadges';
 import { api } from '../lib/api-client';
-import { firstLine, formatDate, SYNC_STATUS_BADGE } from '../lib/format';
+import { firstLine, formatDate, plural, STATUS_BADGE } from '../lib/format';
 import { useApiQuery, useNavigateHandler } from '../lib/hooks';
+import type { ThemeLineState } from '../lib/types';
+
+function LineCard({ state, onOpen, action }: { state: ThemeLineState; onOpen: (e?: Event) => void; action: string }) {
+  const isStaging = state.line === 'staging';
+  const waitingLabel = isStaging
+    ? `${state.waiting}${state.waitingMore ? '+' : ''} ${state.waiting === 1 ? 'update' : 'updates'} waiting`
+    : `${state.waiting}${state.waitingMore ? '+' : ''} ${state.waiting === 1 ? 'update' : 'updates'} to publish`;
+  return (
+    <s-section heading={isStaging ? 'Staging theme' : 'Live theme'}>
+      <s-stack gap="base">
+        <s-text color="subdued">
+          {isStaging
+            ? 'Unpublished. Receives every update first. Backup before every update.'
+            : 'Published. Staging-verified updates only. Backup before every publish.'}
+        </s-text>
+        {!state.configured ? (
+          <s-banner tone="warning">
+            <s-paragraph>{`No ${isStaging ? 'Staging' : 'Live'} theme is selected yet. Choose it in Settings.`}</s-paragraph>
+          </s-banner>
+        ) : (
+          <s-stack gap="small-200">
+            <s-stack direction="inline" gap="small-200" alignItems="center">
+              <s-text type="strong">{state.configured.name}</s-text>
+              <PublishedBadge theme={state.theme} />
+            </s-stack>
+            <s-paragraph>
+              <s-text color="subdued">Last synced: </s-text>
+              {state.lastSynced ? (
+                <>
+                  <s-text type="strong">{state.lastSynced.shortSha}</s-text> {firstLine(state.lastSynced.message)}
+                  <s-text color="subdued">{` · ${formatDate(state.lastSynced.syncedAt)}`}</s-text>
+                </>
+              ) : (
+                <s-text color="subdued">no update yet</s-text>
+              )}
+            </s-paragraph>
+            {state.activeRun ? (
+              <s-badge tone="info">{`Updating ${state.activeRun.progress.succeeded}/${state.activeRun.progress.total}`}</s-badge>
+            ) : state.waiting > 0 ? (
+              <s-badge tone="caution">{waitingLabel}</s-badge>
+            ) : state.lastSynced ? (
+              <s-badge tone="success">Up to date</s-badge>
+            ) : null}
+            {state.lastRun && state.lastRun.status !== 'succeeded' && !state.activeRun && (
+              <s-text color="subdued">
+                {`Last run: ${STATUS_BADGE[state.lastRun.status].label} · ${formatDate(state.lastRun.confirmedAt)}`}
+              </s-text>
+            )}
+          </s-stack>
+        )}
+        <s-stack direction="inline">
+          <s-button onClick={onOpen} disabled={!state.configured}>
+            {action}
+          </s-button>
+        </s-stack>
+      </s-stack>
+    </s-section>
+  );
+}
 
 export default function Dashboard() {
   const go = useNavigateHandler();
-  const load = useCallback(
-    () => Promise.all([api.settings.get(), api.github.connection(), api.sync.history({ perPage: 5 })]),
-    [],
-  );
-  const { data, error, loading, reload } = useApiQuery(load, []);
+  const overview = useApiQuery(() => api.overview(), []);
 
-  if (loading && !data) return <LoadingState title="Dashboard" />;
-
-  const [settingsRes, github, history] = data ?? [null, null, null];
-  const shop = settingsRes?.shop;
-  const settings = settingsRes?.settings;
+  if (overview.loading && !overview.data) return <LoadingState title="Theme Sync" />;
+  const data = overview.data;
 
   return (
     <AppLayout
-      title="Dashboard"
-      primaryAction={{ content: 'Sync a commit', onAction: go('/commits'), disabled: !github?.connected }}
-      banners={<ErrorBanner error={error} onRetry={reload} />}
+      title="Theme Sync"
+      subtitle="Staging first. Live when you say so."
+      primaryAction={{ content: 'Choose an update', onAction: () => go('/updates')(), disabled: !data || data.setupMissing.length > 0 }}
+      secondaryActions={[{ content: 'Refresh', onAction: overview.reload, loading: overview.loading }]}
+      banners={<ErrorBanner error={overview.error} onRetry={overview.reload} />}
     >
-      <s-grid gridTemplateColumns="repeat(auto-fit, minmax(280px, 1fr))" gap="base">
-        <s-section heading="Shopify store">
-          <s-stack gap="small-200">
-            <s-stack direction="inline" gap="small-200" alignItems="center">
-              <s-text type="strong">{shop?.shopDomain ?? '—'}</s-text>
-              {shop && (
-                <s-badge tone={shop.status === 'installed' ? 'success' : 'critical'}>
-                  {shop.status === 'installed' ? 'Connected' : 'Not installed'}
-                </s-badge>
+      {data && (
+        <>
+          <s-section>
+            <s-stack gap="base">
+              <StoreHeader
+                store={data.store}
+                subtitle={`${data.store.shopDomain}${data.repository ? ` · ${data.repository}${data.branch ? ` (${data.branch})` : ''}` : ''}`}
+              />
+              {data.notices.map((notice) => (
+                <s-banner key={notice} tone="warning">
+                  <s-paragraph>{notice}</s-paragraph>
+                </s-banner>
+              ))}
+              {data.setupMissing.length > 0 && (
+                <s-banner tone="info" heading="Finish the one-time setup">
+                  <s-unordered-list>
+                    {data.setupMissing.map((step) => (
+                      <s-list-item key={step}>{step}</s-list-item>
+                    ))}
+                  </s-unordered-list>
+                  <s-button slot="secondary-actions" onClick={go('/settings')}>
+                    Open settings
+                  </s-button>
+                </s-banner>
+              )}
+              {data.publishable && !data.live.activeRun && (
+                <s-banner tone="success" heading={`${data.publishable.shortSha} is verified on Staging`}>
+                  <s-paragraph>
+                    {`${firstLine(data.publishable.message)} fully completed on Staging. Test it there, then publish it to Live.`}
+                  </s-paragraph>
+                  <s-button slot="secondary-actions" onClick={go('/publish')}>
+                    Publish to Live
+                  </s-button>
+                </s-banner>
               )}
             </s-stack>
-            <s-stack direction="inline" gap="small-200">
-              <s-badge tone={shop?.canReadThemes ? 'success' : 'critical'}>
-                {shop?.canReadThemes ? 'Can read themes' : 'Missing read_themes'}
-              </s-badge>
-              <s-badge tone={shop?.canWriteThemes ? 'success' : 'warning'}>
-                {shop?.canWriteThemes ? 'Can write themes' : 'Missing write_themes'}
-              </s-badge>
-            </s-stack>
-          </s-stack>
-        </s-section>
+          </s-section>
 
-        <s-section heading="GitHub">
-          <s-stack gap="small-200">
-            <s-stack direction="inline" gap="small-200" alignItems="center">
-              <s-badge tone={github?.connected ? 'success' : 'caution'}>
-                {github?.connected ? 'Connected' : 'Not connected'}
-              </s-badge>
-            </s-stack>
-            <s-paragraph>
-              {github?.connection
-                ? `Signed in as ${github.connection.accountLogin}`
-                : 'Add a personal access token in Settings.'}
+          <s-grid gridTemplateColumns="repeat(auto-fit, minmax(280px, 1fr))" gap="base">
+            <LineCard
+              state={data.staging}
+              action={data.staging.activeRun ? 'View progress' : 'Choose an update'}
+              onOpen={data.staging.activeRun ? go(`/updates/${data.staging.activeRun.id}`) : go('/updates')}
+            />
+            <LineCard
+              state={data.live}
+              action={data.live.activeRun ? 'View progress' : 'Publish from Staging'}
+              onOpen={data.live.activeRun ? go(`/updates/${data.live.activeRun.id}`) : go('/publish')}
+            />
+          </s-grid>
+
+          <s-section heading="How it works">
+            <s-ordered-list>
+              <s-list-item>Your developer saves an update in the master GitHub repository.</s-list-item>
+              <s-list-item>You choose the update; automatic checks look for code errors and direct edits.</s-list-item>
+              <s-list-item>You review every file, confirm, and Staging is updated after a backup.</s-list-item>
+              <s-list-item>You test Staging in Shopify, then publish the same update to Live.</s-list-item>
+            </s-ordered-list>
+            <s-paragraph color="subdued">
+              {`Protected brand settings and theme-editor content are never replaced. ${plural(data.staging.waiting, 'update')} waiting for Staging.`}
             </s-paragraph>
-            {!github?.connected && (
-              <s-stack direction="inline">
-                <s-button onClick={go('/settings')}>Connect GitHub</s-button>
-              </s-stack>
-            )}
-          </s-stack>
-        </s-section>
-
-        <s-section heading="Repository">
-          <s-stack gap="small-200">
-            <s-text type="strong">{settings?.defaultRepository ?? 'No repository selected'}</s-text>
-            <s-text color="subdued">Default branch: {settings?.defaultBranch ?? '—'}</s-text>
-            <s-stack direction="inline">
-              <s-button onClick={go('/repositories')} disabled={!github?.connected}>
-                Choose repository
-              </s-button>
-            </s-stack>
-          </s-stack>
-        </s-section>
-
-        <s-section heading="Target theme">
-          <s-stack gap="small-200">
-            <s-text type="strong">{settings?.defaultThemeName ?? 'No theme selected'}</s-text>
-            <s-text color="subdued">
-              Strategy: {settings?.syncPreferences.strategy === 'full_snapshot' ? 'Full snapshot' : 'Commit changes'}
-              {' · '}Deletions {settings?.syncPreferences.allowDeletes ? 'allowed' : 'disabled'}
-            </s-text>
-            <s-stack direction="inline">
-              <s-button onClick={go('/themes')}>Choose theme</s-button>
-            </s-stack>
-          </s-stack>
-        </s-section>
-      </s-grid>
-
-      <s-section heading="Recent synchronizations">
-        <s-button slot="secondary-actions" variant="tertiary" onClick={go('/sync-history')}>
-          View all
-        </s-button>
-        {history && history.items.length === 0 ? (
-          <s-paragraph color="subdued">No syncs yet. Pick a commit to preview your first sync.</s-paragraph>
-        ) : (
-          <s-table variant="auto">
-            <s-table-header-row>
-              <s-table-header listSlot="primary">Commit → theme</s-table-header>
-              <s-table-header listSlot="secondary">Started</s-table-header>
-              <s-table-header listSlot="inline">Status</s-table-header>
-              <s-table-header>Details</s-table-header>
-            </s-table-header-row>
-            <s-table-body>
-              {history?.items.map((run) => (
-                <s-table-row key={run.id}>
-                  <s-table-cell>
-                    <s-stack gap="none">
-                      <s-text type="strong">
-                        {run.commitSha.slice(0, 7)} → {run.themeName}
-                      </s-text>
-                      <s-text color="subdued">{firstLine(run.commitMessage)}</s-text>
-                    </s-stack>
-                  </s-table-cell>
-                  <s-table-cell>{formatDate(run.initiatedAt)}</s-table-cell>
-                  <s-table-cell>
-                    <s-badge tone={SYNC_STATUS_BADGE[run.status].tone}>{SYNC_STATUS_BADGE[run.status].label}</s-badge>
-                  </s-table-cell>
-                  <s-table-cell>
-                    <s-button variant="tertiary" onClick={go(`/sync-history?id=${run.id}`)}>
-                      View
-                    </s-button>
-                  </s-table-cell>
-                </s-table-row>
-              ))}
-            </s-table-body>
-          </s-table>
-        )}
-      </s-section>
+          </s-section>
+        </>
+      )}
     </AppLayout>
   );
 }

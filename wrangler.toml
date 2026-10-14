@@ -37,6 +37,14 @@ SHOPIFY_API_VERSION = "2026-07"
 SHOPIFY_SCOPES = "read_themes,write_themes"
 SHOPIFY_APP_URL = "https://ace-marks-git-connection.REPLACE_WITH_WORKERS_SUBDOMAIN.workers.dev"
 GITHUB_API_BASE_URL = "https://api.github.com"
+# Theme Sync (optional):
+# MASTER_REPOSITORY – the master theme repository stores use when none is chosen in Settings.
+# STORE_GROUP       – the stores of the collection (comma-separated *.myshopify.com domains).
+#                     Staff of any listed store can see all of them and roll an update out to
+#                     their Staging themes. Leave empty to keep every store separate.
+# MASTER_REPOSITORY = "acemarks-collection/master-theme"
+# MASTER_BRANCH = "main"
+# STORE_GROUP = "acemarks.myshopify.com,paulevans.myshopify.com,jackerwin.myshopify.com,mylesapparel.myshopify.com,koio.myshopify.com"
 
 [[d1_databases]]
 binding = "DB"

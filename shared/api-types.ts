@@ -28,6 +28,12 @@ export type ApiErrorCode =
   | 'THEME_NOT_WRITABLE'
   | 'PREVIEW_EXPIRED'
   | 'LIVE_THEME_CONFIRMATION_REQUIRED'
+  | 'SETUP_INCOMPLETE'
+  | 'CODE_ERRORS'
+  | 'DIRECT_EDITS_FOUND'
+  | 'NOT_VERIFIED_ON_STAGING'
+  | 'UPDATE_IN_PROGRESS'
+  | 'BACKUP_UNAVAILABLE'
   | 'UPSTREAM_TIMEOUT'
   | 'SERVER_MISCONFIGURED'
   | 'DATABASE_NOT_MIGRATED'
@@ -65,57 +71,80 @@ export interface Paginated<T> {
 // ---------------------------------------------------------------------------
 export interface ShopInfo {
   shopDomain: string;
+  name: string | null;
   status: 'installed' | 'uninstalled';
   scopes: string[];
   canReadThemes: boolean;
   canWriteThemes: boolean;
 }
 
-export const SYNC_STRATEGY_VALUES = ['commit_changes', 'full_snapshot'] as const;
-export type SyncStrategy = (typeof SYNC_STRATEGY_VALUES)[number];
-
 export interface SyncPreferences {
-  /**
-   * commit_changes – apply only the files the selected commit changed.
-   * full_snapshot  – upsert every theme file present in the repository at the commit.
-   */
-  strategy: SyncStrategy;
-  /** Apply deletions for files removed (or renamed away) in the commit. Off by default. */
-  allowDeletes: boolean;
   /** Repository sub-directory that contains the theme, e.g. "theme". Empty = repo root. */
   themeRoot: string;
-  /** Theme paths never written or deleted. Supports `*` and `**` globs. */
+  /**
+   * Protected files are never replaced or removed once they exist in a theme:
+   * brand settings and content edited in the Shopify theme editor. A protected
+   * file that does not exist in the theme yet (a new template) is still created.
+   */
+  protectedPatterns: string[];
+  /** Theme paths never written, created or removed. Supports `*` and `**` globs. */
   ignorePatterns: string[];
 }
 
+export const DEFAULT_PROTECTED_PATTERNS: readonly string[] = [
+  'config/settings_data.json',
+  'templates/**/*.json',
+  'sections/*-group.json',
+];
+
 export const DEFAULT_SYNC_PREFERENCES: SyncPreferences = {
-  strategy: 'commit_changes',
-  allowDeletes: false,
   themeRoot: '',
-  // Merchant customizations live in settings_data.json; overwriting it from Git
-  // would discard theme editor changes, so it is excluded unless removed here.
-  ignorePatterns: ['config/settings_data.json'],
+  protectedPatterns: [...DEFAULT_PROTECTED_PATTERNS],
+  ignorePatterns: [],
 };
 
+export interface ThemeRef {
+  id: string;
+  name: string;
+}
+
 export interface AppSettings {
-  defaultRepository: string | null;
-  defaultBranch: string | null;
-  defaultThemeId: string | null;
-  defaultThemeName: string | null;
-  syncPreferences: SyncPreferences;
+  /** `owner/name` of the master theme repository. */
+  repository: string | null;
+  branch: string | null;
+  /** Unpublished theme that receives every new update first. */
+  stagingTheme: ThemeRef | null;
+  /** Theme that receives Staging-verified updates only (normally the published theme). */
+  liveTheme: ThemeRef | null;
+  preferences: SyncPreferences;
   updatedAt: string | null;
 }
 
 export interface SettingsResponse {
   shop: ShopInfo;
   settings: AppSettings;
+  /** Repository used when none is set for this store (Worker variable MASTER_REPOSITORY). */
+  masterRepository: string | null;
 }
 
 export interface UpdateSettingsRequest {
-  defaultRepository?: string | null;
-  defaultBranch?: string | null;
-  defaultThemeId?: string | null;
-  syncPreferences?: Partial<SyncPreferences>;
+  repository?: string | null;
+  branch?: string | null;
+  stagingThemeId?: string | null;
+  liveThemeId?: string | null;
+  preferences?: Partial<SyncPreferences>;
+}
+
+export interface ConnectionCheck {
+  ok: boolean;
+  message: string;
+}
+
+export interface ConnectionTestResponse {
+  github: ConnectionCheck & { repository: string | null; branch: string | null; account: string | null };
+  shopify: ConnectionCheck & { shopName: string | null };
+  /** Whether Shopify lets this app change theme files (scope + theme-modification exemption). */
+  themeWrites: ConnectionCheck & { allowed: boolean | null };
 }
 
 // ---------------------------------------------------------------------------
@@ -139,6 +168,8 @@ export interface GithubConnectionInfo {
 export interface GithubConnectionResponse {
   connected: boolean;
   connection: GithubConnectionInfo | null;
+  /** True when no store token is saved but the Worker has a shared GITHUB_TOKEN. */
+  usingSharedToken: boolean;
 }
 
 export interface CreateGithubConnectionRequest {
@@ -239,9 +270,12 @@ export interface ShopifyTheme {
 }
 
 // ---------------------------------------------------------------------------
-// Sync
+// Theme Sync: lines of work, updates and runs
 // ---------------------------------------------------------------------------
-export type SyncStatus =
+export type ThemeLine = 'staging' | 'live';
+export type UpdateKind = 'update' | 'publish' | 'rollback' | 'restore' | 'baseline';
+
+export type UpdateStatus =
   | 'previewed'
   | 'queued'
   | 'running'
@@ -251,108 +285,311 @@ export type SyncStatus =
   | 'cancelled'
   | 'expired';
 
-export type SyncPlanAction = 'upsert' | 'delete' | 'skip';
-
-export interface SyncPreviewRequest {
-  /** `owner/name`; defaults to Settings → default repository. */
-  repository?: string;
-  branch?: string;
-  /** Full 40-character commit SHA. */
-  commitSha: string;
-  themeId: string;
-  strategy?: SyncStrategy;
-  allowDeletes?: boolean;
-  /** Restrict the plan to these theme paths (subset of the commit's files). */
-  includePaths?: string[];
+/** The update a theme runs: saved only when every file of an update succeeded. */
+export interface SyncedUpdate {
+  sha: string;
+  shortSha: string;
+  message: string | null;
+  syncedAt: string | null;
+  verifiedOnStagingAt: string | null;
 }
 
-export interface SyncPlanOperation {
+export interface CommitRef {
+  sha: string;
+  shortSha: string;
+  message: string | null;
+}
+
+export type FileChange = 'added' | 'modified' | 'removed';
+
+export interface IncludedCommitFile {
   path: string;
-  sourcePath: string | null;
-  previousPath: string | null;
-  action: SyncPlanAction;
-  changeType: string;
-  existsInTheme: boolean | null;
-  size: number | null;
-  blobSha: string | null;
-  skipReason: string | null;
+  change: FileChange;
+  /** Matches a protected pattern (left untouched if it already exists in the theme). */
+  protected: boolean;
+  /** Not a theme file, outside the theme root, or ignored. */
+  ignored: boolean;
 }
 
-export interface SyncPreviewSummary {
-  creates: number;
-  updates: number;
-  deletes: number;
+export interface IncludedCommit {
+  sha: string;
+  shortSha: string;
+  message: string;
+  date: string | null;
+  authorName: string | null;
+  files: IncludedCommitFile[];
+  filesTruncated: boolean;
+}
+
+export interface CodeIssue {
+  path: string;
+  line: number | null;
+  message: string;
+}
+
+export interface DirectEdit {
+  path: string;
+  updatedAt: string | null;
+  /** edited – changed in Shopify since the last sync; added – created in Shopify, not in the last synced update. */
+  reason: 'edited' | 'added';
+}
+
+export interface UpdateChecks {
+  code: {
+    status: 'passed' | 'failed';
+    filesChecked: number;
+    /** Files checked when they are applied instead (very large updates). */
+    filesDeferred: number;
+    issues: CodeIssue[];
+  };
+  directEdits: {
+    status: 'passed' | 'warning' | 'skipped';
+    files: DirectEdit[];
+    note: string | null;
+  };
+}
+
+export interface UpdateTotals {
+  added: number;
+  updated: number;
+  removed: number;
+  /** Protected files the update would have replaced or removed, left as they are. */
+  protectedUntouched: number;
   skipped: number;
+}
+
+export type UpdatePhase = 'review' | 'backup' | 'applying' | 'done';
+
+export interface UpdateProgress {
   total: number;
+  succeeded: number;
+  failed: number;
+  pending: number;
+  backedUp: number;
 }
 
-export interface SyncPreview {
-  syncId: string;
-  expiresAt: string;
-  repository: string;
-  branch: string | null;
-  commit: { sha: string; message: string | null };
-  theme: ShopifyTheme;
-  strategy: SyncStrategy;
-  operations: SyncPlanOperation[];
-  summary: SyncPreviewSummary;
-  warnings: string[];
-  requiresLiveConfirmation: boolean;
+/**
+ * forward   – applying newer updates (includes every update in between)
+ * backward  – going back to an earlier update
+ * initial   – the theme has no last synced update: the complete theme is applied
+ * rewritten – the branch history no longer contains the last synced update
+ * none      – the theme already runs the target update
+ */
+export type UpdateDirection = 'forward' | 'backward' | 'initial' | 'rewritten' | 'none';
+
+export interface UpdateActions {
+  canConfirm: boolean;
+  needsDirectEditApproval: boolean;
+  blockedByCodeErrors: boolean;
+  canCancel: boolean;
+  canRetry: boolean;
+  canRerun: boolean;
+  canRestore: boolean;
+  canPublish: boolean;
 }
 
-export interface ConfirmSyncRequest {
-  syncId: string;
-  confirm: true;
-  /** Required (true) when the target is the live theme. */
-  confirmLiveTheme?: boolean;
-  /** Required for the live theme: must equal the theme name exactly. */
-  confirmThemeName?: string;
-}
-
-export interface RetrySyncRequest {
-  confirmLiveTheme?: boolean;
-  confirmThemeName?: string;
-}
-
-export interface SyncRun {
+export interface UpdateRun {
   id: string;
+  kind: UpdateKind;
+  line: ThemeLine;
+  status: UpdateStatus;
+  phase: UpdatePhase;
+  shopDomain: string;
+  theme: { id: string; name: string; role: string };
   repository: string;
   branch: string | null;
-  commitSha: string;
-  commitMessage: string | null;
-  themeId: string;
-  themeName: string;
-  themeRole: string;
-  strategy: SyncStrategy;
-  status: SyncStatus;
-  filesChanged: number;
-  filesSucceeded: number;
-  filesFailed: number;
-  filesSkipped: number;
+  base: CommitRef | null;
+  target: CommitRef | null;
+  direction: UpdateDirection;
+  commits: IncludedCommit[];
+  checks: UpdateChecks | null;
+  totals: UpdateTotals;
+  progress: UpdateProgress;
+  warnings: string[];
   errorDetails: { code: string; message: string } | null;
   attempt: number;
+  verifiedOnStagingAt: string | null;
+  restoredFromId: string | null;
+  rolloutId: string | null;
+  previewExpiresAt: string | null;
   initiatedAt: string;
+  confirmedAt: string | null;
   startedAt: string | null;
   completedAt: string | null;
-  /** Failed operations can be retried; upserts/deletes are idempotent. */
-  canRetry: boolean;
+  actions: UpdateActions;
 }
 
-export interface SyncOperation {
+export type UpdateFileStatus = 'pending' | 'succeeded' | 'failed' | 'skipped';
+
+export interface UpdateFile {
   id: string;
   path: string;
-  sourcePath: string | null;
-  previousPath: string | null;
   action: 'upsert' | 'delete';
-  changeType: string;
-  status: 'pending' | 'succeeded' | 'failed' | 'skipped';
+  change: FileChange | 'skipped';
+  status: UpdateFileStatus;
+  introducedBy: string | null;
   skipReason: string | null;
-  attempts: number;
   error: string | null;
+  /** transient – can be retried; code – needs a developer fix. */
+  errorKind: 'transient' | 'code' | 'other' | null;
+  backup: 'pending' | 'saved' | 'absent' | null;
+  attempts: number;
 }
 
-export interface SyncRunDetail extends SyncRun {
-  operations: SyncOperation[];
+export interface UpdateRunDetail extends UpdateRun {
+  files: UpdateFile[];
+}
+
+export interface CreateUpdatePlanRequest {
+  /** update – Staging; publish – a Live theme; rollback – Staging or Live to an earlier update. */
+  kind: 'update' | 'publish' | 'rollback';
+  /** Full 40-character commit SHA of the update to apply (or go back to). */
+  targetSha: string;
+  /** Required for publish (the Live theme to publish to). Rollback defaults to the line's theme. */
+  themeId?: string;
+  line?: ThemeLine;
+}
+
+export interface ConfirmUpdateRequest {
+  /** "Replace and continue": replace files that were edited directly in Shopify. */
+  acceptDirectEdits?: boolean;
+}
+
+export interface BaselineRequest {
+  line: ThemeLine;
+  /** The update the theme already runs. Nothing in the theme is changed. */
+  sha: string;
+}
+
+// ---------------------------------------------------------------------------
+// Overview, updates list, publish options
+// ---------------------------------------------------------------------------
+export interface StoreSummary {
+  shopDomain: string;
+  name: string;
+  installed: boolean;
+  /** Opens this app inside that store's Shopify Admin. */
+  adminUrl: string;
+  current: boolean;
+}
+
+export interface ThemeLineState {
+  line: ThemeLine;
+  configured: ThemeRef | null;
+  /** Current Shopify data for the configured theme (null if it no longer exists). */
+  theme: ShopifyTheme | null;
+  lastSynced: SyncedUpdate | null;
+  /** Staging: updates waiting in the repository. Live: Staging-verified updates to publish. */
+  waiting: number;
+  /** True when more updates are waiting than were counted. */
+  waitingMore: boolean;
+  activeRun: UpdateRun | null;
+  lastRun: UpdateRun | null;
+}
+
+export interface OverviewResponse {
+  store: StoreSummary;
+  repository: string | null;
+  branch: string | null;
+  githubConnected: boolean;
+  /** What is still missing before updates can be applied. */
+  setupMissing: string[];
+  staging: ThemeLineState;
+  live: ThemeLineState;
+  /** Staging's last synced update when it can be published to Live. */
+  publishable: SyncedUpdate | null;
+  /** Non-fatal problems while loading (for example GitHub unreachable). */
+  notices: string[];
+}
+
+export type UpdateListState = 'new' | 'current' | 'older';
+
+export interface UpdateListItem extends CommitSummary {
+  state: UpdateListState;
+  counts: { added: number; modified: number; removed: number } | null;
+}
+
+export interface UpdatesResponse {
+  line: ThemeLine;
+  theme: ThemeRef | null;
+  repository: string;
+  branch: string | null;
+  current: SyncedUpdate | null;
+  /** Whether the current update was found in the listed history. */
+  currentFound: boolean;
+  waiting: number;
+  waitingMore: boolean;
+  items: UpdateListItem[];
+  page: number;
+  hasNextPage: boolean;
+}
+
+export interface PublishThemeOption {
+  theme: ShopifyTheme;
+  lastSynced: SyncedUpdate | null;
+  isConfiguredLive: boolean;
+}
+
+export interface PublishOptionsResponse {
+  /** Staging's last synced update. */
+  update: SyncedUpdate | null;
+  verified: boolean;
+  reason: string | null;
+  themes: PublishThemeOption[];
+  defaultThemeId: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Roll-out across stores
+// ---------------------------------------------------------------------------
+export type RolloutStagingState =
+  | 'up_to_date'
+  | 'behind'
+  | 'ahead'
+  | 'queued'
+  | 'updating'
+  | 'failed'
+  | 'not_configured'
+  | 'not_installed';
+
+export type RolloutLiveState = 'published' | 'ready_to_publish' | 'behind' | 'updating' | 'not_configured' | 'none';
+
+export interface RolloutStore {
+  shopDomain: string;
+  name: string;
+  current: boolean;
+  adminUrl: string;
+  staging: { state: RolloutStagingState; sha: string | null; runId: string | null; progress: { done: number; total: number } | null };
+  live: { state: RolloutLiveState; sha: string | null };
+}
+
+export interface RolloutResponse {
+  /** False when the Worker has no STORE_GROUP configured. */
+  enabled: boolean;
+  target: CommitRef | null;
+  stores: RolloutStore[];
+}
+
+export interface RolloutPreviewRequest {
+  sha: string;
+  shops: string[];
+}
+
+export interface RolloutPreviewResult {
+  shopDomain: string;
+  name: string;
+  run: UpdateRun | null;
+  error: { code: string; message: string } | null;
+}
+
+export interface RolloutConfirmRequest {
+  runs: { shopDomain: string; runId: string; acceptDirectEdits?: boolean }[];
+}
+
+export interface RolloutConfirmResult {
+  shopDomain: string;
+  run: UpdateRun | null;
+  error: { code: string; message: string } | null;
 }
 
 export interface HealthResponse {
