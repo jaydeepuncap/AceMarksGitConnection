@@ -67,21 +67,15 @@ export interface ShopTokenWrite {
 }
 
 /** Creates or re-activates a shop with fresh offline credentials (install / reinstall / token exchange). */
-export async function upsertInstalledShop(
-  db: Database,
-  shopDomain: string,
-  tokens: ShopTokenWrite,
-  shopifyClientId: string,
-): Promise<Shop> {
+export async function upsertInstalledShop(db: Database, shopDomain: string, tokens: ShopTokenWrite): Promise<Shop> {
   const now = new Date();
   const [row] = await db
     .insert(shops)
-    .values({ shopDomain, shopifyClientId, status: 'installed', installedAt: now, ...tokens, tokenVersion: 1 })
+    .values({ shopDomain, status: 'installed', installedAt: now, ...tokens, tokenVersion: 1 })
     .onConflictDoUpdate({
       target: shops.shopDomain,
       set: {
         ...tokens,
-        shopifyClientId,
         status: 'installed',
         uninstalledAt: null,
         installedAt: sql`coalesce(${shops.installedAt}, ${now.getTime()})`,
@@ -110,14 +104,6 @@ export async function updateShopTokensIfVersion(
     .where(and(eq(shops.id, shopId), eq(shops.tokenVersion, expectedVersion)))
     .returning();
   return row;
-}
-
-/** Records which app a pre-existing shop belongs to (backfill for rows created before multi-app support). */
-export async function setShopClientId(db: Database, shopId: string, shopifyClientId: string): Promise<void> {
-  await db
-    .update(shops)
-    .set({ shopifyClientId })
-    .where(and(eq(shops.id, shopId), sql`${shops.shopifyClientId} IS NULL`));
 }
 
 export async function clearShopTokens(db: Database, shopId: string): Promise<void> {

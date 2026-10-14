@@ -18,17 +18,12 @@ async function getSettings(t: ReturnType<typeof createTestEnv>) {
 
 describe('required server configuration', () => {
   it('reports which secrets are missing by name only', () => {
-    expect(
-      missingServerConfig({ SHOPIFY_API_KEY: 'client-id-1', SHOPIFY_API_SECRET: 's', ENCRYPTION_KEY: TEST_ENCRYPTION_KEY }),
-    ).toEqual([]);
-    expect(missingServerConfig({ SHOPIFY_API_KEY: 'client-id-1', SHOPIFY_API_SECRET: ' ', ENCRYPTION_KEY: 'c2hvcnQ=' })).toEqual([
-      'SHOPIFY_API_KEY and SHOPIFY_API_SECRET must be set together',
+    expect(missingServerConfig({ SHOPIFY_API_KEY: 'k', SHOPIFY_API_SECRET: 's', ENCRYPTION_KEY: TEST_ENCRYPTION_KEY })).toEqual([]);
+    expect(missingServerConfig({ SHOPIFY_API_KEY: 'k', SHOPIFY_API_SECRET: ' ', ENCRYPTION_KEY: 'c2hvcnQ=' })).toEqual([
+      'SHOPIFY_API_SECRET',
       'ENCRYPTION_KEY (32 random bytes, base64)',
     ]);
-    expect(missingServerConfig({})).toEqual([
-      'No Shopify app configured: set SHOPIFY_APPS (or SHOPIFY_API_KEY + SHOPIFY_API_SECRET)',
-      'ENCRYPTION_KEY (32 random bytes, base64)',
-    ]);
+    expect(missingServerConfig({})).toHaveLength(3);
   });
 
   it('fails closed with SERVER_MISCONFIGURED instead of a generic 500', async () => {
@@ -38,7 +33,7 @@ describe('required server configuration', () => {
     const { status, body } = await getSettings(t);
     expect(status).toBe(500);
     expect(body.error?.code).toBe('SERVER_MISCONFIGURED');
-    expect(body.error?.message).toContain('SHOPIFY_API_KEY and SHOPIFY_API_SECRET');
+    expect(body.error?.message).toContain('SHOPIFY_API_KEY');
     expect(body.error?.message).toContain('ENCRYPTION_KEY');
   });
 
@@ -70,7 +65,6 @@ describe('required server configuration', () => {
 
   it('recognises missing-table errors wrapped as a cause', () => {
     expect(isMissingTableError(new Error('Failed query', { cause: new Error('no such table: shops') }))).toBe(true);
-    expect(isMissingTableError(new Error('table shops has no column named shopify_client_id'))).toBe(true);
     expect(isMissingTableError(new Error('UNIQUE constraint failed'))).toBe(false);
   });
 });

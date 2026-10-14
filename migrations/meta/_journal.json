@@ -8,13 +8,6 @@
       "when": 1791795315404,
       "tag": "0000_init",
       "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "6",
-      "when": 1791895278440,
-      "tag": "0001_shop_app_client_id",
-      "breakpoints": true
     }
   ]
 }

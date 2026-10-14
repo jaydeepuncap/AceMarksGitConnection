@@ -45,12 +45,6 @@ export const shops = sqliteTable(
     /** Canonical `{handle}.myshopify.com` domain, lowercase. */
     shopDomain: text('shop_domain').notNull(),
     status: text('status', { enum: SHOP_STATUSES }).notNull().default('installed'),
-    /**
-     * Client ID of the Shopify app this shop installed. One Worker serves
-     * several custom apps (one per store), so tokens must be exchanged and
-     * refreshed with that app's credentials.
-     */
-    shopifyClientId: text('shopify_client_id'),
     /** Comma-separated scopes actually granted by Shopify. */
     scopes: text('scopes').notNull().default(''),
     /** Encrypted offline Admin API access token. */
@@ -70,7 +64,6 @@ export const shops = sqliteTable(
   (t) => [
     uniqueIndex('shops_shop_domain_unique').on(t.shopDomain),
     index('shops_status_idx').on(t.status),
-    index('shops_client_id_idx').on(t.shopifyClientId),
   ],
 );
 

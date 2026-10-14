@@ -3,11 +3,11 @@
 #
 # Prerequisites (one time, see README "Deploy to production"):
 #   - wrangler login (or CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID in CI)
-#   - production D1/KV/Queue IDs filled into the top level of wrangler.toml
-#   - secrets: npm run apps:push-secret (SHOPIFY_APPS) and wrangler secret put ENCRYPTION_KEY
-#   - one linked shopify.app.<store>.toml per store app (npm run apps:new / npm run shopify:link)
+#   - production D1/KV/Queue created and IDs filled into wrangler.toml [env.production]
+#   - secrets: wrangler secret put SHOPIFY_API_KEY|SHOPIFY_API_SECRET|ENCRYPTION_KEY --env production
+#   - shopify app config link (fills client_id in shopify.app.toml)
 #
-# Flags: --skip-shopify   do not release Shopify app configuration (npm run shopify:deploy:ci)
+# Flags: --skip-shopify   do not run `shopify app deploy`
 #        --skip-tests     skip lint/typecheck/tests (not recommended)
 set -euo pipefail
 
@@ -38,17 +38,20 @@ fi
 step "Building the React app (dist/client)"
 npm run build:web
 
-# Production is the top-level environment in wrangler.toml (--env="" targets it explicitly).
 step "Applying D1 migrations to production"
-npx wrangler d1 migrations apply DB --remote --env=""
+npx wrangler d1 migrations apply DB --remote --env production
 
-step "Deploying the Worker (one deploy updates every store's app)"
-npx wrangler deploy --env=""
+step "Deploying the Worker"
+npx wrangler deploy --env production
 
 if [ "$SKIP_SHOPIFY" = false ]; then
-  step "Releasing Shopify app configuration to every store app (scopes, URLs, webhooks)"
-  npx tsx scripts/shopify-apps.ts deploy --ci
+  step "Releasing Shopify app configuration (scopes, URLs, webhooks)"
+  if command -v shopify >/dev/null 2>&1; then
+    shopify app deploy
+  else
+    npx --yes @shopify/cli@latest app deploy
+  fi
 fi
 
 step "Done"
-echo "Health check: curl -fsS \"\$(grep -m1 '^SHOPIFY_APP_URL' wrangler.toml | cut -d'\"' -f2)/api/health\""
+echo "Health check: curl -fsS \"\$(grep -m1 '^application_url' shopify.app.toml | cut -d'\"' -f2)/api/health\""

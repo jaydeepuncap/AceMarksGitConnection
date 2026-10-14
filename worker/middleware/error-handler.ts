@@ -7,7 +7,6 @@ import { HTTPException } from 'hono/http-exception';
 import type { AppEnv } from '../env';
 import { createLogger } from '../lib/logger';
 import { ApiError, errorBody } from '../lib/response';
-import { getShopifyApps } from '../lib/shopify-apps';
 
 const REQUEST_ID = /^[A-Za-z0-9-]{8,64}$/;
 
@@ -36,13 +35,10 @@ export const apiSecurityHeaders = (): MiddlewareHandler<AppEnv> => async (c, nex
   c.header('Referrer-Policy', 'strict-origin-when-cross-origin');
 };
 
-/**
- * D1 (via Drizzle) reports a missing or outdated schema as "no such table: x",
- * "no such column: y" or "table x has no column named y".
- */
+/** D1 (via Drizzle) reports a schema that was never migrated as "no such table: <name>". */
 export function isMissingTableError(err: unknown): boolean {
   for (let e: unknown = err, depth = 0; e instanceof Error && depth < 4; e = e.cause, depth++) {
-    if (/no such table|no such column|has no column named/i.test(e.message)) return true;
+    if (/no such table/i.test(e.message)) return true;
   }
   return false;
 }
@@ -77,7 +73,7 @@ export const errorHandler: ErrorHandler<AppEnv> = (err, c) => {
         new ApiError(
           500,
           'DATABASE_NOT_MIGRATED',
-          'The D1 database schema is missing or out of date. Apply the migrations: npm run db:migrate:remote',
+          'The D1 database has no tables yet. Apply the migrations: npm run db:migrate:remote',
         ),
         requestId,
       ),
@@ -151,14 +147,17 @@ function decodedLength(base64: string | undefined): number {
 }
 
 export function missingServerConfig(env: Partial<AppEnv['Bindings']>): string[] {
-  const missing: string[] = [...getShopifyApps(env).errors];
-  if (decodedLength(env.ENCRYPTION_KEY?.trim()) !== 32) missing.push('ENCRYPTION_KEY (32 random bytes, base64)');
+  const missing: string[] = [];
+  if (!env.SHOPIFY_API_KEY?.trim()) missing.push('SHOPIFY_API_KEY');
+  if (!env.SHOPIFY_API_SECRET?.trim()) missing.push('SHOPIFY_API_SECRET');
+  const key = env.ENCRYPTION_KEY?.trim();
+  if (decodedLength(key) !== 32) missing.push('ENCRYPTION_KEY (32 random bytes, base64)');
   return missing;
 }
 
 /**
- * Fails closed when no Shopify app is configured (or SHOPIFY_APPS is malformed)
- * or ENCRYPTION_KEY is missing, instead of failing later with a generic 500.
+ * Fails closed when secrets are absent. Without SHOPIFY_API_KEY the session-token
+ * audience check would be skipped, and without ENCRYPTION_KEY tokens cannot be stored.
  */
 export const requireServerConfig = (): MiddlewareHandler<AppEnv> => async (c, next) => {
   const missing = missingServerConfig(c.env);
@@ -166,7 +165,7 @@ export const requireServerConfig = (): MiddlewareHandler<AppEnv> => async (c, ne
     throw new ApiError(
       500,
       'SERVER_MISCONFIGURED',
-      `Server configuration problem: ${missing.join('; ')}. Fix the Worker secrets with \`wrangler secret put <NAME>\`.`,
+      `Missing Worker secrets: ${missing.join(', ')}. Set them with \`wrangler secret put <NAME>\` and redeploy.`,
       { details: { missing } },
     );
   }
