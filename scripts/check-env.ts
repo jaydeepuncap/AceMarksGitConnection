@@ -7,7 +7,7 @@
  * Usage: npm run check-env            (local)
  *        npm run check-env -- --prod  (also fail on production placeholders)
  */
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { getShopifyApps } from '../worker/lib/shopify-apps.ts';
 
 const prod = process.argv.includes('--prod');
@@ -60,24 +60,30 @@ if (!prod) {
 }
 
 const wrangler = readFileSync('wrangler.toml', 'utf8');
-const shopifyToml = readFileSync('shopify.app.toml', 'utf8');
-// Match the real table header, not mentions of it in comments.
-const prodStart = wrangler.search(/^\[env\.production\]/m);
-const prodSection = prodStart >= 0 ? wrangler.slice(prodStart) : '';
-const devSection = prodStart >= 0 ? wrangler.slice(0, prodStart) : wrangler;
+// Top level = production; named environments start at the first real [env.*] header.
+const envStart = wrangler.search(/^\[env\./m);
+const prodSection = envStart >= 0 ? wrangler.slice(0, envStart) : wrangler;
+const envSections = envStart >= 0 ? wrangler.slice(envStart) : '';
 
-if (/REPLACE_WITH_DEV_/.test(devSection)) {
-  warnings.push('wrangler.toml dev D1/KV IDs are placeholders (fine for local `wrangler dev`, required for --remote).');
-}
 const prodPlaceholders = prodSection.match(/REPLACE_WITH_[A-Z0-9_]+/g) ?? [];
 if (prodPlaceholders.length) {
   (prod ? errors : warnings).push(`wrangler.toml production placeholders: ${[...new Set(prodPlaceholders)].join(', ')}`);
 }
-const tomlPlaceholders = shopifyToml.match(/REPLACE_WITH_[A-Z0-9_]+/g) ?? [];
-if (tomlPlaceholders.length) {
-  (prod ? errors : warnings).push(
-    `shopify.app.toml placeholders: ${[...new Set(tomlPlaceholders)].join(', ')} (run \`shopify app config link\`)`,
-  );
+if (/REPLACE_WITH_/.test(envSections)) {
+  warnings.push('wrangler.toml [env.development] IDs are placeholders (fine for local dev, required for --remote).');
+}
+
+// Shopify app configs: at least one must be linked to a real app.
+const appConfigs = readdirSync('.').filter((f) => /^shopify\.app(\.[\w-]+)?\.toml$/.test(f));
+const linked = appConfigs.filter((f) => {
+  const id = /^client_id\s*=\s*"([^"]*)"/m.exec(readFileSync(f, 'utf8'))?.[1] ?? '';
+  return id !== '' && !id.startsWith('REPLACE_WITH');
+});
+if (linked.length === 0) {
+  (prod ? errors : warnings).push('No shopify.app*.toml is linked to an app (run `npm run shopify:link`).');
+}
+for (const f of appConfigs.filter((f) => !linked.includes(f))) {
+  warnings.push(`${f} still has placeholders and is skipped by \`npm run shopify:deploy\`.`);
 }
 
 for (const w of warnings) console.warn(`⚠  ${w}`);

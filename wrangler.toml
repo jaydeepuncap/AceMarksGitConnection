@@ -35,7 +35,7 @@ APP_ENV = "production"
 LOG_LEVEL = "info"
 SHOPIFY_API_VERSION = "2026-07"
 SHOPIFY_SCOPES = "read_themes,write_themes"
-SHOPIFY_APP_URL = "https://ace-marks-git-connection.REPLACE_WITH_WORKERS_SUBDOMAIN.workers.dev"
+SHOPIFY_APP_URL = "https://ace-marks-git-connection.uncap.workers.dev"
 GITHUB_API_BASE_URL = "https://api.github.com"
 
 [[d1_databases]]

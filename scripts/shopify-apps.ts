@@ -4,7 +4,9 @@
  *   npm run apps:new -- <store-name> <client-id>   create shopify.app.<store-name>.toml from the template
  *   npm run apps:check                             validate shopify-apps.secret.json against the .toml files
  *   npm run apps:push-secret                       upload shopify-apps.secret.json as the SHOPIFY_APPS secret
- *   npm run apps:deploy                            `shopify app deploy` for every store app (config, scopes, webhooks)
+ *   npm run shopify:validate [-- store-b]          validate every (or one) store app config
+ *   npm run shopify:deploy [-- store-b]            `shopify app deploy` for every (or one) store app
+ *   npm run shopify:deploy:ci                      same, without prompts (--allow-updates)
  *
  * shopify-apps.secret.json holds every app's client ID + secret. It is gitignored:
  * never commit it. Secrets are never printed by this script.
@@ -113,7 +115,7 @@ function newApp(storeName: string | undefined, clientId: string | undefined) {
     .replaceAll('{{HANDLE}}', `ace-marks-git-connection-${storeName}`)
     .replaceAll('{{APP_URL}}', APP_URL.replace(/\/+$/, ''));
   writeFileSync(file, toml);
-  console.log(`✔  Created ${file}. Next: add the app to ${SECRET_FILE}, then npm run apps:push-secret && npm run apps:deploy`);
+  console.log(`✔  Created ${file}. Next: add the app to ${SECRET_FILE}, then npm run apps:push-secret && npm run shopify:deploy`);
 }
 
 function pushSecret() {
@@ -128,15 +130,46 @@ function pushSecret() {
   if (result.status !== 0) fail('wrangler secret put failed');
 }
 
-function deployAll() {
+/** Store app configs to act on: all linked ones, or only those named on the command line. */
+function selectedConfigs(names: string[]) {
   const configs = storeConfigs();
   if (configs.length === 0) fail('No shopify.app.*.toml with a real client_id found');
-  const force = process.argv.includes('--force') ? ['--force'] : [];
+  if (names.length === 0) return configs;
+  const picked = configs.filter((c) =>
+    names.some((n) => c.file === n || c.file === `shopify.app.${n}.toml` || c.clientId === n),
+  );
+  if (picked.length !== names.length) fail(`Unknown app config in: ${names.join(', ')}`);
+  return picked;
+}
+
+/** Runs the project's pinned Shopify CLI (devDependency), never a random global version. */
+function shopifyCli(args: string[]) {
+  try {
+    execFileSync('npx', ['--no-install', 'shopify', ...args], { stdio: 'inherit' });
+  } catch {
+    // The CLI already printed its own error above.
+    fail(`shopify ${args.join(' ')} failed`);
+  }
+}
+
+function validateAll(names: string[]) {
+  for (const cfg of selectedConfigs(names)) {
+    console.log(`\n▶ shopify app config validate --config ${cfg.file}  (${cfg.name})`);
+    shopifyCli(['app', 'config', 'validate', '--config', cfg.file]);
+  }
+}
+
+/**
+ * `shopify app deploy` for every store app: creates and releases a new app version
+ * with the scopes, URLs and webhooks from each shopify.app.*.toml.
+ * --ci releases without prompts (--allow-updates); otherwise the CLI asks per app.
+ */
+function deployAll(names: string[], ci: boolean) {
+  const configs = selectedConfigs(names);
+  const flags = ci ? ['--allow-updates', '--no-color'] : [];
   for (const cfg of configs) {
     console.log(`\n▶ shopify app deploy --config ${cfg.file}  (${cfg.name})`);
-    execFileSync('npx', ['--yes', '@shopify/cli@latest', 'app', 'deploy', '--config', cfg.file, ...force], {
-      stdio: 'inherit',
-    });
+    shopifyCli(['app', 'deploy', '--config', cfg.file, ...flags]);
   }
   console.log(`\n✔  Released configuration to ${configs.length} app(s).`);
 }
@@ -153,8 +186,17 @@ switch (command) {
     pushSecret();
     break;
   case 'deploy':
-    deployAll();
+    deployAll(
+      args.filter((a) => !a.startsWith('--')),
+      args.includes('--ci'),
+    );
+    break;
+  case 'validate':
+    validateAll(args.filter((a) => !a.startsWith('--')));
     break;
   default:
-    fail('Commands: new <store-name> <client-id> | check | push-secret [--env <name>] | deploy [--force]');
+    fail(
+      'Commands: new <store-name> <client-id> | check | push-secret [--env <name>] | ' +
+        'validate [store…] | deploy [store…] [--ci]',
+    );
 }

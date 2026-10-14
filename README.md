@@ -164,7 +164,7 @@ If you lose `ENCRYPTION_KEY`, merchants must reconnect GitHub. Shopify tokens ar
 # after editing drizzle/schema.ts
 npm run db:generate          # → migrations/0001_<name>.sql
 npm run db:migrate:local     # local D1 under .wrangler/state
-npm run db:migrate:remote    # production D1 (--env production)
+npm run db:migrate:remote    # production D1 (top-level environment)
 ```
 
 ---
@@ -218,7 +218,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"   # 
 1. Create the app: `shopify app config link` (choose *Create new app*). This fills `client_id` in `shopify.app.toml`.
 2. Copy the client ID and secret into `.dev.vars` (`SHOPIFY_API_KEY`, `SHOPIFY_API_SECRET`). `shopify app env show` prints them.
 3. For production, set `application_url` and `[auth].redirect_urls` to your Worker URL, for example `https://ace-marks-git-connection.<subdomain>.workers.dev` and `…/auth/callback`. During `shopify app dev` the CLI points these at the dev tunnel automatically.
-4. Run `shopify app deploy` to release the scopes and webhook subscriptions from `shopify.app.toml`.
+4. Run `npm run shopify:deploy` to release the scopes and webhook subscriptions to every linked app (`npm run shopify:deploy -- <store>` for one).
 5. **Request the theme-file exemption** (see [above](#shopify-scopes-and-theme-write-access)).
 6. Create a **development store** in the Partner Dashboard and install the app on it (`shopify app dev` offers this).
 
@@ -234,13 +234,13 @@ npx wrangler queues create ace-marks-sync-dev
 npx wrangler queues create ace-marks-sync-dlq-dev
 
 # Production
-npx wrangler d1 create ace-marks-git-connection          # → [[env.production.d1_databases]] database_id
-npx wrangler kv namespace create KV --env production     # → [[env.production.kv_namespaces]] id
+npx wrangler d1 create ace-marks-git-connection          # → top-level [[d1_databases]] database_id
+npx wrangler kv namespace create KV                      # → top-level [[kv_namespaces]] id
 npx wrangler queues create ace-marks-sync
 npx wrangler queues create ace-marks-sync-dlq
 ```
 
-Replace every `REPLACE_WITH_*` value in `wrangler.toml` with the IDs those commands print, and set `SHOPIFY_APP_URL` under `[env.production.vars]`. `npm run check-env -- --prod` lists anything still missing.
+Replace every `REPLACE_WITH_*` value in `wrangler.toml` with the IDs those commands print, and set `SHOPIFY_APP_URL` in the top-level `[vars]`. `npm run check-env -- --prod` lists anything still missing.
 
 ### 4. GitHub credential (per shop, entered in the app)
 
@@ -269,7 +269,7 @@ This project runs all of them from **one Worker, one database and one codebase**
 | HTML shell | Every app uses the same URL. The page receives the right client ID from the `id_token` Shopify adds to the URL, or from the shop's app. |
 | Webhooks | A webhook from an app the store no longer uses cannot uninstall or erase the store's current install. |
 | Code updates | `npm run deploy` deploys the Worker once and every store gets the new code immediately. |
-| App config updates (scopes, URLs, webhooks) | `npm run apps:deploy` runs `shopify app deploy` for every `shopify.app.*.toml`. |
+| App config updates (scopes, URLs, webhooks) | `npm run shopify:deploy` runs `shopify app deploy` for every linked `shopify.app.*.toml`. |
 
 ### Add a store
 
@@ -277,7 +277,7 @@ This project runs all of them from **one Worker, one database and one codebase**
 2. Create the store's config from the shared template, then release it:
    ```bash
    npm run apps:new -- store-b <client-id>   # writes shopify.app.store-b.toml (commit it)
-   npm run apps:deploy                        # releases scopes, URLs and webhooks to every app
+   npm run shopify:deploy                     # releases scopes, URLs and webhooks to every app
    ```
 3. Add the app to `shopify-apps.secret.json`. This file is gitignored; start from `config/shopify-apps.example.json`. Then upload it:
    ```bash
@@ -287,15 +287,33 @@ This project runs all of them from **one Worker, one database and one codebase**
 4. Generate the install link in the Partner Dashboard (**Distribution → Generate link**) and install the app on the store.
 5. Request the **theme-modification exemption for this app** (see [Shopify scopes and theme write access](#shopify-scopes-and-theme-write-access)). Shopify approves it per app.
 
+### Shopify commands
+
+The Shopify CLI is pinned in `devDependencies` (`@shopify/cli`), so every machine runs the same version.
+
+| Command | What it does |
+|---|---|
+| `npm run shopify:link` | Link a new `shopify.app.<name>.toml` to an app in the Partner Dashboard |
+| `npm run shopify:use` | Choose which app config the bare `shopify` commands use |
+| `npm run shopify:dev` | `shopify app dev` with the live app config (`shopify.app.development.toml`) |
+| `npm run shopify:info` | Show the live app's linked app and settings |
+| `npm run shopify:validate [-- store-b]` | Validate every (or one) store app config |
+| `npm run shopify:deploy [-- store-b]` | `shopify app deploy` for every (or one) store app. Asks for confirmation. |
+| `npm run shopify:deploy:ci` | Same, without prompts (`--allow-updates`), for CI or scripts |
+| `npm run deploy` | Deploy the Worker (code) once; every store gets it |
+| `npm run deploy:all` | `deploy` + `shopify:deploy:ci` |
+
+`shopify app config push` no longer exists in Shopify CLI 4; `shopify app deploy` releases configuration changes.
+
 ### Release a change to all stores
 
 ```bash
 npm run deploy        # code: one Worker deploy updates every store
-npm run apps:deploy   # only when shopify.app.*.toml / the template changed
+npm run shopify:deploy   # only when shopify.app.*.toml / the template changed
 npm run deploy:all    # both
 ```
 
-To change scopes or webhooks for every store, edit `config/shopify.app.template.toml` and the generated `shopify.app.*.toml` files the same way, then run `npm run apps:deploy`.
+To change scopes or webhooks for every store, edit `config/shopify.app.template.toml` and the generated `shopify.app.*.toml` files the same way, then run `npm run shopify:deploy`.
 
 **Encryption.** `ENCRYPTION_KEY` is shared by all apps. Every stored token is still bound to its own store (AES-GCM associated data), so one store's ciphertext cannot be decrypted as another's.
 
@@ -367,9 +385,8 @@ For an end-to-end check against a real store, use `shopify app dev` with a devel
 One-time:
 
 ```bash
-npx wrangler secret put SHOPIFY_API_KEY    --env production
-npx wrangler secret put SHOPIFY_API_SECRET --env production
-npx wrangler secret put ENCRYPTION_KEY     --env production
+npm run apps:push-secret                  # SHOPIFY_APPS: every store app's client ID + secret
+npx wrangler secret put ENCRYPTION_KEY
 ```
 
 Each release:
@@ -383,13 +400,13 @@ npm run deploy     # = scripts/deploy.sh
 1. `check-env --prod` (fails on placeholders)
 2. lint, typecheck and tests
 3. `vite build`
-4. `wrangler d1 migrations apply DB --remote --env production`
-5. `wrangler deploy --env production`
-6. `shopify app deploy`
+4. `wrangler d1 migrations apply DB --remote` (production is the top-level environment)
+5. `wrangler deploy`
+6. `npm run shopify:deploy:ci` (`shopify app deploy --allow-updates` for every store app)
 
 Flags: `--skip-shopify`, `--skip-tests`.
 
-Verify with `curl https://<app-url>/api/health`, then open the app in the store's admin. Watch logs with `npx wrangler tail --env production`; they are structured JSON with `requestId`, `shop` and `syncId` fields.
+Verify with `curl https://<app-url>/api/health`, then open the app in the store's admin. Watch logs with `npx wrangler tail`; they are structured JSON with `requestId`, `shop` and `syncId` fields.
 
 For CI, set `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`, plus `SHOPIFY_CLI_PARTNERS_TOKEN` for `shopify app deploy`.
 
@@ -403,7 +420,7 @@ For CI, set `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`, plus `SHOPIFY_CL
 | `SHOPIFY_APPS` | `.dev.vars` (single-line JSON in single quotes); Worker secret via `npm run apps:push-secret` | Every app's `{ name, clientId, clientSecret, shops }`. See [Multiple stores](#multiple-stores-one-custom-app-per-store). |
 | `SHOPIFY_API_KEY` / `SHOPIFY_API_SECRET` | `.dev.vars`; Worker secrets | Legacy single-app credentials. Still supported, and treated as one more app. |
 | `ENCRYPTION_KEY` / `ENCRYPTION_KEY_PREVIOUS` | `.dev.vars`; Worker secrets | 32-byte base64 AES key / rotation key |
-| `SHOPIFY_API_VERSION`, `SHOPIFY_SCOPES`, `SHOPIFY_APP_URL`, `GITHUB_API_BASE_URL`, `LOG_LEVEL`, `APP_ENV` | `wrangler.toml [vars]` / `[env.production.vars]` | Non-secret. `.dev.vars` can override them locally. |
+| `SHOPIFY_API_VERSION`, `SHOPIFY_SCOPES`, `SHOPIFY_APP_URL`, `GITHUB_API_BASE_URL`, `LOG_LEVEL`, `APP_ENV` | `wrangler.toml` top-level `[vars]` (production) / `[env.development.vars]` | Non-secret. `.dev.vars` can override them locally. |
 | `DB` | `wrangler.toml [[d1_databases]]` | D1 binding. No connection strings or env vars. |
 | `KV` | `wrangler.toml [[kv_namespaces]]` | Cache, OAuth state, webhook de-dup, session-seen markers |
 | `SYNC_QUEUE` | `wrangler.toml [[queues.*]]` | Optional; enables background jobs |
@@ -411,7 +428,7 @@ For CI, set `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`, plus `SHOPIFY_CL
 | `ASSETS` | `wrangler.toml [assets]` | `dist/client`, `run_worker_first = true`, SPA fallback |
 | GitHub PAT | Entered in the app UI → D1 (encrypted) | Never in env vars; never returned to the browser |
 
-`wrangler.toml` targets Wrangler v4 (installed as a dev dependency). Bindings and vars are **not inherited** by `[env.production]`, which is why it redeclares all of them.
+`wrangler.toml` targets Wrangler v4 (installed as a dev dependency). Production is the top level; bindings and vars are **not inherited** by `[env.development]` or `previews`, which is why they redeclare them.
 
 ---
 
