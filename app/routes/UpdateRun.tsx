@@ -8,7 +8,7 @@ import { api } from '../lib/api-client';
 import { showToast } from '../lib/app-bridge';
 import { firstLine, formatDate, formatDay, KIND_LABEL, LINE_LABEL, plural, runTitle, STATUS_BADGE } from '../lib/format';
 import { useApiQuery, useMutation } from '../lib/hooks';
-import { usePublishFromStaging } from '../lib/publish';
+import { usePublishToLive } from '../lib/publish';
 import type { UpdateFile, UpdateRunDetail } from '../lib/types';
 
 const POLL_MS = 2500;
@@ -119,7 +119,7 @@ function Review({ run, storeName }: { run: UpdateRunDetail; storeName: string })
         <KeyValue label={run.kind === 'restore' ? 'Restoring to' : backward ? 'Go back to' : 'Updating to'}>
           <s-stack direction="inline" gap="small-200" alignItems="center">
             <CommitRefText commit={run.target} empty="The state before the update" />
-            {run.kind === 'publish' && run.verifiedOnStagingAt && <s-badge tone="success">Verified on Staging</s-badge>}
+            {run.kind === 'publish' && run.verifiedOnStagingAt && <s-badge tone="success">Tested</s-badge>}
           </s-stack>
         </KeyValue>
 
@@ -450,7 +450,7 @@ export default function UpdateRun() {
   const [acceptedEdits, setAcceptedEdits] = useState(false);
   const [pending, setPending] = useState<'retry' | 'rerun' | 'restore' | null>(null);
   const confirm = useMutation(api.updates.confirm);
-  const publish = usePublishFromStaging();
+  const publish = usePublishToLive();
   const cancel = useMutation(api.updates.cancel);
   const action = useMutation(async (kind: 'retry' | 'rerun' | 'restore') => api.updates[kind](id));
 
@@ -472,7 +472,7 @@ export default function UpdateRun() {
     if (!run) return;
     const result = await confirm.run(id, { acceptDirectEdits: acceptedEdits || undefined });
     if (result) {
-      showToast(run.line === 'live' ? 'Publishing to Live' : 'Updating Staging');
+      showToast(run.line === 'live' ? 'Publishing to Live' : `Updating ${run.theme.name}`);
       query.reload();
     }
   };
@@ -507,9 +507,7 @@ export default function UpdateRun() {
         ? 'Restore backup'
         : run.kind === 'rollback'
           ? `Confirm going back on ${LINE_LABEL[run.line]}`
-          : run.line === 'staging'
-            ? 'Confirm update to Staging'
-            : `Confirm update to ${run.theme.name}`;
+          : `Confirm update to ${run.theme.name}`;
 
   const liveSummary = overview.data
     ? { sha: overview.data.live.lastSynced?.sha ?? null, waiting: overview.data.live.waiting }

@@ -98,7 +98,7 @@ function CheckRow({ label, check }: { label: string; check: ConnectionCheck }) {
   );
 }
 
-/** One-time setup: connections, Staging/Live themes and protected files. */
+/** One-time setup: GitHub connection, master repository and branch, protected and ignored files. */
 export default function Settings() {
   const settingsQuery = useApiQuery(() => api.settings.get(), []);
   const githubQuery = useApiQuery(() => api.github.connection(), []);

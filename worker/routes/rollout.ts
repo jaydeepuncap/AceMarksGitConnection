@@ -1,21 +1,21 @@
 /**
- * Roll an update out to the Staging themes of several stores of the group.
+ * Roll an update out to a test (unpublished) theme of several stores of the group.
  *
  *   GET  /api/rollout          ?sha   where every store of the group stands
  *   POST /api/rollout/preview  { sha, shops }   checks + review for each store (nothing changes)
  *   POST /api/rollout/confirm  { runs: [{ shopDomain, runId, acceptDirectEdits? }] }
  *
  * Only stores listed in STORE_GROUP, and only when the requesting store is one
- * of them. Each store's own settings, tokens and Staging theme are used, and
- * roll-outs only ever reach Staging: each store is published to Live from its
- * own screen, one at a time.
+ * of them. Each store's own settings and tokens are used, and roll-outs only
+ * ever reach unpublished themes: each store is published to Live from its own
+ * Theme Sync, one at a time.
  */
 import { Hono, type Context } from 'hono';
 import type { Shop } from '../../drizzle/schema';
 import type {
   CommitRef,
+  ShopifyTheme,
   RolloutConfirmResult,
-  RolloutLiveState,
   RolloutPreviewResult,
   RolloutResponse,
   RolloutStagingState,
@@ -27,10 +27,10 @@ import {
   findActiveSyncForTheme,
   findShopsByDomains,
   getDb,
-  getSettings,
   getSyncRun,
   getThemeState,
   latestRunForTheme,
+  type Database,
 } from '../lib/database';
 import { ApiError, ok } from '../lib/response';
 import { storeGroup, toStoreSummary } from '../lib/store-group';
@@ -46,7 +46,7 @@ import { rateLimit } from '../middleware/error-handler';
 import { planRun } from '../sync/plan';
 import { confirmRun, describeRun } from '../sync/runs';
 import { loadShopRuntime, mapLimit } from '../sync/runtime';
-import { dispatchCtx, requestActor } from './helpers';
+import { dispatchCtx, requestActor, themesFor } from './helpers';
 
 const writeLimiter = rateLimit({
   binding: 'SYNC_RATE_LIMITER',
@@ -74,6 +74,17 @@ async function groupShops(c: Context<AppEnv>, domains: string[]): Promise<Map<st
   return new Map(rows.map((r) => [r.shopDomain, r]));
 }
 
+/** The test theme that most recently received an update from Theme Sync. */
+async function mostRecentlyUpdated(db: Database, shopId: string, themes: ShopifyTheme[]): Promise<ShopifyTheme | undefined> {
+  let best: { theme: ShopifyTheme; at: number } | undefined;
+  for (const theme of themes) {
+    const run = await latestRunForTheme(db, shopId, theme.id);
+    const at = run?.confirmedAt?.getTime() ?? 0;
+    if (run && (!best || at > best.at)) best = { theme, at };
+  }
+  return best?.theme;
+}
+
 const toError = (err: unknown) =>
   err instanceof ApiError
     ? { code: err.code, message: err.message }
@@ -89,21 +100,18 @@ export const rolloutRoutes = new Hono<AppEnv>()
       return ok<RolloutResponse>(c, { enabled: false, target: null, stores: [] });
     }
 
-    // Default target: the update this store's Staging runs.
-    const currentSettings = await getSettings(db, current.id);
-    let target: CommitRef | null = null;
-    if (query.sha) {
-      target = { sha: query.sha, shortSha: query.sha.slice(0, 7), message: null };
-    } else if (currentSettings.stagingTheme) {
-      const state = await getThemeState(db, current.id, currentSettings.stagingTheme.id);
-      if (state?.lastSyncedSha) {
-        target = { sha: state.lastSyncedSha, shortSha: state.lastSyncedSha.slice(0, 7), message: state.lastSyncedMessage };
-      }
+    const chosen = new Map<string, string>();
+    for (const pair of (query.themes ?? '').split(',')) {
+      const [domain, id] = pair.split(':');
+      const normalized = normalizeShopDomain(domain);
+      if (normalized && id && /^\d{1,20}$/.test(id)) chosen.set(normalized, `gid://shopify/OnlineStoreTheme/${id}`);
     }
 
     const rows = await findShopsByDomains(db, group);
     const byDomain = new Map(rows.map((r) => [r.shopDomain, r]));
     const stores: RolloutStore[] = [];
+    let target: CommitRef | null = query.sha ? { sha: query.sha, shortSha: query.sha.slice(0, 7), message: null } : null;
+
     for (const domain of group) {
       const shop = byDomain.get(domain);
       const summary = toStoreSummary(c.env, domain, shop, current.shopDomain);
@@ -112,21 +120,45 @@ export const rolloutRoutes = new Hono<AppEnv>()
         name: summary.name,
         current: summary.current,
         adminUrl: summary.adminUrl,
+        themes: [],
+        themeId: null,
         staging: { state: 'not_installed', sha: null, runId: null, progress: null },
         live: { state: 'none', sha: null },
       };
       stores.push(entry);
       if (!shop || shop.status !== 'installed') continue;
 
-      const settings = await getSettings(db, shop.id);
-      if (!settings.stagingTheme) {
+      const rt = await loadShopRuntime(c.env, db, shop, c.get('logger').child({ shop: domain }), {
+        sessionToken: domain === current.shopDomain ? c.get('auth').sessionToken : undefined,
+      });
+      let themes: ShopifyTheme[];
+      try {
+        themes = await themesFor(rt);
+      } catch {
+        entry.staging.state = 'not_configured';
+        continue;
+      }
+      const testThemes = themes.filter((t) => !t.isLive && t.writable);
+      entry.themes = testThemes.map((t) => ({ id: t.id, name: t.name }));
+      const testTheme =
+        testThemes.find((t) => t.id === chosen.get(domain)) ??
+        testThemes.find((t) => t.id === rt.settings.stagingTheme?.id) ??
+        (await mostRecentlyUpdated(db, shop.id, testThemes)) ??
+        testThemes[0];
+      entry.themeId = testTheme?.id ?? null;
+
+      const state = testTheme ? await getThemeState(db, shop.id, testTheme.id) : undefined;
+      // Default update: what this store's test theme runs.
+      if (!target && domain === current.shopDomain && state?.lastSyncedSha) {
+        target = { sha: state.lastSyncedSha, shortSha: state.lastSyncedSha.slice(0, 7), message: state.lastSyncedMessage };
+      }
+      if (!testTheme) {
         entry.staging.state = 'not_configured';
       } else {
-        const state = await getThemeState(db, shop.id, settings.stagingTheme.id);
         entry.staging.sha = state?.lastSyncedSha ?? null;
-        const active = await findActiveSyncForTheme(db, shop.id, settings.stagingTheme.id);
-        const latest = await latestRunForTheme(db, shop.id, settings.stagingTheme.id);
-        let stagingState: RolloutStagingState = state?.lastSyncedSha === target?.sha ? 'up_to_date' : 'behind';
+        const active = await findActiveSyncForTheme(db, shop.id, testTheme.id);
+        const latest = await latestRunForTheme(db, shop.id, testTheme.id);
+        let stagingState: RolloutStagingState = 'behind';
         if (active) {
           const counts = await countOperations(db, shop.id, active.id);
           stagingState = active.status === 'queued' && counts.succeeded === 0 ? 'queued' : 'updating';
@@ -136,33 +168,39 @@ export const rolloutRoutes = new Hono<AppEnv>()
           stagingState = 'failed';
           entry.staging.runId = latest.id;
         }
-        entry.staging.state = target ? stagingState : 'behind';
+        entry.staging.state = stagingState;
       }
 
-      if (!settings.liveTheme) {
+      const published = themes.find((t) => t.isLive);
+      if (!published) {
         entry.live.state = 'not_configured';
       } else {
-        const liveState = await getThemeState(db, shop.id, settings.liveTheme.id);
+        const liveState = await getThemeState(db, shop.id, published.id);
         entry.live.sha = liveState?.lastSyncedSha ?? null;
-        const liveActive = await findActiveSyncForTheme(db, shop.id, settings.liveTheme.id);
-        let live: RolloutLiveState = 'none';
-        if (liveActive) live = 'updating';
-        else if (target && liveState?.lastSyncedSha === target.sha) live = 'published';
-        else if (target && entry.staging.state === 'up_to_date') live = 'ready_to_publish';
-        else if (liveState?.lastSyncedSha) live = 'behind';
-        entry.live.state = live;
+        entry.live.state = (await findActiveSyncForTheme(db, shop.id, published.id)) ? 'updating' : 'none';
+      }
+    }
+
+    // States relative to the update (known only once the target is resolved).
+    for (const entry of stores) {
+      if (target && entry.staging.state === 'behind' && entry.staging.sha === target.sha) entry.staging.state = 'up_to_date';
+      if (entry.live.state === 'none' && target) {
+        if (entry.live.sha === target.sha) entry.live.state = 'published';
+        else if (entry.staging.state === 'up_to_date') entry.live.state = 'ready_to_publish';
+        else if (entry.live.sha) entry.live.state = 'behind';
       }
     }
     return ok<RolloutResponse>(c, { enabled: true, target, stores });
   })
   .post('/preview', writeLimiter, async (c) => {
     const body = parseOrThrow(rolloutPreviewSchema, await readJsonBody(c.req.raw));
-    const shops = await groupShops(c, body.shops);
+    const shops = await groupShops(c, body.targets.map((t) => t.shopDomain));
+    const themeFor = new Map(body.targets.map((t) => [normalizeShopDomain(t.shopDomain)!, t.themeId]));
     const rolloutId = crypto.randomUUID();
     const { userId, shopDomain: currentDomain, sessionToken } = c.get('auth');
     const db = getDb(c.env.DB);
 
-    const results = await mapLimit(body.shops.map((d) => normalizeShopDomain(d)!), 2, async (domain): Promise<RolloutPreviewResult> => {
+    const results = await mapLimit([...themeFor.keys()], 2, async (domain): Promise<RolloutPreviewResult> => {
       const shop = shops.get(domain);
       const name = shop?.shopName ?? toStoreSummary(c.env, domain, shop, currentDomain).name;
       if (!shop || shop.status !== 'installed') {
@@ -171,16 +209,16 @@ export const rolloutRoutes = new Hono<AppEnv>()
       try {
         const logger = c.get('logger').child({ shop: domain, rolloutId });
         const rt = await loadShopRuntime(c.env, db, shop, logger, { sessionToken: domain === currentDomain ? sessionToken : undefined });
-        if (!rt.settings.stagingTheme) throw new ApiError(400, 'SETUP_INCOMPLETE', 'No Staging theme is set for this store');
+        const themeId = themeFor.get(domain)!;
         const run = await planRun(rt, {
           kind: 'update',
-          line: 'staging',
-          themeId: rt.settings.stagingTheme.id,
+          line: themeId === rt.settings.stagingTheme?.id ? 'staging' : 'other',
+          themeId,
           targetSha: body.sha,
           userId,
           rolloutId,
         });
-        return { shopDomain: domain, name, run: await describeRun(db, run, domain, rt.settings.stagingTheme.id), error: null };
+        return { shopDomain: domain, name, run: await describeRun(db, run, domain, rt.settings.stagingTheme?.id ?? null), error: null };
       } catch (err) {
         return { shopDomain: domain, name, run: null, error: toError(err) };
       }

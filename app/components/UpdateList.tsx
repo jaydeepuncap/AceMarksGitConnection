@@ -4,7 +4,7 @@ import { api } from '../lib/api-client';
 import { showToast } from '../lib/app-bridge';
 import { firstLine, formatDay, LINE_LABEL } from '../lib/format';
 import { useApiQuery, useMutation } from '../lib/hooks';
-import { usePublishFromStaging } from '../lib/publish';
+import { usePublishToLive } from '../lib/publish';
 import type { ThemeLine, UpdateListItem } from '../lib/types';
 import { CommitFiles } from './CommitFiles';
 import { ErrorBanner } from './ErrorBanner';
@@ -16,7 +16,7 @@ const PER_PAGE = 20;
 interface Props {
   /** update: newest updates first. goback: the theme's update and earlier ones. */
   mode: 'update' | 'goback';
-  /** A configured line (Staging / Live) … */
+  /** A line of work … */
   line?: ThemeLine;
   /** … or any theme of the store. */
   themeId?: string;
@@ -48,7 +48,7 @@ export function UpdateList({ mode, line = 'staging', themeId, branch, canApply =
     [line, themeId, branch, mode, page],
   );
   const plan = useMutation(api.updates.plan);
-  const publish = usePublishFromStaging();
+  const publish = usePublishToLive();
   const baseline = useMutation(api.updates.baseline);
 
   const toggle = (sha: string) =>
@@ -161,7 +161,7 @@ export function UpdateList({ mode, line = 'staging', themeId, branch, canApply =
                         disabled={!!pendingSha}
                         onClick={() => select(item)}
                       >
-                        {mode === 'update' ? (line === 'staging' && !themeId ? 'Update Staging →' : 'Update to this →') : 'Go back to this →'}
+                        {mode === 'update' ? 'Update to this →' : 'Go back to this →'}
                       </s-button>
                     )}
                     {!canApply && mode === 'update' && item.verified && item.state !== 'current' && (

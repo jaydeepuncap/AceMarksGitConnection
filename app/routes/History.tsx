@@ -4,9 +4,8 @@ import { AppLayout } from '../components/AppLayout';
 import { ErrorBanner } from '../components/ErrorBanner';
 import { LoadingState } from '../components/LoadingState';
 import { api } from '../lib/api-client';
-import { formatDate, KIND_LABEL, LINE_LABEL, STATUS_BADGE } from '../lib/format';
+import { formatDate, KIND_LABEL, STATUS_BADGE } from '../lib/format';
 import { useApiQuery } from '../lib/hooks';
-import type { ThemeLine } from '../lib/types';
 
 const PER_PAGE = 25;
 
@@ -14,9 +13,11 @@ const PER_PAGE = 25;
 export default function History() {
   const navigate = useNavigate();
   const [page, setPage] = useState(1);
-  const [line, setLine] = useState<ThemeLine | ''>('');
-  const history = useApiQuery(() => api.history({ page, perPage: PER_PAGE, line: line || undefined }), [page, line]);
+  const [themeId, setThemeId] = useState('');
+  const history = useApiQuery(() => api.history({ page, perPage: PER_PAGE, themeId: themeId || undefined }), [page, themeId]);
   const stores = useApiQuery(() => api.overview(), []);
+  const themes = useApiQuery(() => api.themes.list(), []);
+  const published = new Set((themes.data ?? []).filter((t) => t.isLive).map((t) => t.id));
 
   if (history.loading && !history.data) return <LoadingState title="Update history" />;
   const storeName = stores.data?.store.name ?? '';
@@ -33,16 +34,19 @@ export default function History() {
           <s-box inlineSize="220px">
             <s-select
               label="Theme"
-              value={line || 'all'}
+              value={themeId || 'all'}
               onChange={(event) => {
                 const value = event.currentTarget.value;
-                setLine(value === 'all' ? '' : (value as ThemeLine));
+                setThemeId(value === 'all' ? '' : value);
                 setPage(1);
               }}
             >
               <s-option value="all">All themes</s-option>
-              <s-option value="staging">Staging</s-option>
-              <s-option value="live">Live</s-option>
+              {(themes.data ?? []).map((t) => (
+                <s-option key={t.id} value={t.id}>
+                  {t.isLive ? `${t.name} (Live)` : t.name}
+                </s-option>
+              ))}
             </s-select>
           </s-box>
           {history.data && history.data.items.length === 0 ? (
@@ -71,7 +75,10 @@ export default function History() {
                     <s-table-cell>{formatDate(run.confirmedAt)}</s-table-cell>
                     <s-table-cell>{storeName}</s-table-cell>
                     <s-table-cell>
-                      <s-text type={run.line === 'live' ? 'strong' : 'generic'}>{`${LINE_LABEL[run.line]} · ${run.theme.name}`}</s-text>
+                      <s-stack direction="inline" gap="small-200" alignItems="center">
+                        <s-text type={published.has(run.theme.id) ? 'strong' : 'generic'}>{run.theme.name}</s-text>
+                        {published.has(run.theme.id) && <s-badge tone="success">Live</s-badge>}
+                      </s-stack>
                     </s-table-cell>
                     <s-table-cell>{KIND_LABEL[run.kind]}</s-table-cell>
                     <s-table-cell>{run.target?.shortSha ?? '—'}</s-table-cell>

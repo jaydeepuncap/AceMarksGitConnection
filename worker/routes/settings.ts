@@ -10,7 +10,7 @@ import { invalidate, cacheKeys } from '../lib/cache';
 import { adminClient, githubClient } from '../lib/clients';
 import { getDb, getSettings, updateGithubConnectionRepository, upsertSettings, type SettingsWrite } from '../lib/database';
 import { ApiError, ok } from '../lib/response';
-import { canWriteThemeFiles, getShopDetails, getTheme } from '../lib/shopify-graphql';
+import { canWriteThemeFiles, getShopDetails, getTheme, listThemes } from '../lib/shopify-graphql';
 import { parseOrThrow, readJsonBody, splitRepository, updateSettingsSchema } from '../lib/validators';
 import { requireRepo, resolveBranch } from '../sync/runtime';
 import { importThemeMarker, requestRuntime, toShopInfo } from './helpers';
@@ -136,9 +136,11 @@ export const settingsRoutes = new Hono<AppEnv>()
       const admin = await rt.admin();
       const details = await getShopDetails(admin);
       Object.assign(result.shopify, { ok: true, message: `Connected to ${details.name} (${rt.shop.shopDomain}).`, shopName: details.name });
-      const target = rt.settings.stagingTheme?.id ?? null;
+      // Any unpublished theme will do: the check never changes a file.
+      const themes = await listThemes(admin);
+      const target = (themes.find((t) => !t.isLive && t.writable) ?? themes.find((t) => t.writable))?.id ?? null;
       if (!target) {
-        result.themeWrites.message = 'Pick the Staging theme to check theme write access.';
+        result.themeWrites.message = 'The store has no theme the app can check.';
       } else {
         const check = await canWriteThemeFiles(admin, target);
         Object.assign(result.themeWrites, { ok: check.allowed, allowed: check.allowed, message: check.message });

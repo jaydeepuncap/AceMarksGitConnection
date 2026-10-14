@@ -199,7 +199,7 @@ export const api = {
   ) =>
     apiRequest<Paginated<UpdateRun>>('GET', '/api/history', { query }),
   rollout: {
-    get: (sha?: string) => apiRequest<RolloutResponse>('GET', '/api/rollout', { query: { sha } }),
+    get: (sha?: string, themes?: string) => apiRequest<RolloutResponse>('GET', '/api/rollout', { query: { sha, themes } }),
     preview: (body: RolloutPreviewRequest) => apiRequest<RolloutPreviewResult[]>('POST', '/api/rollout/preview', { body }),
     confirm: (body: RolloutConfirmRequest) => apiRequest<RolloutConfirmResult[]>('POST', '/api/rollout/confirm', { body }),
   },

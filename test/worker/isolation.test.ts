@@ -68,7 +68,7 @@ describe('shop-level data isolation', () => {
     const res = await call(A, '/api/rollout/preview', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sha: '2'.repeat(40), shops: [B] }),
+      body: JSON.stringify({ sha: '2'.repeat(40), targets: [{ shopDomain: B, themeId: THEME_DEV.id }] }),
     });
     expect(res.status).toBe(403);
   });

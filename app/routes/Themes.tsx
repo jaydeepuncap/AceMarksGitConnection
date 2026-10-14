@@ -11,10 +11,9 @@ import type { ThemeOverviewItem } from '../lib/types';
 
 export const themePath = (themeId: string) => `/themes/${themeId.split('/').pop()}`;
 
-export function LineBadge({ line }: { line: ThemeOverviewItem['line'] }) {
-  if (line === 'staging') return <s-badge tone="info">Staging</s-badge>;
-  if (line === 'live') return <s-badge tone="success">Live</s-badge>;
-  return null;
+/** The published theme is the Live theme; every other theme is a test theme. */
+export function RoleText({ theme }: { theme: ThemeOverviewItem['theme'] }) {
+  return <s-text color="subdued">{theme.isLive ? 'Live · customers see this' : 'Test theme'}</s-text>;
 }
 
 /** Step 01 — every theme of the store with the update it last synced. */
@@ -59,9 +58,9 @@ export default function Themes() {
               {(themes.data ?? []).map((item) => (
                 <s-table-row key={item.theme.id} clickDelegate={`open-${item.theme.numericId}`}>
                   <s-table-cell>
-                    <s-stack direction="inline" gap="small-200" alignItems="center">
+                    <s-stack gap="small-300">
                       <s-text type="strong">{item.theme.name}</s-text>
-                      <LineBadge line={item.line} />
+                      <RoleText theme={item.theme} />
                     </s-stack>
                   </s-table-cell>
                   <s-table-cell>
@@ -101,8 +100,9 @@ export default function Themes() {
             </s-table-body>
           </s-table>
           <s-text color="subdued">
-            Each theme records its last synced update in assets/theme-sync.json. Theme Sync never changes which theme is
-            published in Shopify; it only updates the files of the theme you choose.
+            Test an update on any unpublished theme; once it fully completes it can be published to the Live (published)
+            theme. Each theme records its last synced update in assets/theme-sync.json. Theme Sync never changes which theme
+            is published in Shopify.
           </s-text>
         </s-stack>
       </s-section>

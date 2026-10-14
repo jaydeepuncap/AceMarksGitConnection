@@ -124,7 +124,11 @@ export const updatesQuerySchema = z.object({
   perPage: z.coerce.number().int().min(1).max(50).default(20),
 });
 
-export const rolloutQuerySchema = z.object({ sha: commitShaSchema.optional() });
+export const rolloutQuerySchema = z.object({
+  sha: commitShaSchema.optional(),
+  /** Chosen test theme per store: "shop.myshopify.com:123,other.myshopify.com:456". */
+  themes: z.string().max(2000).optional(),
+});
 
 export const uuidSchema = z.string().uuid('Invalid ID');
 
@@ -207,7 +211,10 @@ export const baselineSchema = z
 export const rolloutPreviewSchema = z
   .object({
     sha: commitShaSchema,
-    shops: z.array(z.string().trim().min(1).max(255)).min(1).max(20),
+    targets: z
+      .array(z.object({ shopDomain: z.string().trim().min(1).max(255), themeId: themeIdSchema }).strict())
+      .min(1)
+      .max(20),
   })
   .strict();
 

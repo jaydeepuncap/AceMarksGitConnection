@@ -224,7 +224,6 @@ async function getTreeFiles(rt: ShopRuntime, github: GitHubClient, treeSha: stri
   return themeFilesFromTree(tree.entries, rt.settings.preferences);
 }
 
-/** Has `sha` fully completed on this store's Staging theme (now or earlier)? */
 /**
  * When `sha` fully completed on an unpublished theme of this store (Staging or
  * any other test theme) — the condition for publishing it to Live.
@@ -254,10 +253,10 @@ function assertThemeForKind(rt: ShopRuntime, input: PlanInput, theme: ShopifyThe
     );
   }
   if (input.kind === 'publish' && theme.id === stagingId) {
-    throw new ApiError(422, 'VALIDATION_ERROR', 'Choose a Live theme other than the Staging theme');
+    throw new ApiError(422, 'VALIDATION_ERROR', 'Publish to the published theme, not to a test theme');
   }
   if (theme.isLive && input.line !== 'live') {
-    throw new ApiError(422, 'VALIDATION_ERROR', 'The published theme only receives Staging-verified updates');
+    throw new ApiError(422, 'VALIDATION_ERROR', 'The published theme only receives updates tested on an unpublished theme');
   }
 }
 
@@ -467,7 +466,7 @@ export async function planRun(rt: ShopRuntime, input: PlanInput): Promise<SyncHi
   const history = base ? await resolveHistory(rt, github, base.sha, target.sha) : { direction: baseSha ? 'rewritten' : 'initial', commits: [], more: 0 } as HistoryResult;
 
   if (input.kind === 'update' && history.direction === 'backward') {
-    throw new ApiError(422, 'VALIDATION_ERROR', 'This update is older than the one Staging runs. Use "Go back" instead.');
+    throw new ApiError(422, 'VALIDATION_ERROR', 'This update is older than the one the theme runs. Choose "Go back to an earlier update" instead.');
   }
   if (input.kind === 'rollback' && history.direction === 'forward') {
     throw new ApiError(422, 'VALIDATION_ERROR', 'This update is newer than the one the theme runs; it is not going back.');

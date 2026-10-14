@@ -8,7 +8,7 @@ import { UpdateList } from '../components/UpdateList';
 import { api } from '../lib/api-client';
 import { firstLine, formatDate, KIND_LABEL, STATUS_BADGE } from '../lib/format';
 import { useApiQuery } from '../lib/hooks';
-import { LineBadge } from './Themes';
+import { RoleText } from './Themes';
 
 /** Select value for "use the store's branch" (an empty option value is not reliable in <s-select>). */
 const STORE_BRANCH = '__store_branch__';
@@ -53,7 +53,7 @@ export default function ThemeDetail() {
         <>
           <s-section heading="Last synced update">
             <s-stack direction="inline" slot="secondary-actions" gap="small-200">
-              <LineBadge line={item.line} />
+              <RoleText theme={theme} />
               <PublishedBadge theme={theme} />
             </s-stack>
             <s-stack gap="base">
@@ -68,10 +68,10 @@ export default function ThemeDetail() {
                   <KeyValue label="Synced on">
                     <s-text>{formatDate(item.lastSynced.syncedAt)}</s-text>
                   </KeyValue>
-                  {item.lastSynced.verifiedOnStagingAt && (
+                  {isLive && item.lastSynced.verifiedOnStagingAt && (
                     <>
                       <s-divider />
-                      <KeyValue label="Verified on Staging">
+                      <KeyValue label="Tested on a test theme">
                         <s-text>{formatDate(item.lastSynced.verifiedOnStagingAt)}</s-text>
                       </KeyValue>
                     </>

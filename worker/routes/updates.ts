@@ -71,7 +71,7 @@ const writeLimiter = rateLimit({
 function lineTheme(rt: ShopRuntime, line: ThemeLine) {
   const theme = line === 'staging' ? rt.settings.stagingTheme : rt.settings.liveTheme;
   if (!theme) {
-    throw new ApiError(400, 'SETUP_INCOMPLETE', `Pick the ${line === 'staging' ? 'Staging' : 'Live'} theme in Settings first`);
+    throw new ApiError(400, 'SETUP_INCOMPLETE', 'Open the theme on the Themes page and choose the update there');
   }
   return theme;
 }
@@ -188,7 +188,7 @@ export const updatesRoutes = new Hono<AppEnv>()
       line = 'live';
       // Default: the Live theme from Settings, else the published theme.
       const published = (await themesFor(rt)).find((t) => t.isLive);
-      const target = body.themeId ?? rt.settings.liveTheme?.id ?? published?.id;
+      const target = body.themeId ?? published?.id ?? rt.settings.liveTheme?.id;
       if (!target) throw new ApiError(400, 'SETUP_INCOMPLETE', 'This store has no published theme to publish to');
       themeId = target;
     } else if (body.themeId) {

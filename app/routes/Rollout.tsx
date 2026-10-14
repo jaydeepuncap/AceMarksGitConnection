@@ -15,7 +15,7 @@ const STAGING_BADGE: Record<RolloutStagingState, { label: string; tone: Tone }> 
   queued: { label: 'Queued', tone: 'neutral' },
   updating: { label: 'Updating', tone: 'info' },
   failed: { label: 'Incomplete', tone: 'critical' },
-  not_configured: { label: 'No Staging theme', tone: 'warning' },
+  not_configured: { label: 'No unpublished theme', tone: 'warning' },
   not_installed: { label: 'Not installed', tone: 'warning' },
 };
 
@@ -36,11 +36,16 @@ function stagingLabel(store: RolloutStore) {
   return badge.label;
 }
 
-/** Roll an update out to the Staging themes of several stores. */
+/** Roll an update out to a test (unpublished) theme of several stores. */
 export default function Rollout() {
   const [sha, setSha] = useState<string | undefined>(undefined);
-  const status = useApiQuery(() => api.rollout.get(sha), [sha]);
-  const updates = useApiQuery(() => api.updates.list({ line: 'staging', perPage: 20 }), [], status.data?.enabled ?? false);
+  // Chosen test theme per store (numeric theme ID), sent as "domain:id,…".
+  const [themeChoice, setThemeChoice] = useState<Record<string, string>>({});
+  const themesParam = Object.entries(themeChoice)
+    .map(([domain, id]) => `${domain}:${id.split('/').pop()}`)
+    .join(',');
+  const status = useApiQuery(() => api.rollout.get(sha, themesParam || undefined), [sha, themesParam]);
+  const updates = useApiQuery(() => api.updates.list({ perPage: 20 }), [], status.data?.enabled ?? false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [previews, setPreviews] = useState<RolloutPreviewResult[] | null>(null);
   const [replace, setReplace] = useState<Set<string>>(new Set());
@@ -51,9 +56,9 @@ export default function Rollout() {
   const busy = (status.data?.stores ?? []).some((s) => s.staging.state === 'updating' || s.staging.state === 'queued');
   useEffect(() => {
     if (!busy) return;
-    const timer = setInterval(() => api.rollout.get(sha).then(status.setData).catch(() => undefined), 3000);
+    const timer = setInterval(() => api.rollout.get(sha, themesParam || undefined).then(status.setData).catch(() => undefined), 3000);
     return () => clearInterval(timer);
-  }, [busy, sha, status.setData]);
+  }, [busy, sha, themesParam, status.setData]);
 
   if (status.loading && !status.data) return <LoadingState title="Roll out to stores" />;
   const data = status.data;
@@ -67,7 +72,10 @@ export default function Rollout() {
 
   const check = async () => {
     if (!target) return;
-    const results = await preview.run({ sha: target.sha, shops: [...selected] });
+    const targets = (data?.stores ?? [])
+      .filter((s) => selected.has(s.shopDomain) && s.themeId)
+      .map((s) => ({ shopDomain: s.shopDomain, themeId: s.themeId! }));
+    const results = await preview.run({ sha: target.sha, targets });
     if (results) {
       setPreviews(results);
       setReplace(new Set());
@@ -134,8 +142,9 @@ export default function Rollout() {
                 ))}
               </s-select>
               <s-paragraph color="subdued">
-                Each store then follows the same path: test its Staging theme, then publish to its Live theme from that
-                store&apos;s Theme Sync — one store at a time, so a launch can be staged brand by brand.
+                The update goes to the test (unpublished) theme you choose for each store. Each store then tests it and
+                publishes it to its Live theme from that store&apos;s Theme Sync — one store at a time, so a launch can be
+                staged brand by brand.
               </s-paragraph>
             </s-stack>
           </s-section>
@@ -146,7 +155,8 @@ export default function Rollout() {
                 <s-table-header-row>
                   <s-table-header>Roll out</s-table-header>
                   <s-table-header listSlot="primary">Store</s-table-header>
-                  <s-table-header listSlot="inline">Staging</s-table-header>
+                  <s-table-header>Test theme</s-table-header>
+                  <s-table-header listSlot="inline">Test theme status</s-table-header>
                   <s-table-header listSlot="secondary">Live</s-table-header>
                   <s-table-header>Open</s-table-header>
                 </s-table-header-row>
@@ -170,6 +180,28 @@ export default function Rollout() {
                         </s-table-cell>
                         <s-table-cell>
                           <s-text type="strong">{store.name}</s-text>
+                        </s-table-cell>
+                        <s-table-cell>
+                          {store.themes.length > 0 ? (
+                            <s-select
+                              label={`Test theme for ${store.name}`}
+                              labelAccessibilityVisibility="exclusive"
+                              value={store.themeId ?? store.themes[0]!.id}
+                              onChange={(event) => {
+                                const value = event.currentTarget.value;
+                                setThemeChoice((prev) => ({ ...prev, [store.shopDomain]: value }));
+                                setPreviews(null);
+                              }}
+                            >
+                              {store.themes.map((t) => (
+                                <s-option key={t.id} value={t.id}>
+                                  {t.name}
+                                </s-option>
+                              ))}
+                            </s-select>
+                          ) : (
+                            <s-text color="subdued">—</s-text>
+                          )}
                         </s-table-cell>
                         <s-table-cell>
                           <s-badge tone={STAGING_BADGE[store.staging.state].tone}>{stagingLabel(store)}</s-badge>
@@ -239,7 +271,7 @@ export default function Rollout() {
                 <s-stack direction="inline" gap="small-200" justifyContent="end">
                   <s-button onClick={() => setPreviews(null)}>Cancel</s-button>
                   <s-button variant="primary" disabled={ready.length === 0} loading={confirm.pending} onClick={start}>
-                    {`Update Staging on ${plural(ready.length, 'store')}`}
+                    {`Update the test theme on ${plural(ready.length, 'store')}`}
                   </s-button>
                 </s-stack>
               </s-stack>

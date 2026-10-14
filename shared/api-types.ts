@@ -584,7 +584,13 @@ export interface RolloutStore {
   name: string;
   current: boolean;
   adminUrl: string;
+  /** Unpublished themes of the store the update can be tested on. */
+  themes: ThemeRef[];
+  /** The test theme shown and updated for this store. */
+  themeId: string | null;
+  /** State of the test theme. */
   staging: { state: RolloutStagingState; sha: string | null; runId: string | null; progress: { done: number; total: number } | null };
+  /** State of the published (Live) theme. */
   live: { state: RolloutLiveState; sha: string | null };
 }
 
@@ -597,7 +603,8 @@ export interface RolloutResponse {
 
 export interface RolloutPreviewRequest {
   sha: string;
-  shops: string[];
+  /** The test (unpublished) theme to update in each store. */
+  targets: { shopDomain: string; themeId: string }[];
 }
 
 export interface RolloutPreviewResult {

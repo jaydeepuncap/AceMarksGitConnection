@@ -183,8 +183,8 @@ The screens follow the client guide (*Theme Sync Client Guide v1.1*):
 | Theme page | `/themes/:id` | One theme: last synced update, **branch** picker, that branch's commits (**New** / **Current** / **Added** / **Tested**, files per commit) with *Update to this →*, *Go back to this →*, *Already running this*; on the published theme *Publish to Live →* for tested commits; the theme's full update history with branch |
 | Checks + Review | `/updates/:id` | Code check, direct edit detection, every included update with its files, totals, confirm |
 | Progress + result | `/updates/:id` | Backup, file-by-file progress, preview link, *Publish to Live →*; for incomplete runs *Retry failed files*, *Run full update again*, *Restore backup* |
-| Roll out | `/rollout` | One update to the Staging themes of several stores (needs `STORE_GROUP` and a Staging theme per store) |
-| Update history | `/history` | Every run: date, theme, what, updated to, branch, status |
+| Roll out | `/rollout` | One update to a chosen test (unpublished) theme in several stores (needs `STORE_GROUP`) |
+| Update history | `/history` | Every run (filter by theme): date, theme (Live marked), what, updated to, branch, status |
 | Settings | `/settings` | GitHub, master repository/branch, protected files, ignored files, *Test connection* |
 
 **Test before Live.** The published theme is the Live theme. It never receives a commit directly: apply the commit to any unpublished theme first; once that update fully completes the commit is **Tested** and can be published to Live from the published theme's page or from the update result.
@@ -226,7 +226,7 @@ The screens follow the client guide (*Theme Sync Client Guide v1.1*):
 
 ### Rolling out across stores
 
-Set `STORE_GROUP` to the stores' `*.myshopify.com` domains and install the app on each. From any store in the group, *Roll out* shows where each store stands (Staging up to date / updating / incomplete; Live published / ready to publish), checks the selected stores (each with its own settings, tokens and Staging theme) and updates their **Staging** themes. Live is always published from each store's own Theme Sync, one store at a time.
+Set `STORE_GROUP` to the stores' `*.myshopify.com` domains and install the app on each. From any store in the group, *Roll out* shows for every store a **test theme** (any unpublished theme; the one that last received an update is preselected) and the published **Live** theme, with their state for the chosen update. It checks the selected stores (each with its own settings and tokens) and updates their test themes. Live is always published from each store's own Theme Sync, one store at a time.
 
 ## Setup
 

@@ -4,7 +4,7 @@ import { app } from '../../worker/index';
 import { createLogger } from '../../worker/lib/logger';
 import { handleSyncMessage } from '../../worker/sync/dispatch';
 import { createTestEnv, sessionToken, type TestContext } from '../helpers/env';
-import { seedShop, THEME_DEV, THEME_LIVE } from '../helpers/fixtures';
+import { seedShop, THEME_DEV, THEME_LIVE, THEME_OTHER } from '../helpers/fixtures';
 import { C1, C3, installWorld, REPO_FILES } from '../helpers/sync-world';
 
 const ACE = 'acemarks.myshopify.com';
@@ -48,7 +48,12 @@ describe('roll out across stores', () => {
       [PAUL, 'behind', 'behind'],
     ]);
 
-    const preview = await api<RolloutPreviewResult[]>('POST', '/api/rollout/preview', { sha: C3, shops: [ACE, PAUL] });
+    expect(status.stores[0]).toMatchObject({ themeId: THEME_DEV.id, themes: expect.arrayContaining([{ id: THEME_DEV.id, name: 'Staging' }]) });
+    expect(status.stores[0]!.themes.some((t) => t.id === THEME_LIVE.id)).toBe(false); // never the published theme
+    const preview = await api<RolloutPreviewResult[]>('POST', '/api/rollout/preview', {
+      sha: C3,
+      targets: [ACE, PAUL].map((shopDomain) => ({ shopDomain, themeId: THEME_DEV.id })),
+    });
     expect(preview.status).toBe(201);
     expect(preview.body.data.map((r) => [r.shopDomain, r.run?.status, r.run?.base?.sha])).toEqual([
       [ACE, 'previewed', C1],
@@ -79,9 +84,20 @@ describe('roll out across stores', () => {
 
   it('refuses stores outside the group and callers outside the group', async () => {
     await setup();
-    expect((await api('POST', '/api/rollout/preview', { sha: C3, shops: [OUTSIDER] })).status).toBe(403);
-    expect((await api('POST', '/api/rollout/preview', { sha: C3, shops: [ACE] }, OUTSIDER)).status).toBe(403);
+    expect((await api('POST', '/api/rollout/preview', { sha: C3, targets: [{ shopDomain: OUTSIDER, themeId: THEME_DEV.id }] })).status).toBe(403);
+    expect((await api('POST', '/api/rollout/preview', { sha: C3, targets: [{ shopDomain: ACE, themeId: THEME_DEV.id }] }, OUTSIDER)).status).toBe(403);
     expect((await api<RolloutResponse>('GET', '/api/rollout', undefined, OUTSIDER)).body.data.enabled).toBe(false);
+  });
+
+  it('uses the test theme chosen for each store and never the published theme', async () => {
+    await setup();
+    const status = (await api<RolloutResponse>('GET', `/api/rollout?sha=${C3}&themes=${PAUL}:333`)).body.data;
+    expect(status.stores.map((s) => s.themeId)).toEqual([THEME_DEV.id, THEME_OTHER.id]);
+    const res = await api<RolloutPreviewResult[]>('POST', '/api/rollout/preview', {
+      sha: C3,
+      targets: [{ shopDomain: PAUL, themeId: THEME_LIVE.id }],
+    });
+    expect(res.body.data[0]?.error?.code).toBe('NOT_VERIFIED_ON_STAGING');
   });
 
   it('cannot confirm another store’s plan that a roll-out did not create', async () => {

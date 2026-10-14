@@ -21,6 +21,7 @@ vi.mock('../../app/lib/api-client', async (importOriginal) => {
       history: vi.fn(),
       settings: { get: vi.fn(), update: vi.fn() },
       commits: { files: vi.fn() },
+      themes: { list: vi.fn(), overview: vi.fn(), get: vi.fn() },
       updates: { list: vi.fn(), get: vi.fn(), plan: vi.fn(), confirm: vi.fn(), cancel: vi.fn(), retry: vi.fn() },
     },
   };
@@ -28,6 +29,7 @@ vi.mock('../../app/lib/api-client', async (importOriginal) => {
 const { api } = await import('../../app/lib/api-client');
 type Fn = ReturnType<typeof vi.fn>;
 const mocked = api as unknown as {
+  themes: { list: Fn };
   overview: Fn;
   stores: Fn;
   history: Fn;
@@ -233,8 +235,9 @@ describe('update screens', () => {
       hasNextPage: false,
     });
     mocked.overview.mockResolvedValue({ store: { name: 'Ace Marks' } });
+    mocked.themes.list.mockResolvedValue([{ id: 'x', name: 'Live', isLive: true }]);
     wrap(<History />, '/history');
-    await waitFor(() => expect(screen.getByText('Live · Live')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getAllByText('Live').length).toBeGreaterThan(0));
     expect(screen.getByText('Complete')).toBeInTheDocument();
     expect(screen.getByText('Publish to Live')).toBeInTheDocument();
     expect(screen.getByText('3333333')).toBeInTheDocument();

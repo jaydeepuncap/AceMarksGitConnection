@@ -191,7 +191,7 @@ export async function confirmRun(
   if (!theme) throw new ApiError(404, 'NOT_FOUND', 'The theme no longer exists in this store');
   if (!theme.writable) throw new ApiError(409, 'THEME_NOT_WRITABLE', `A ${theme.role} theme cannot be changed`);
   if (theme.isLive && run.line !== 'live') {
-    throw new ApiError(409, 'THEME_NOT_WRITABLE', 'This theme is now the published theme. Only Staging-verified updates can go there.');
+    throw new ApiError(409, 'THEME_NOT_WRITABLE', 'This theme is now the published theme. It only receives updates tested on an unpublished theme.');
   }
   if (run.kind === 'publish' && !(await verifiedOnStaging(rt, run.commitSha))) {
     throw new ApiError(422, 'NOT_VERIFIED_ON_STAGING', 'Only updates that fully completed on an unpublished theme can be published to Live.');

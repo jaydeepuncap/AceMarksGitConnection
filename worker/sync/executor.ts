@@ -464,7 +464,7 @@ export async function processSyncChunk(
     if (!theme) throw new ApiError(404, 'NOT_FOUND', 'The theme no longer exists in this store');
     if (!theme.writable) throw new ApiError(409, 'THEME_NOT_WRITABLE', `The theme is ${theme.role} and cannot be changed`);
     if (theme.isLive && run.line !== 'live') {
-      throw new ApiError(409, 'THEME_NOT_WRITABLE', 'The Staging theme was published after this update was confirmed');
+      throw new ApiError(409, 'THEME_NOT_WRITABLE', 'This theme was published after the update was confirmed; the published theme only receives tested updates');
     }
   } catch (err) {
     if (isTransient(err)) return { done: false, retryAfterSeconds: err instanceof ApiError ? (err.retryAfter ?? 30) : 30 };
