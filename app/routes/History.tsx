@@ -61,6 +61,7 @@ export default function History() {
                 <s-table-header listSlot="primary">Theme</s-table-header>
                 <s-table-header>What</s-table-header>
                 <s-table-header>Updated to</s-table-header>
+                <s-table-header>Branch</s-table-header>
                 <s-table-header listSlot="inline">Status</s-table-header>
                 <s-table-header>Details</s-table-header>
               </s-table-header-row>
@@ -74,6 +75,9 @@ export default function History() {
                     </s-table-cell>
                     <s-table-cell>{KIND_LABEL[run.kind]}</s-table-cell>
                     <s-table-cell>{run.target?.shortSha ?? '—'}</s-table-cell>
+                    <s-table-cell>
+                      <s-badge tone="neutral">{run.branch ?? '—'}</s-badge>
+                    </s-table-cell>
                     <s-table-cell>
                       <s-badge tone={STATUS_BADGE[run.status].tone}>{STATUS_BADGE[run.status].label}</s-badge>
                     </s-table-cell>

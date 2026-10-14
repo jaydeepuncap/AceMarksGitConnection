@@ -33,13 +33,9 @@ export default function ThemeDetail() {
   const settings = useApiQuery(() => api.settings.get(), []);
   const branches = useApiQuery(() => api.github.branches({ perPage: 100 }), []);
   const storeBranchName = settings.data?.settings.branch ?? null;
-  // The branch whose history is shown: the one selected, else the store's branch.
-  const historyBranch = branch || storeBranchName || undefined;
-  const history = useApiQuery(
-    () => api.history({ themeId: id, perPage: 10, branch: historyBranch, includeUnknownBranch: !branch }),
-    [id, historyBranch, branch],
-    !settings.loading,
-  );
+  // Every update on this theme, from any branch.
+  const [historyPage, setHistoryPage] = useState(1);
+  const history = useApiQuery(() => api.history({ themeId: id, page: historyPage, perPage: 20 }), [id, historyPage]);
   const publishOptions = useApiQuery(() => api.updates.publishOptions(), []);
   const publish = usePublishFromStaging();
 
@@ -168,15 +164,22 @@ export default function ThemeDetail() {
             </s-stack>
           </s-section>
 
-          <s-section heading={`Updates on this theme${historyBranch ? ` from ${historyBranch}` : ''}`}>
+          <s-section heading="Update history of this theme">
             {(history.data?.items ?? []).length === 0 ? (
               <s-text color="subdued">No updates yet.</s-text>
             ) : (
-              <s-table>
+              <s-table
+                paginate
+                hasPreviousPage={historyPage > 1}
+                hasNextPage={!!history.data?.hasNextPage}
+                onPreviousPage={() => setHistoryPage((p) => Math.max(1, p - 1))}
+                onNextPage={() => setHistoryPage((p) => p + 1)}
+              >
                 <s-table-header-row>
                   <s-table-header listSlot="secondary">Date</s-table-header>
                   <s-table-header listSlot="primary">What</s-table-header>
                   <s-table-header>Updated to</s-table-header>
+                  <s-table-header>Branch</s-table-header>
                   <s-table-header listSlot="inline">Status</s-table-header>
                   <s-table-header>Details</s-table-header>
                 </s-table-header-row>
@@ -185,7 +188,14 @@ export default function ThemeDetail() {
                     <s-table-row key={run.id}>
                       <s-table-cell>{formatDate(run.confirmedAt)}</s-table-cell>
                       <s-table-cell>{KIND_LABEL[run.kind]}</s-table-cell>
-                      <s-table-cell>{run.target?.shortSha ?? '—'}</s-table-cell>
+                      <s-table-cell>
+                        <s-text>
+                          <s-text type="strong">{run.target?.shortSha ?? '—'}</s-text> {firstLine(run.target?.message)}
+                        </s-text>
+                      </s-table-cell>
+                      <s-table-cell>
+                        <s-badge tone="neutral">{run.branch ?? storeBranchName ?? '—'}</s-badge>
+                      </s-table-cell>
                       <s-table-cell>
                         <s-badge tone={STATUS_BADGE[run.status].tone}>{STATUS_BADGE[run.status].label}</s-badge>
                       </s-table-cell>
