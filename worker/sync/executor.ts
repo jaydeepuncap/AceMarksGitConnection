@@ -319,10 +319,13 @@ async function recordLastSynced(db: Database, admin: ShopifyGraphqlClient, run: 
     const marker = {
       app: 'Theme Sync',
       lastSyncedUpdate: run.commitSha,
+      shortSha: run.commitSha.slice(0, 7),
       description: (run.commitMessage ?? '').split('\n')[0] ?? '',
       repository: run.repository,
       branch: run.branch,
+      theme: run.themeName,
       syncedOn: syncedAt.toISOString(),
+      syncId: run.id,
     };
     await upsertThemeFiles(admin, run.themeId, [
       { filename: THEME_SYNC_MARKER_PATH, body: { type: 'TEXT', value: `${JSON.stringify(marker, null, 2)}\n` } },

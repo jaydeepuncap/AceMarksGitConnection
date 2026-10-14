@@ -220,6 +220,13 @@ export default function Commits() {
   if (settings.loading && !settings.data) return <LoadingState title="Commits" />;
 
   const writableThemes = (themes.data ?? []).filter((t) => t.writable);
+  // Earlier commits (below the selected one) that are not in the theme yet; they are synced along with it.
+  const listed = commits.data?.items ?? [];
+  const selectedIndex = listed.findIndex((c) => c.sha === selectedSha);
+  const catchUp =
+    selectedIndex >= 0 && strategy !== 'full_snapshot' && listed[selectedIndex]!.syncStatus === 'new'
+      ? listed.slice(selectedIndex + 1).filter((c) => c.syncStatus === 'new').length
+      : 0;
   const selectedTheme = writableThemes.find((t) => t.id === themeId);
 
   const runPreview = async () => {
@@ -339,12 +346,14 @@ export default function Commits() {
                   </s-text>
                   <s-text color="subdued">
                     {commits.data && commits.data.waiting > 0
-                      ? `${commits.data.waiting}${commits.data.waitingMore ? '+' : ''} ${commits.data.waiting === 1 ? 'update' : 'updates'} waiting · select the newest to apply all of them`
+                      ? `${commits.data.waiting}${commits.data.waitingMore ? '+' : ''} ${commits.data.waiting === 1 ? 'update' : 'updates'} waiting · syncing one also applies the earlier ones not added yet`
                       : 'Up to date with this branch'}
                   </s-text>
                 </s-stack>
               ) : (
-                <s-text color="subdued">{`${selectedTheme.name} has no last synced commit from this branch yet.`}</s-text>
+                <s-text color="subdued">
+                  {`${selectedTheme.name} has no last synced commit from this branch yet. The first sync records it in the theme (assets/theme-sync.json), so duplicates of this theme keep their status.`}
+                </s-text>
               )}
             </s-box>
           )}
@@ -352,6 +361,11 @@ export default function Commits() {
             <s-text color="subdued">
               Applies every update between the theme&apos;s last synced commit and the selected one together, in order, so
               no developer work is left out.
+            </s-text>
+          )}
+          {strategy === 'commit_changes' && lastSynced && (
+            <s-text color="subdued">
+              Earlier updates that are not in the theme yet are applied together with the selected commit.
             </s-text>
           )}
           {selectedTheme?.isLive && (
@@ -369,8 +383,9 @@ export default function Commits() {
               Preview sync
             </s-button>
             <s-text color="subdued">
-              {selectedSha ? `Selected commit ${selectedSha.slice(0, 7)}` : 'Select a commit below'} · previews never
-              modify the theme
+              {selectedSha ? `Selected commit ${selectedSha.slice(0, 7)}` : 'Select a commit below'}
+              {catchUp > 0 ? ` · also applies ${catchUp}${commits.data?.hasNextPage && listed[listed.length - 1]?.syncStatus === 'new' ? '+' : ''} earlier ${catchUp === 1 ? 'update' : 'updates'} not added yet` : ''}{' '}
+              · previews never modify the theme
             </s-text>
           </s-stack>
         </s-stack>

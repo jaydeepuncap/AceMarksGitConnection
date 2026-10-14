@@ -10,8 +10,8 @@ import { Hono } from 'hono';
 import type { CommitDetail, CommitFile, CommitFilesResponse, CommitListItem, CommitsResponse } from '../../shared/api-types';
 import type { AppEnv } from '../env';
 import { cached, cacheKeys } from '../lib/cache';
-import { githubClient, resolveRepository } from '../lib/clients';
-import { getDb, getLastSynced, getSettings, syncedCommits, toLastSynced } from '../lib/database';
+import { adminClient, githubClient, resolveRepository } from '../lib/clients';
+import { getDb, getSettings, syncedCommits, toLastSynced } from '../lib/database';
 import { GITHUB_MAX_COMMIT_FILES } from '../lib/github-client';
 import { ok } from '../lib/response';
 import {
@@ -22,6 +22,7 @@ import {
   parseOrThrow,
 } from '../lib/validators';
 import { annotateCommitFiles } from '../sync/planner';
+import { resolveLastSynced } from '../sync/theme-state';
 
 export const commitsRoutes = new Hono<AppEnv>()
   .get('/', async (c) => {
@@ -51,7 +52,11 @@ export const commitsRoutes = new Hono<AppEnv>()
     const { shop } = c.get('auth');
     const db = getDb(c.env.DB);
     const branch = ref ?? (await client.getRepository(target.owner, target.repo)).defaultBranch;
-    const last = await getLastSynced(db, shop.id, query.themeId, branch);
+    // A duplicated theme has no row yet: its assets/theme-sync.json says where it stands.
+    const last = await resolveLastSynced(
+      { db, admin: await adminClient(c), kv: c.env.KV, logger: c.get('logger') },
+      { shopId: shop.id, themeId: query.themeId, branch, repository: target.fullName },
+    );
     response.lastSynced = toLastSynced(last);
     let lastIndex: number | null = null;
     if (last) {

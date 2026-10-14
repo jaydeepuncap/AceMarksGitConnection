@@ -35,10 +35,11 @@ import {
   repoPathToThemePath,
   validateThemePath,
 } from '../../shared/theme-paths';
-import { createSyncPreview, getLastSynced, type Database, type NewSyncOperation } from '../lib/database';
+import { createSyncPreview, type Database, type NewSyncOperation } from '../lib/database';
 import { GITHUB_MAX_COMMIT_FILES, type GitHubClient } from '../lib/github-client';
 import type { Logger } from '../lib/logger';
 import { ApiError } from '../lib/response';
+import { resolveLastSynced } from './theme-state';
 import {
   getTheme,
   getThemeFilesMetadata,
@@ -323,7 +324,7 @@ async function detectDirectEdits(
 }
 
 export async function buildSyncPreview(
-  deps: { db: Database; github: GitHubClient; admin: ShopifyGraphqlClient; logger: Logger },
+  deps: { db: Database; github: GitHubClient; admin: ShopifyGraphqlClient; kv: KVNamespace; logger: Logger },
   input: PlanInput,
 ): Promise<SyncPreview> {
   const { db, github, admin, logger } = deps;
@@ -345,10 +346,35 @@ export async function buildSyncPreview(
     throw new ApiError(400, 'VALIDATION_ERROR', 'Commit SHA did not resolve exactly; use the full 40-character SHA');
   }
 
-  // The commit this theme was last synced to from this branch (the "current" update).
-  const last = input.branch ? await getLastSynced(db, input.shopId, theme.id, input.branch) : undefined;
+  // The commit this theme was last synced to from this branch (the "current" update),
+  // recovered from the sync history or the theme's assets/theme-sync.json when needed.
+  const last = input.branch
+    ? await resolveLastSynced(deps, {
+        shopId: input.shopId,
+        themeId: theme.id,
+        branch: input.branch,
+        repository: `${input.owner}/${input.repo}`,
+      })
+    : undefined;
   if (input.strategy === 'since_last_sync' && last?.commitSha === input.commitSha) {
     throw new ApiError(409, 'CONFLICT', `${theme.name} is already on ${input.commitSha.slice(0, 7)} from ${input.branch}`);
+  }
+
+  // Updates between the last synced commit and the selected one. When some of
+  // them are not in the theme yet, they are applied together with the selected
+  // commit (a theme never skips an update).
+  let since: Awaited<ReturnType<GitHubClient['listCommitsUntil']>> | null = null;
+  let strategy: SyncStrategy = input.strategy;
+  const warnings: string[] = [];
+  if (last && last.commitSha !== input.commitSha && strategy !== 'full_snapshot') {
+    since = await github.listCommitsUntil(input.owner, input.repo, input.commitSha, last.commitSha, 300);
+    const earlier = since.found ? since.commits.length - 1 : 0;
+    if (strategy === 'commit_changes' && earlier > 0 && !(input.includePaths && input.includePaths.length > 0)) {
+      strategy = 'since_last_sync';
+      warnings.push(
+        `${earlier} earlier update(s) on ${input.branch} are not in ${theme.name} yet, so they are applied together with this one.`,
+      );
+    }
   }
   let baseFiles: Map<string, TreeFile> | null = null;
   let baseMessage: string | null = last?.commitMessage ?? null;
@@ -362,9 +388,7 @@ export async function buildSyncPreview(
     }
   }
 
-  const warnings: string[] = [];
   let ops: PlannedOp[];
-  let strategy: SyncStrategy = input.strategy;
   let commitsIncluded: IncludedCommit[] = [
     { sha: input.commitSha, shortSha: input.commitSha.slice(0, 7), message: commitData.commit.commit.message },
   ];
@@ -381,7 +405,7 @@ export async function buildSyncPreview(
   if (strategy === 'since_last_sync' && baseFiles && last) {
     // Every update between the last synced commit and the selected one, in one step.
     const targetFiles = await themeTree(github, input.owner, input.repo, commitData.treeSha, input.preferences);
-    const walk = await github.listCommitsUntil(input.owner, input.repo, input.commitSha, last.commitSha, 300);
+    const walk = since ?? (await github.listCommitsUntil(input.owner, input.repo, input.commitSha, last.commitSha, 300));
     if (walk.found) {
       commitsIncluded = walk.commits
         .reverse()

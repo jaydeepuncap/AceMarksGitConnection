@@ -610,3 +610,33 @@ export async function saveLastSynced(
       },
     });
 }
+
+/**
+ * The most recent fully succeeded sync of a theme — on `branch` (runs recorded
+ * without a branch count as any branch), or on any branch when `branch` is null.
+ */
+export async function latestSucceededRun(
+  db: Database,
+  shopId: string,
+  themeId: string,
+  branch: string | null,
+  repository: string | null,
+): Promise<SyncHistoryRow | undefined> {
+  const [row] = await db
+    .select()
+    .from(syncHistory)
+    .where(
+      and(
+        eq(syncHistory.shopId, shopId),
+        eq(syncHistory.themeId, themeId),
+        eq(syncHistory.status, 'succeeded'),
+        ...(repository ? [sql`lower(${syncHistory.repository}) = ${repository.toLowerCase()}`] : []),
+        branch
+          ? sql`(${syncHistory.branch} = ${branch} or ${syncHistory.branch} is null)`
+          : sql`${syncHistory.branch} is not null`,
+      ),
+    )
+    .orderBy(desc(syncHistory.completedAt))
+    .limit(1);
+  return row;
+}

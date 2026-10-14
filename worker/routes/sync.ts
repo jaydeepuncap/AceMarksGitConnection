@@ -92,7 +92,7 @@ export const syncRoutes = new Hono<AppEnv>()
       body.branch ?? target.defaultBranch ?? (await github.getRepository(target.owner, target.repo)).defaultBranch;
 
     const preview = await buildSyncPreview(
-      { db, github, admin: await adminClient(c), logger: c.get('logger') },
+      { db, github, admin: await adminClient(c), kv: c.env.KV, logger: c.get('logger') },
       {
         shopId: shop.id,
         userId,
