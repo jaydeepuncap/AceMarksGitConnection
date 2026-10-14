@@ -225,19 +225,19 @@ async function getTreeFiles(rt: ShopRuntime, github: GitHubClient, treeSha: stri
 }
 
 /** Has `sha` fully completed on this store's Staging theme (now or earlier)? */
+/**
+ * When `sha` fully completed on an unpublished theme of this store (Staging or
+ * any other test theme) — the condition for publishing it to Live.
+ */
 export async function verifiedOnStaging(rt: ShopRuntime, sha: string): Promise<Date | null> {
-  const stagingId = rt.settings.stagingTheme?.id;
-  if (!stagingId) return null;
-  const state = await getThemeState(rt.db, rt.shop.id, stagingId);
-  if (state?.lastSyncedSha === sha && state.verifiedOnStagingAt) return state.verifiedOnStagingAt;
   const row = await rt.db.query.syncHistory.findFirst({
     where: (h, { and, eq, inArray }) =>
       and(
         eq(h.shopId, rt.shop.id),
-        eq(h.themeId, stagingId),
         eq(h.commitSha, sha),
         eq(h.status, 'succeeded'),
         inArray(h.kind, ['update', 'rollback']),
+        inArray(h.line, ['staging', 'other']),
       ),
     orderBy: (h, { desc }) => [desc(h.completedAt)],
   });
@@ -250,7 +250,7 @@ function assertThemeForKind(rt: ShopRuntime, input: PlanInput, theme: ShopifyThe
     throw new ApiError(
       422,
       'NOT_VERIFIED_ON_STAGING',
-      'The Live theme only receives updates that fully completed on Staging. Update Staging first, then use Publish to Live.',
+      'The live theme only receives updates that fully completed on an unpublished theme. Apply the update to an unpublished theme, test it, then publish it to Live.',
     );
   }
   if (input.kind === 'publish' && theme.id === stagingId) {
@@ -430,7 +430,7 @@ export async function planRun(rt: ShopRuntime, input: PlanInput): Promise<SyncHi
         throw new ApiError(
           422,
           'NOT_VERIFIED_ON_STAGING',
-          'Only updates that fully completed on this store\'s Staging theme can be published to Live.',
+          'Only updates that fully completed on an unpublished theme of this store can be published to Live.',
         );
       }
     }

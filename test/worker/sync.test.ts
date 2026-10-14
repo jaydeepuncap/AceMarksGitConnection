@@ -417,9 +417,13 @@ describe('Theme Sync workflow', () => {
       const files = world.theme(SHOP, THEME_OTHER.id);
       expect(text(files, 'sections/cart.liquid')).toBe(REPO_FILES.C3['sections/cart.liquid']);
       expect(JSON.parse(text(files, 'assets/theme-sync.json')!)).toMatchObject({ lastSyncedUpdate: C3, themeRole: 'Theme' });
-      // Staging and Live are untouched; another theme's update never counts as verified on Staging.
+      // Staging and Live are untouched; a commit fully tested on any unpublished theme can be published.
       expect(text(staging(), 'sections/cart.liquid')).toBe(REPO_FILES.C1['sections/cart.liquid']);
-      expect((await plan({ kind: 'publish', targetSha: C3, themeId: THEME_LIVE.id })).status).toBe(422);
+      const liveList = (await api<UpdatesResponse>('GET', `/api/updates?themeId=222`)).body.data;
+      expect(liveList.items.find((i) => i.sha === C3)).toMatchObject({ verified: true, applied: false, state: 'new' });
+      const publish = await plan({ kind: 'publish', targetSha: C3 });
+      expect(publish.status).toBe(201);
+      expect(publish.body.data.theme.id).toBe(THEME_LIVE.id);
     });
 
     it('tags commits already added to the theme and filters its history by branch', async () => {

@@ -376,7 +376,7 @@ export async function finalizeIfComplete(ctx: Ctx): Promise<SyncStatus | null> {
   const marker = await getMarkerOperation(db, shopId, run.id);
   if (counts.failed === 0) {
     const completedAt = new Date();
-    const verifiedAt = run.line === 'staging' ? completedAt : run.verifiedOnStagingAt;
+    const verifiedAt = run.line !== 'live' ? completedAt : run.verifiedOnStagingAt;
     if (marker && marker.status === 'pending') {
       // Written last, only after every other file succeeded.
       try {

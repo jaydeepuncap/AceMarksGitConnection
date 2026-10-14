@@ -479,6 +479,24 @@ export async function appliedCommits(db: Database, shopId: string, themeId: stri
   return new Set(rows.map((r) => r.sha));
 }
 
+/** Which of `shas` fully completed on an unpublished theme (can be published to Live). */
+export async function verifiedCommits(db: Database, shopId: string, shas: string[]): Promise<Set<string>> {
+  if (shas.length === 0) return new Set();
+  const rows = await db
+    .selectDistinct({ sha: syncHistory.commitSha })
+    .from(syncHistory)
+    .where(
+      and(
+        eq(syncHistory.shopId, shopId),
+        eq(syncHistory.status, 'succeeded'),
+        inArray(syncHistory.kind, ['update', 'rollback']),
+        inArray(syncHistory.line, ['staging', 'other']),
+        inArray(syncHistory.commitSha, shas.slice(0, 90)),
+      ),
+    );
+  return new Set(rows.map((r) => r.sha));
+}
+
 export async function latestRunForTheme(db: Database, shopId: string, themeId: string): Promise<SyncHistoryRow | undefined> {
   const [row] = await db
     .select()

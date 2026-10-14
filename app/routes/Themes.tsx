@@ -29,15 +29,24 @@ export default function Themes() {
   return (
     <AppLayout
       title="Themes"
-      secondaryActions={[
-        { content: 'Refresh', onAction: refresh, loading: themes.loading },
-        { content: 'Go back to an earlier update', onAction: () => navigate('/go-back') },
-      ]}
+      secondaryActions={[{ content: 'Refresh', onAction: refresh, loading: themes.loading }]}
       banners={<ErrorBanner error={themes.error} onRetry={themes.reload} />}
     >
       <s-section>
         <s-stack gap="base">
           <StoreHeader store={overview.data?.store ?? null} />
+          {!!overview.data?.setupMissing.length && (
+            <s-banner tone="info" heading="Finish the one-time setup">
+              <s-unordered-list>
+                {overview.data.setupMissing.map((step) => (
+                  <s-list-item key={step}>{step}</s-list-item>
+                ))}
+              </s-unordered-list>
+              <s-button slot="secondary-actions" onClick={() => navigate('/settings')}>
+                Open settings
+              </s-button>
+            </s-banner>
+          )}
           <s-table>
             <s-table-header-row>
               <s-table-header listSlot="primary">Theme</s-table-header>

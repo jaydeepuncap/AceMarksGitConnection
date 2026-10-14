@@ -4,6 +4,7 @@ import { api } from '../lib/api-client';
 import { showToast } from '../lib/app-bridge';
 import { firstLine, formatDay, LINE_LABEL } from '../lib/format';
 import { useApiQuery, useMutation } from '../lib/hooks';
+import { usePublishFromStaging } from '../lib/publish';
 import type { ThemeLine, UpdateListItem } from '../lib/types';
 import { CommitFiles } from './CommitFiles';
 import { ErrorBanner } from './ErrorBanner';
@@ -20,7 +21,7 @@ interface Props {
   /** … or any theme of the store. */
   themeId?: string;
   branch?: string;
-  /** False for the published theme: it only receives Staging-verified updates. */
+  /** False for the published theme: it only receives updates tested on an unpublished theme. */
   canApply?: boolean;
 }
 
@@ -28,6 +29,7 @@ function StateBadge({ item }: { item: UpdateListItem }) {
   return (
     <s-stack direction="inline" gap="small-200" alignItems="center">
       {item.applied && item.state !== 'current' && <s-badge tone="success">Added</s-badge>}
+      {item.verified && !item.applied && <s-badge tone="info">Tested</s-badge>}
       {item.state === 'new' && <s-badge tone="caution">New</s-badge>}
       {item.state === 'current' && <s-badge tone="success">Current</s-badge>}
       {item.state === 'older' && !item.applied && <s-text color="subdued">Earlier</s-text>}
@@ -46,6 +48,7 @@ export function UpdateList({ mode, line = 'staging', themeId, branch, canApply =
     [line, themeId, branch, mode, page],
   );
   const plan = useMutation(api.updates.plan);
+  const publish = usePublishFromStaging();
   const baseline = useMutation(api.updates.baseline);
 
   const toggle = (sha: string) =>
@@ -86,6 +89,7 @@ export function UpdateList({ mode, line = 'staging', themeId, branch, canApply =
     <s-stack gap="base">
       <ErrorBanner error={list.error} onRetry={list.reload} />
       <ErrorBanner error={plan.error ?? baseline.error} heading="The update could not be prepared" onDismiss={plan.clearError} />
+      <ErrorBanner error={publish.error} heading="The publish could not be prepared" onDismiss={publish.clearError} />
       {data && (
         <>
           <s-stack gap="small-300">
@@ -104,10 +108,10 @@ export function UpdateList({ mode, line = 'staging', themeId, branch, canApply =
           </s-stack>
 
           {!canApply && (
-            <s-banner tone="info" heading="Staging before Live">
+            <s-banner tone="info" heading="Test before Live">
               <s-paragraph>
-                The Live theme only receives updates that fully completed on Staging. Update Staging and test it;
-                a verified update can then be published from the Overview or this page.
+                The published theme only receives updates that fully completed on an unpublished theme. Apply the update to an
+                unpublished theme and test it; it is then marked Tested here and can be published.
               </s-paragraph>
             </s-banner>
           )}
@@ -158,6 +162,20 @@ export function UpdateList({ mode, line = 'staging', themeId, branch, canApply =
                         onClick={() => select(item)}
                       >
                         {mode === 'update' ? (line === 'staging' && !themeId ? 'Update Staging →' : 'Update to this →') : 'Go back to this →'}
+                      </s-button>
+                    )}
+                    {!canApply && mode === 'update' && item.verified && item.state !== 'current' && (
+                      <s-button
+                        variant="primary"
+                        loading={pendingSha === item.sha && publish.pending}
+                        disabled={!!pendingSha}
+                        onClick={async () => {
+                          setPendingSha(item.sha);
+                          await publish.start(item.sha, themeId);
+                          setPendingSha(null);
+                        }}
+                      >
+                        Publish to Live →
                       </s-button>
                     )}
                     {canApply && noCurrent && (

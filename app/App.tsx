@@ -1,14 +1,12 @@
 import { useEffect } from 'react';
 import { Link, Route, Routes, useNavigate } from 'react-router-dom';
 import { NavMenu } from '@shopify/app-bridge-react';
-import Dashboard from './routes/Dashboard';
 import History from './routes/History';
 import Rollout from './routes/Rollout';
 import Settings from './routes/Settings';
 import ThemeDetail from './routes/ThemeDetail';
 import Themes from './routes/Themes';
 import UpdateRun from './routes/UpdateRun';
-import Updates from './routes/Updates';
 import { isEmbedded } from './lib/app-bridge';
 
 /**
@@ -47,25 +45,22 @@ export default function App() {
     <>
       <NavMenu>
         <Link to="/" rel="home">
-          Overview
+          Themes
         </Link>
         <Link to="/themes">Themes</Link>
-        <Link to="/updates">Updates</Link>
         <Link to="/rollout">Roll out</Link>
         <Link to="/history">Update history</Link>
         <Link to="/settings">Settings</Link>
       </NavMenu>
       <Routes>
-        <Route path="/" element={<Dashboard />} />
+        <Route path="/" element={<Themes />} />
         <Route path="/themes" element={<Themes />} />
         <Route path="/themes/:id" element={<ThemeDetail />} />
-        <Route path="/updates" element={<Updates key="update" mode="update" />} />
         <Route path="/updates/:id" element={<UpdateRun />} />
-        <Route path="/go-back" element={<Updates key="goback" mode="goback" />} />
         <Route path="/rollout" element={<Rollout />} />
         <Route path="/history" element={<History />} />
         <Route path="/settings" element={<Settings />} />
-        <Route path="*" element={<Dashboard />} />
+        <Route path="*" element={<Themes />} />
       </Routes>
     </>
   );

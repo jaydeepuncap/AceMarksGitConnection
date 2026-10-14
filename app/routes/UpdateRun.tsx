@@ -262,7 +262,7 @@ function Result({
           )}
         </s-stack>
 
-        {run.line === 'staging' && run.kind !== 'restore' && (
+        {run.line !== 'live' && run.kind !== 'restore' && (
           <>
             <s-grid gridTemplateColumns="repeat(auto-fit, minmax(220px, 1fr))" gap="base">
               <s-box border="base" borderRadius="base" padding="base">
@@ -274,18 +274,18 @@ function Result({
               <s-box border="base" borderRadius="base" padding="base">
                 <s-stack gap="small-200">
                   <s-text color="subdued">Something is off?</s-text>
-                  <s-text>Restore Staging to its earlier version or ask your developer for a fix. Live stays exactly as it was.</s-text>
+                  <s-text>{`Restore ${run.theme.name} to its earlier version or ask your developer for a fix. Live stays exactly as it was.`}</s-text>
                   {run.actions.canRestore && (
                     <s-stack direction="inline">
                       <s-button loading={restoring} onClick={onRestore}>
-                        Restore Staging
+                        {`Restore ${run.theme.name}`}
                       </s-button>
                     </s-stack>
                   )}
                 </s-stack>
               </s-box>
             </s-grid>
-            <s-section heading="What to check on Staging">
+            <s-section heading={`What to check on ${run.theme.name}`}>
               <s-ordered-list>
                 <s-list-item>The pages the update touched — the review lists them.</s-list-item>
                 <s-list-item>Brand styling: colors, type and logo still match the brand.</s-list-item>
@@ -480,7 +480,7 @@ export default function UpdateRun() {
     const result = await cancel.run(id);
     if (result) {
       showToast('Update cancelled. Nothing changed.');
-      navigate(!run ? '/updates' : run.line === 'staging' ? '/updates' : `/themes/${run.theme.id.split('/').pop()}`);
+      navigate(run ? `/themes/${run.theme.id.split('/').pop()}` : '/themes');
     }
   };
   const doAction = async (kind: 'retry' | 'rerun' | 'restore') => {

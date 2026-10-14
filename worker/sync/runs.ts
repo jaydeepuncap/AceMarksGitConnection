@@ -105,12 +105,8 @@ export function toUpdateRun(row: SyncHistoryRow, counts: OperationCounts, shopDo
         counts.succeeded > 0 &&
         withinBackupWindow &&
         extras.isLatestForTheme === true,
-      canPublish:
-        row.status === 'succeeded' &&
-        row.line === 'staging' &&
-        row.kind !== 'restore' &&
-        !!extras.stagingCurrentSha &&
-        extras.stagingCurrentSha === row.commitSha,
+      // Fully completed on an unpublished theme → can be published to Live.
+      canPublish: row.status === 'succeeded' && row.line !== 'live' && (row.kind === 'update' || row.kind === 'rollback'),
     },
   };
 }
@@ -198,7 +194,7 @@ export async function confirmRun(
     throw new ApiError(409, 'THEME_NOT_WRITABLE', 'This theme is now the published theme. Only Staging-verified updates can go there.');
   }
   if (run.kind === 'publish' && !(await verifiedOnStaging(rt, run.commitSha))) {
-    throw new ApiError(422, 'NOT_VERIFIED_ON_STAGING', 'Only updates that fully completed on Staging can be published to Live.');
+    throw new ApiError(422, 'NOT_VERIFIED_ON_STAGING', 'Only updates that fully completed on an unpublished theme can be published to Live.');
   }
   if (run.kind === 'restore') {
     const latest = await latestRunForTheme(db, shop.id, run.themeId);

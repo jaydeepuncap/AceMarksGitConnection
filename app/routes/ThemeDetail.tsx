@@ -8,7 +8,6 @@ import { UpdateList } from '../components/UpdateList';
 import { api } from '../lib/api-client';
 import { firstLine, formatDate, KIND_LABEL, STATUS_BADGE } from '../lib/format';
 import { useApiQuery } from '../lib/hooks';
-import { usePublishFromStaging } from '../lib/publish';
 import { LineBadge } from './Themes';
 
 /** Select value for "use the store's branch" (an empty option value is not reliable in <s-select>). */
@@ -36,8 +35,6 @@ export default function ThemeDetail() {
   // Every update on this theme, from any branch.
   const [historyPage, setHistoryPage] = useState(1);
   const history = useApiQuery(() => api.history({ themeId: id, page: historyPage, perPage: 20 }), [id, historyPage]);
-  const publishOptions = useApiQuery(() => api.updates.publishOptions(), []);
-  const publish = usePublishFromStaging();
 
   if (detail.loading && !detail.data) return <LoadingState title="Theme" />;
   const item = detail.data;
@@ -50,12 +47,7 @@ export default function ThemeDetail() {
     <AppLayout
       title={theme?.name ?? 'Theme'}
       backAction={{ content: 'Themes', onAction: () => navigate('/themes') }}
-      banners={
-        <>
-          <ErrorBanner error={detail.error} onRetry={detail.reload} />
-          <ErrorBanner error={publish.error} heading="The publish could not be prepared" onDismiss={publish.clearError} />
-        </>
-      }
+      banners={<ErrorBanner error={detail.error} onRetry={detail.reload} />}
     >
       {item && theme && (
         <>
@@ -105,19 +97,6 @@ export default function ThemeDetail() {
               )}
             </s-stack>
           </s-section>
-
-          {isLive && !item.activeRun && (() => {
-            const verified = publishOptions.data?.verified ? publishOptions.data.update : null;
-            if (!verified || verified.sha === item.lastSynced?.sha) return null;
-            return (
-              <s-banner tone="success" heading={`${verified.shortSha} is verified on Staging`}>
-                <s-paragraph>{`${firstLine(verified.message)} fully completed on Staging. Publish the same update to ${theme.name}.`}</s-paragraph>
-                <s-button slot="secondary-actions" loading={publish.pending} onClick={() => publish.start(verified.sha, theme.id)}>
-                  Publish from Staging →
-                </s-button>
-              </s-banner>
-            );
-          })()}
 
           {item.activeRun && (
             <s-banner tone="info" heading="An update is running on this theme">

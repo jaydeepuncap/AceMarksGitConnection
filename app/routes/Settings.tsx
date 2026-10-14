@@ -87,7 +87,6 @@ function GithubTokenForm({ onChanged }: { onChanged: () => void }) {
 
 /** Select values for "no choice" — an empty option value is not reliable in <s-select>. */
 const DEFAULT_BRANCH = '__default__';
-const NONE = '__none__';
 
 function CheckRow({ label, check }: { label: string; check: ConnectionCheck }) {
   return (
@@ -102,7 +101,6 @@ function CheckRow({ label, check }: { label: string; check: ConnectionCheck }) {
 /** One-time setup: connections, Staging/Live themes and protected files. */
 export default function Settings() {
   const settingsQuery = useApiQuery(() => api.settings.get(), []);
-  const themesQuery = useApiQuery(() => api.themes.list(), []);
   const githubQuery = useApiQuery(() => api.github.connection(), []);
   const save = useMutation(api.settings.update);
   const test = useMutation(api.settings.test);
@@ -110,8 +108,6 @@ export default function Settings() {
 
   const [repository, setRepository] = useState('');
   const [branch, setBranch] = useState('');
-  const [stagingId, setStagingId] = useState('');
-  const [liveId, setLiveId] = useState('');
   const [themeRoot, setThemeRoot] = useState('');
   const [protectedText, setProtectedText] = useState('');
   const [ignoreText, setIgnoreText] = useState('');
@@ -122,8 +118,6 @@ export default function Settings() {
     if (!settings) return;
     setRepository(settings.repository ?? '');
     setBranch(settings.branch ?? '');
-    setStagingId(settings.stagingTheme?.id ?? '');
-    setLiveId(settings.liveTheme?.id ?? '');
     setThemeRoot(settings.preferences.themeRoot);
     setProtectedText(settings.preferences.protectedPatterns.join('\n'));
     setIgnoreText(settings.preferences.ignorePatterns.join('\n'));
@@ -142,8 +136,7 @@ export default function Settings() {
   const rootError = validateThemeRootInput(themeRoot);
   const protectedPatterns = parseIgnorePatterns(protectedText);
   const ignore = parseIgnorePatterns(ignoreText);
-  const sameTheme = !!stagingId && stagingId === liveId;
-  const invalid = !!(repoError || rootError || protectedPatterns.error || ignore.error || sameTheme);
+  const invalid = !!(repoError || rootError || protectedPatterns.error || ignore.error);
 
   const onSave = useCallback(async () => {
     if (invalid || !settings) return;
@@ -154,14 +147,12 @@ export default function Settings() {
       body.repository = repoValue || null;
       body.branch = repoValue ? branch || null : null;
     }
-    if (stagingId !== (settings.stagingTheme?.id ?? '')) body.stagingThemeId = stagingId || null;
-    if (liveId !== (settings.liveTheme?.id ?? '')) body.liveThemeId = liveId || null;
     const result = await save.run(body);
     if (result) {
       settingsQuery.setData(result);
       showToast('Settings saved');
     }
-  }, [invalid, settings, themeRoot, protectedPatterns.patterns, ignore.patterns, repoValue, branch, stagingId, liveId, save, settingsQuery]);
+  }, [invalid, settings, themeRoot, protectedPatterns.patterns, ignore.patterns, repoValue, branch, save, settingsQuery]);
 
   const onTest = async () => {
     const result = await test.run();
@@ -169,9 +160,6 @@ export default function Settings() {
   };
 
   if (settingsQuery.loading && !data) return <LoadingState title="Settings" />;
-  const themes = themesQuery.data ?? [];
-  const staging = themes.find((t) => t.id === stagingId);
-  const live = themes.find((t) => t.id === liveId);
   const branches = branchesQuery.data?.items ?? [];
 
   return (
@@ -263,74 +251,6 @@ export default function Settings() {
         </s-stack>
       </s-section>
 
-      <s-section heading="Staging and Live themes">
-        <s-stack gap="base">
-          <ErrorBanner error={themesQuery.error} onRetry={themesQuery.reload} heading="Themes could not be loaded" />
-          <s-table>
-            <s-table-header-row>
-              <s-table-header listSlot="primary">Line of work</s-table-header>
-              <s-table-header>Theme</s-table-header>
-              <s-table-header listSlot="inline">Status</s-table-header>
-              <s-table-header listSlot="secondary">Receives</s-table-header>
-            </s-table-header-row>
-            <s-table-body>
-              <s-table-row>
-                <s-table-cell>Work in progress</s-table-cell>
-                <s-table-cell>
-                  <s-select label="Staging theme" labelAccessibilityVisibility="exclusive" value={stagingId || NONE} onChange={(e) => setStagingId(e.currentTarget.value === NONE ? '' : e.currentTarget.value)}>
-                    <s-option value={NONE}>Choose the Staging theme</s-option>
-                    {themes
-                      .filter((t) => !t.isLive)
-                      .map((t) => (
-                        <s-option key={t.id} value={t.id} disabled={!t.writable}>
-                          {t.writable ? t.name : `${t.name} — read-only`}
-                        </s-option>
-                      ))}
-                  </s-select>
-                </s-table-cell>
-                <s-table-cell>{staging ? <s-badge tone="neutral">Unpublished</s-badge> : <s-text color="subdued">—</s-text>}</s-table-cell>
-                <s-table-cell>Every new update first</s-table-cell>
-              </s-table-row>
-              <s-table-row>
-                <s-table-cell>Staging-verified</s-table-cell>
-                <s-table-cell>
-                  <s-select label="Live theme" labelAccessibilityVisibility="exclusive" value={liveId || NONE} onChange={(e) => setLiveId(e.currentTarget.value === NONE ? '' : e.currentTarget.value)}>
-                    <s-option value={NONE}>Choose the Live theme</s-option>
-                    {themes.map((t) => (
-                      <s-option key={t.id} value={t.id} disabled={!t.writable}>
-                        {`${t.name}${t.isLive ? ' (published)' : ''}`}
-                      </s-option>
-                    ))}
-                  </s-select>
-                </s-table-cell>
-                <s-table-cell>
-                  {live ? (
-                    live.isLive ? (
-                      <s-badge tone="success">Published</s-badge>
-                    ) : (
-                      <s-badge tone="neutral">Unpublished</s-badge>
-                    )
-                  ) : (
-                    <s-text color="subdued">—</s-text>
-                  )}
-                </s-table-cell>
-                <s-table-cell>Staging-verified updates only</s-table-cell>
-              </s-table-row>
-            </s-table-body>
-          </s-table>
-          {sameTheme && (
-            <s-banner tone="critical">
-              <s-paragraph>Staging and Live must be different themes.</s-paragraph>
-            </s-banner>
-          )}
-          {live && !live.isLive && (
-            <s-banner tone="info">
-              <s-paragraph>The Live theme you chose is not the published theme. Theme Sync never changes which theme is published.</s-paragraph>
-            </s-banner>
-          )}
-        </s-stack>
-      </s-section>
-
       <s-section heading="Protected · never replaced">
         <s-stack gap="base">
           <s-stack gap="small-200">
@@ -343,7 +263,7 @@ export default function Settings() {
           </s-stack>
           <s-text-area
             label="Protected files"
-            details="One pattern per line. Protected files that already exist in a theme are never replaced or removed; new ones are created. * matches within a folder, ** across folders."
+            details="One pattern per line. Use for files the store edits in Shopify. If the file already exists in a theme it is never replaced or removed, so those edits are kept; if it does not exist yet (for example a new template), it is created once. * matches within a folder, ** across folders."
             value={protectedText}
             rows={4}
             error={protectedPatterns.error ?? undefined}
@@ -364,7 +284,7 @@ export default function Settings() {
           />
           <s-text-area
             label="Ignored files"
-            details="Theme paths Theme Sync never creates, changes or removes. One pattern per line."
+            details="One pattern per line. Use for repository files that must never go to Shopify. They are skipped completely: never created, changed or removed in any theme."
             value={ignoreText}
             rows={3}
             error={ignore.error ?? undefined}

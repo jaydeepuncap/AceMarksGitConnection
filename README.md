@@ -179,21 +179,22 @@ The screens follow the client guide (*Theme Sync Client Guide v1.1*):
 
 | Screen | Route | What it does |
 |---|---|---|
-| Overview | `/` | Store, master repository, Staging and Live cards with their last synced update, updates waiting / to publish |
-| Themes (step 01) | `/themes` | **Every theme** of the store with its Staging/Live tag, published status, last synced update (from `assets/theme-sync.json`) and last run |
-| Theme page | `/themes/:id` | One theme: its last synced update, a **branch** picker, that branch's commits (NEW / CURRENT, files per commit) with *Update to this →* / *Go back to this →* / *Already running this*, and its recent updates. Any unpublished theme can receive a commit directly; the published/Live theme only through *Publish to Live*. |
-| Updates (step 02) | `/updates` | Commits newest first, marked **NEW** / **CURRENT**, with `+a ~m −r` counts; expand a commit to see its files |
-| Checks + Review (03–04) | `/updates/:id` | Code check, direct edit detection, every included update with its files, totals, *Confirm update to Staging* |
-| Progress + result (05–06, 08) | `/updates/:id` | Backup, file-by-file progress, *Preview Staging in Shopify*, *Publish to Live*; for incomplete runs *Retry failed files*, *Run full update again*, *Restore backup* |
-| Go back (09) | `/go-back` | Return Staging or Live to an earlier update |
-| Roll out | `/rollout` | One update to the Staging themes of several stores (needs `STORE_GROUP`) |
-| Update history (10) | `/history` | Every run per theme: date, theme, what, updated to, status |
-| Settings | `/settings` | GitHub, Shopify, Staging/Live themes, protected files, *Test connection* |
+| Themes (home) | `/`, `/themes` | **Every theme** of the store with its published status, last synced update (from `assets/theme-sync.json`) and last run; setup checklist |
+| Theme page | `/themes/:id` | One theme: last synced update, **branch** picker, that branch's commits (**New** / **Current** / **Added** / **Tested**, files per commit) with *Update to this →*, *Go back to this →*, *Already running this*; on the published theme *Publish to Live →* for tested commits; the theme's full update history with branch |
+| Checks + Review | `/updates/:id` | Code check, direct edit detection, every included update with its files, totals, confirm |
+| Progress + result | `/updates/:id` | Backup, file-by-file progress, preview link, *Publish to Live →*; for incomplete runs *Retry failed files*, *Run full update again*, *Restore backup* |
+| Roll out | `/rollout` | One update to the Staging themes of several stores (needs `STORE_GROUP` and a Staging theme per store) |
+| Update history | `/history` | Every run: date, theme, what, updated to, branch, status |
+| Settings | `/settings` | GitHub, master repository/branch, protected files, ignored files, *Test connection* |
+
+**Test before Live.** The published theme is the Live theme. It never receives a commit directly: apply the commit to any unpublished theme first; once that update fully completes the commit is **Tested** and can be published to Live from the published theme's page or from the update result.
+
+**Protected vs. ignored files.** *Protected* files are files the store edits in Shopify (brand settings, theme-editor content): if the file already exists in a theme it is never replaced or removed, so those edits are kept; if it does not exist yet (a new template) it is created once. *Ignored* files are repository files that must never go to Shopify: they are skipped completely — never created, changed or removed.
 
 ### One-time setup (per store)
 
 1. **Connect GitHub** — a fine-grained token per store, or one shared `GITHUB_TOKEN` Worker secret for all stores; choose the master repository (or set `MASTER_REPOSITORY`).
-2. **Pick Staging and Live themes.** Staging must be an unpublished theme; Live is normally the published theme.
+2. **Themes.** The published theme is Live automatically; any unpublished theme can be used to test updates.
 3. **Confirm protected files.** Defaults: `config/settings_data.json` (brand colors, type, theme settings), `templates/**/*.json` and `sections/*-group.json` (content edited in the theme editor). A protected file that already exists in a theme is **never replaced or removed**; a new one (for example a new template) is created.
 4. **Record where each theme starts.** A theme with no last synced update can either be marked *Already running this* (records the update without changing files) or receive a first update, which writes the complete theme from that update and removes nothing. Themes that carry `assets/theme-sync.json` (for example a duplicate) are picked up automatically.
 5. **Test connection** checks GitHub, Shopify and whether Shopify lets the app change theme files (theme-modification exemption) — without changing anything.

@@ -8,7 +8,7 @@ import type * as ApiClientModule from '../../app/lib/api-client';
 import type { UpdateRunDetail, UpdatesResponse } from '../../app/lib/types';
 import History from '../../app/routes/History';
 import UpdateRun from '../../app/routes/UpdateRun';
-import Updates from '../../app/routes/Updates';
+import { UpdateList } from '../../app/components/UpdateList';
 import { Route, Routes } from 'react-router-dom';
 
 vi.mock('../../app/lib/api-client', async (importOriginal) => {
@@ -132,7 +132,7 @@ const renderRun = (run: UpdateRunDetail) => {
 };
 
 describe('update screens', () => {
-  it('Updates lists commits newest first with NEW / CURRENT', async () => {
+  it('a theme\u2019s commit list shows NEW / CURRENT, file counts and the apply action', async () => {
     const list: UpdatesResponse = {
       line: 'staging',
       shopifyTheme: null,
@@ -144,20 +144,20 @@ describe('update screens', () => {
       waiting: 1,
       waitingMore: false,
       items: [
-        { sha: C3, shortSha: '3333333', message: 'Update cart functionality', authorName: null, authorLogin: null, authorAvatarUrl: null, date: '2026-10-06T10:00:00Z', htmlUrl: '', parents: [], state: 'new', applied: false, counts: { added: 1, modified: 2, removed: 1 } },
-        { sha: C1, shortSha: '1111111', message: 'Add custom CSS', authorName: null, authorLogin: null, authorAvatarUrl: null, date: '2026-10-04T10:00:00Z', htmlUrl: '', parents: [], state: 'current', applied: true, counts: { added: 0, modified: 1, removed: 0 } },
+        { sha: C3, shortSha: '3333333', message: 'Update cart functionality', authorName: null, authorLogin: null, authorAvatarUrl: null, date: '2026-10-06T10:00:00Z', htmlUrl: '', parents: [], state: 'new', applied: false, verified: false, counts: { added: 1, modified: 2, removed: 1 } },
+        { sha: C1, shortSha: '1111111', message: 'Add custom CSS', authorName: null, authorLogin: null, authorAvatarUrl: null, date: '2026-10-04T10:00:00Z', htmlUrl: '', parents: [], state: 'current', applied: true, verified: true, counts: { added: 0, modified: 1, removed: 0 } },
       ],
       page: 1,
       hasNextPage: false,
     };
     mocked.updates.list.mockResolvedValue(list);
-    wrap(<Updates mode="update" />, '/updates');
+    wrap(<UpdateList mode="update" themeId="gid://shopify/OnlineStoreTheme/1" />, '/themes/1');
     await waitFor(() => expect(screen.getByText('Update cart functionality')).toBeInTheDocument());
     expect(screen.getByText(/1 update waiting/)).toBeInTheDocument();
     expect(screen.getByText('New')).toBeInTheDocument();
     expect(screen.getByText('Current')).toBeInTheDocument();
     expect(screen.getByText('~2')).toBeInTheDocument();
-    expect(screen.getAllByText('Update Staging →')).toHaveLength(1);
+    expect(screen.getAllByText('Update to this →')).toHaveLength(1);
   });
 
   it('review shows checks, every update and file, and the confirm action', async () => {

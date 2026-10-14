@@ -30,6 +30,7 @@ import { cached } from '../lib/cache';
 import {
   appliedCommits,
   countOperations,
+  verifiedCommits,
   createRun,
   findActiveSyncForTheme,
   getSyncRun,
@@ -135,8 +136,10 @@ export const updatesRoutes = new Hono<AppEnv>()
     const items: UpdateListItem[] = page.items.map((commit, i) => {
       const g = offset + i;
       const state = currentIndex === null ? 'new' : g < currentIndex ? 'new' : g === currentIndex ? 'current' : 'older';
-      return { ...commit, state, counts: null, applied: false };
+      return { ...commit, state, counts: null, applied: false, verified: false };
     });
+    const verified = await verifiedCommits(rt.db, rt.shop.id, items.map((i) => i.sha));
+    for (const item of items) item.verified = verified.has(item.sha);
     if (theme) {
       const applied = await appliedCommits(rt.db, rt.shop.id, theme.id, items.map((i) => i.sha));
       for (const item of items) item.applied = applied.has(item.sha) || item.sha === current?.sha;
@@ -183,7 +186,11 @@ export const updatesRoutes = new Hono<AppEnv>()
     let themeId: string;
     if (body.kind === 'publish') {
       line = 'live';
-      themeId = body.themeId ?? lineTheme(rt, 'live').id;
+      // Default: the Live theme from Settings, else the published theme.
+      const published = (await themesFor(rt)).find((t) => t.isLive);
+      const target = body.themeId ?? rt.settings.liveTheme?.id ?? published?.id;
+      if (!target) throw new ApiError(400, 'SETUP_INCOMPLETE', 'This store has no published theme to publish to');
+      themeId = target;
     } else if (body.themeId) {
       // Any theme of the store, chosen on its theme page.
       themeId = body.themeId;

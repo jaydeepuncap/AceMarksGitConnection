@@ -57,8 +57,6 @@ export const overviewRoutes = new Hono<AppEnv>()
     const setupMissing: string[] = [];
     if (!githubConnected) setupMissing.push('Connect GitHub');
     if (!rt.repo) setupMissing.push('Choose the master repository');
-    if (!rt.settings.stagingTheme) setupMissing.push('Pick the Staging theme');
-    if (!rt.settings.liveTheme) setupMissing.push('Pick the Live theme');
 
     let themes: ShopifyTheme[] | null = null;
     try {

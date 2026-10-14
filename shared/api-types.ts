@@ -518,6 +518,8 @@ export interface UpdateListItem extends CommitSummary {
   state: UpdateListState;
   /** This commit was already applied to the theme (a completed update, publish, go back or recorded baseline). */
   applied: boolean;
+  /** Fully completed on an unpublished theme of the store, so it can be published to Live. */
+  verified: boolean;
   counts: { added: number; modified: number; removed: number } | null;
 }
 
