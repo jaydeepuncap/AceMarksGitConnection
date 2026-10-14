@@ -118,13 +118,14 @@ export default function Rollout() {
             <s-stack gap="base">
               <s-select
                 label="Update to roll out"
-                value={target?.sha ?? ''}
+                value={target?.sha ?? 'none'}
                 onChange={(event) => {
-                  setSha(event.currentTarget.value || undefined);
+                  const value = event.currentTarget.value;
+                  setSha(/^[0-9a-f]{40}$/.test(value) ? value : undefined);
                   setPreviews(null);
                 }}
               >
-                {!target && <s-option value="">Choose an update</s-option>}
+                {!target && <s-option value="none">Choose an update</s-option>}
                 {target && !(updates.data?.items ?? []).some((i) => i.sha === target.sha) && (
                   <s-option value={target.sha}>{`${target.shortSha} ${firstLine(target.message)}`}</s-option>
                 )}

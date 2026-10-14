@@ -422,6 +422,22 @@ describe('Theme Sync workflow', () => {
       expect((await plan({ kind: 'publish', targetSha: C3, themeId: THEME_LIVE.id })).status).toBe(422);
     });
 
+    it('tags commits already added to the theme and filters its history by branch', async () => {
+      await setup();
+      await updateStagingTo(C2);
+      const list = (await api<UpdatesResponse>('GET', `/api/updates?themeId=${encodeURIComponent(THEME_DEV.id)}&branch=main`)).body.data;
+      expect(list.items.map((i) => [i.shortSha, i.state, i.applied])).toEqual([
+        [C3.slice(0, 7), 'new', false],
+        [C2.slice(0, 7), 'current', true],
+        [C1.slice(0, 7), 'older', false],
+      ]);
+      const onMain = (await api<Paginated<UpdateRun>>('GET', `/api/history?themeId=111&branch=main`)).body.data;
+      expect(onMain.items.map((r) => r.target?.sha)).toEqual([C2]);
+      const onOther = (await api<Paginated<UpdateRun>>('GET', `/api/history?themeId=111&branch=feature`)).body.data;
+      expect(onOther.items).toEqual([]);
+      expect((await api('GET', `/api/updates?themeId=111&branch=${encodeURIComponent('main (store branch)')}`)).status).toBe(400);
+    });
+
     it('the published theme cannot receive a commit directly', async () => {
       await setup();
       const res = await plan({ kind: 'update', targetSha: C3, themeId: THEME_LIVE.id });

@@ -28,6 +28,7 @@ import type {
 import type { AppEnv } from '../env';
 import { cached } from '../lib/cache';
 import {
+  appliedCommits,
   countOperations,
   createRun,
   findActiveSyncForTheme,
@@ -134,8 +135,12 @@ export const updatesRoutes = new Hono<AppEnv>()
     const items: UpdateListItem[] = page.items.map((commit, i) => {
       const g = offset + i;
       const state = currentIndex === null ? 'new' : g < currentIndex ? 'new' : g === currentIndex ? 'current' : 'older';
-      return { ...commit, state, counts: null };
+      return { ...commit, state, counts: null, applied: false };
     });
+    if (theme) {
+      const applied = await appliedCommits(rt.db, rt.shop.id, theme.id, items.map((i) => i.sha));
+      for (const item of items) item.applied = applied.has(item.sha) || item.sha === current?.sha;
+    }
     // File counts (+a ~m -r) for waiting updates and the current one.
     await mapLimit(
       items.filter((item) => item.state !== 'older'),
@@ -241,7 +246,7 @@ export const updatesRoutes = new Hono<AppEnv>()
       {
         id,
         repository: repo.fullName,
-        branch: repo.branch,
+        branch: body.branch ?? (await resolveBranch(rt).catch(() => repo.branch)),
         commitSha: body.sha,
         commitMessage: commit.commit.commit.message.slice(0, 1000),
         themeId: theme.id,

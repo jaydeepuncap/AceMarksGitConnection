@@ -25,9 +25,14 @@ interface Props {
 }
 
 function StateBadge({ item }: { item: UpdateListItem }) {
-  if (item.state === 'new') return <s-badge tone="caution">New</s-badge>;
-  if (item.state === 'current') return <s-badge tone="neutral">Current</s-badge>;
-  return <s-text color="subdued">Earlier</s-text>;
+  return (
+    <s-stack direction="inline" gap="small-200" alignItems="center">
+      {item.applied && item.state !== 'current' && <s-badge tone="success">Added</s-badge>}
+      {item.state === 'new' && <s-badge tone="caution">New</s-badge>}
+      {item.state === 'current' && <s-badge tone="success">Current</s-badge>}
+      {item.state === 'older' && !item.applied && <s-text color="subdued">Earlier</s-text>}
+    </s-stack>
+  );
 }
 
 /** Commits of a branch for one theme, marked NEW / CURRENT, with their files and an apply action. */
@@ -64,7 +69,7 @@ export function UpdateList({ mode, line = 'staging', themeId, branch, canApply =
 
   const markCurrent = async (item: UpdateListItem) => {
     setPendingSha(item.sha);
-    const run = await baseline.run({ line, sha: item.sha, themeId });
+    const run = await baseline.run({ line, sha: item.sha, themeId, branch });
     setPendingSha(null);
     if (run) {
       showToast(`Recorded as running ${item.shortSha}`);

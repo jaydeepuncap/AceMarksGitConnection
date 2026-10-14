@@ -85,6 +85,10 @@ function GithubTokenForm({ onChanged }: { onChanged: () => void }) {
   );
 }
 
+/** Select values for "no choice" — an empty option value is not reliable in <s-select>. */
+const DEFAULT_BRANCH = '__default__';
+const NONE = '__none__';
+
 function CheckRow({ label, check }: { label: string; check: ConnectionCheck }) {
   return (
     <s-grid gridTemplateColumns="8rem 1fr auto" gap="base" alignItems="center">
@@ -242,12 +246,12 @@ export default function Settings() {
             />
             <s-select
               label="Branch"
-              value={branch}
+              value={branch || DEFAULT_BRANCH}
               disabled={!repoValid || branchesQuery.loading}
               details={branchesQuery.error ? branchesQuery.error.message : 'Updates are listed from this branch.'}
-              onChange={(event) => setBranch(event.currentTarget.value)}
+              onChange={(event) => setBranch(event.currentTarget.value === DEFAULT_BRANCH ? '' : event.currentTarget.value)}
             >
-              <s-option value="">Repository default</s-option>
+              <s-option value={DEFAULT_BRANCH}>Repository default</s-option>
               {branches.map((b) => (
                 <s-option key={b.name} value={b.name}>
                   {b.name}
@@ -273,8 +277,8 @@ export default function Settings() {
               <s-table-row>
                 <s-table-cell>Work in progress</s-table-cell>
                 <s-table-cell>
-                  <s-select label="Staging theme" labelAccessibilityVisibility="exclusive" value={stagingId} onChange={(e) => setStagingId(e.currentTarget.value)}>
-                    <s-option value="">Choose the Staging theme</s-option>
+                  <s-select label="Staging theme" labelAccessibilityVisibility="exclusive" value={stagingId || NONE} onChange={(e) => setStagingId(e.currentTarget.value === NONE ? '' : e.currentTarget.value)}>
+                    <s-option value={NONE}>Choose the Staging theme</s-option>
                     {themes
                       .filter((t) => !t.isLive)
                       .map((t) => (
@@ -290,8 +294,8 @@ export default function Settings() {
               <s-table-row>
                 <s-table-cell>Staging-verified</s-table-cell>
                 <s-table-cell>
-                  <s-select label="Live theme" labelAccessibilityVisibility="exclusive" value={liveId} onChange={(e) => setLiveId(e.currentTarget.value)}>
-                    <s-option value="">Choose the Live theme</s-option>
+                  <s-select label="Live theme" labelAccessibilityVisibility="exclusive" value={liveId || NONE} onChange={(e) => setLiveId(e.currentTarget.value === NONE ? '' : e.currentTarget.value)}>
+                    <s-option value={NONE}>Choose the Live theme</s-option>
                     {themes.map((t) => (
                       <s-option key={t.id} value={t.id} disabled={!t.writable}>
                         {`${t.name}${t.isLive ? ' (published)' : ''}`}

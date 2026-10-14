@@ -11,6 +11,9 @@ import { useApiQuery } from '../lib/hooks';
 import { usePublishFromStaging } from '../lib/publish';
 import { LineBadge } from './Themes';
 
+/** Select value for "use the store's branch" (an empty option value is not reliable in <s-select>). */
+const STORE_BRANCH = '__store_branch__';
+
 function KeyValue({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <s-grid gridTemplateColumns="10rem 1fr" gap="base" alignItems="center">
@@ -29,7 +32,14 @@ export default function ThemeDetail() {
   const detail = useApiQuery(() => api.themes.get(id), [id]);
   const settings = useApiQuery(() => api.settings.get(), []);
   const branches = useApiQuery(() => api.github.branches({ perPage: 100 }), []);
-  const history = useApiQuery(() => api.history({ themeId: id, perPage: 5 }), [id]);
+  const storeBranchName = settings.data?.settings.branch ?? null;
+  // The branch whose history is shown: the one selected, else the store's branch.
+  const historyBranch = branch || storeBranchName || undefined;
+  const history = useApiQuery(
+    () => api.history({ themeId: id, perPage: 10, branch: historyBranch, includeUnknownBranch: !branch }),
+    [id, historyBranch, branch],
+    !settings.loading,
+  );
   const publishOptions = useApiQuery(() => api.updates.publishOptions(), []);
   const publish = usePublishFromStaging();
 
@@ -127,11 +137,14 @@ export default function ThemeDetail() {
               <s-grid gridTemplateColumns="repeat(auto-fit, minmax(220px, 1fr))" gap="base">
                 <s-select
                   label="Branch"
-                  value={branch}
+                  value={branch || STORE_BRANCH}
                   details={branches.error ? branches.error.message : undefined}
-                  onChange={(event) => setBranch(event.currentTarget.value)}
+                  onChange={(event) => {
+                    const value = event.currentTarget.value;
+                    setBranch(value === STORE_BRANCH ? '' : value);
+                  }}
                 >
-                  <s-option value="">{storeBranch ? `${storeBranch} (store branch)` : 'Repository default'}</s-option>
+                  <s-option value={STORE_BRANCH}>{storeBranch ? `${storeBranch} (store branch)` : 'Repository default'}</s-option>
                   {(branches.data?.items ?? [])
                     .filter((b) => b.name !== storeBranch)
                     .map((b) => (
@@ -155,7 +168,7 @@ export default function ThemeDetail() {
             </s-stack>
           </s-section>
 
-          <s-section heading="Recent updates on this theme">
+          <s-section heading={`Updates on this theme${historyBranch ? ` from ${historyBranch}` : ''}`}>
             {(history.data?.items ?? []).length === 0 ? (
               <s-text color="subdued">No updates yet.</s-text>
             ) : (

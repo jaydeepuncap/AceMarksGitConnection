@@ -194,7 +194,9 @@ export const api = {
     restore: (id: string) => apiRequest<UpdateRun>('POST', `/api/updates/${encodeURIComponent(id)}/restore`, { body: {} }),
     cancel: (id: string) => apiRequest<UpdateRun>('POST', `/api/updates/${encodeURIComponent(id)}/cancel`, { body: {} }),
   },
-  history: (query: { page?: number; perPage?: number; line?: ThemeLine; themeId?: string } = {}) =>
+  history: (
+    query: { page?: number; perPage?: number; line?: ThemeLine; themeId?: string; branch?: string; includeUnknownBranch?: boolean } = {},
+  ) =>
     apiRequest<Paginated<UpdateRun>>('GET', '/api/history', { query }),
   rollout: {
     get: (sha?: string) => apiRequest<RolloutResponse>('GET', '/api/rollout', { query: { sha } }),

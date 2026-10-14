@@ -33,13 +33,14 @@ export default function History() {
           <s-box inlineSize="220px">
             <s-select
               label="Theme"
-              value={line}
+              value={line || 'all'}
               onChange={(event) => {
-                setLine(event.currentTarget.value as ThemeLine | '');
+                const value = event.currentTarget.value;
+                setLine(value === 'all' ? '' : (value as ThemeLine));
                 setPage(1);
               }}
             >
-              <s-option value="">Staging and Live</s-option>
+              <s-option value="all">All themes</s-option>
               <s-option value="staging">Staging</s-option>
               <s-option value="live">Live</s-option>
             </s-select>

@@ -4,7 +4,7 @@
  * clause, so a request authenticated for shop A can never read or modify rows
  * that belong to shop B, even with a guessed record ID.
  */
-import { and, desc, eq, inArray, isNotNull, ne, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNotNull, isNull, ne, or, sql } from 'drizzle-orm';
 import { drizzle, type DrizzleD1Database } from 'drizzle-orm/d1';
 import * as schema from '../../drizzle/schema';
 import {
@@ -428,11 +428,28 @@ export async function getSyncRun(db: Database, shopId: string, syncId: string): 
 export async function listHistory(
   db: Database,
   shopId: string,
-  opts: { page: number; perPage: number; line?: ThemeLine; themeId?: string; status?: SyncStatus },
+  opts: {
+    page: number;
+    perPage: number;
+    line?: ThemeLine;
+    themeId?: string;
+    status?: SyncStatus;
+    /** Only runs whose update came from this branch. */
+    branch?: string;
+    /** Also include runs recorded without a branch (they used the store's default branch). */
+    includeUnknownBranch?: boolean;
+  },
 ): Promise<{ rows: SyncHistoryRow[]; hasNextPage: boolean }> {
   const filters = [eq(syncHistory.shopId, shopId), isNotNull(syncHistory.confirmedAt)];
   if (opts.line) filters.push(eq(syncHistory.line, opts.line));
   if (opts.themeId) filters.push(eq(syncHistory.themeId, opts.themeId));
+  if (opts.branch) {
+    filters.push(
+      opts.includeUnknownBranch
+        ? (or(eq(syncHistory.branch, opts.branch), isNull(syncHistory.branch)) as ReturnType<typeof eq>)
+        : eq(syncHistory.branch, opts.branch),
+    );
+  }
   if (opts.status) filters.push(eq(syncHistory.status, opts.status));
   const rows = await db
     .select()
@@ -442,6 +459,24 @@ export async function listHistory(
     .limit(opts.perPage + 1)
     .offset((opts.page - 1) * opts.perPage);
   return { rows: rows.slice(0, opts.perPage), hasNextPage: rows.length > opts.perPage };
+}
+
+/** Which of `shas` were fully applied to the theme (completed update, publish, go back or baseline). */
+export async function appliedCommits(db: Database, shopId: string, themeId: string, shas: string[]): Promise<Set<string>> {
+  if (shas.length === 0) return new Set();
+  const rows = await db
+    .selectDistinct({ sha: syncHistory.commitSha })
+    .from(syncHistory)
+    .where(
+      and(
+        eq(syncHistory.shopId, shopId),
+        eq(syncHistory.themeId, themeId),
+        eq(syncHistory.status, 'succeeded'),
+        inArray(syncHistory.kind, ['update', 'publish', 'rollback', 'baseline']),
+        inArray(syncHistory.commitSha, shas.slice(0, 90)),
+      ),
+    );
+  return new Set(rows.map((r) => r.sha));
 }
 
 export async function latestRunForTheme(db: Database, shopId: string, themeId: string): Promise<SyncHistoryRow | undefined> {

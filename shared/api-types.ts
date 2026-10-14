@@ -467,6 +467,8 @@ export interface BaselineRequest {
   sha: string;
   /** Any theme of the store (overrides `line`). */
   themeId?: string;
+  /** Branch the update was chosen from. */
+  branch?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -514,6 +516,8 @@ export type UpdateListState = 'new' | 'current' | 'older';
 
 export interface UpdateListItem extends CommitSummary {
   state: UpdateListState;
+  /** This commit was already applied to the theme (a completed update, publish, go back or recorded baseline). */
+  applied: boolean;
   counts: { added: number; modified: number; removed: number } | null;
 }
 

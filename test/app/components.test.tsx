@@ -144,8 +144,8 @@ describe('update screens', () => {
       waiting: 1,
       waitingMore: false,
       items: [
-        { sha: C3, shortSha: '3333333', message: 'Update cart functionality', authorName: null, authorLogin: null, authorAvatarUrl: null, date: '2026-10-06T10:00:00Z', htmlUrl: '', parents: [], state: 'new', counts: { added: 1, modified: 2, removed: 1 } },
-        { sha: C1, shortSha: '1111111', message: 'Add custom CSS', authorName: null, authorLogin: null, authorAvatarUrl: null, date: '2026-10-04T10:00:00Z', htmlUrl: '', parents: [], state: 'current', counts: { added: 0, modified: 1, removed: 0 } },
+        { sha: C3, shortSha: '3333333', message: 'Update cart functionality', authorName: null, authorLogin: null, authorAvatarUrl: null, date: '2026-10-06T10:00:00Z', htmlUrl: '', parents: [], state: 'new', applied: false, counts: { added: 1, modified: 2, removed: 1 } },
+        { sha: C1, shortSha: '1111111', message: 'Add custom CSS', authorName: null, authorLogin: null, authorAvatarUrl: null, date: '2026-10-04T10:00:00Z', htmlUrl: '', parents: [], state: 'current', applied: true, counts: { added: 0, modified: 1, removed: 0 } },
       ],
       page: 1,
       hasNextPage: false,

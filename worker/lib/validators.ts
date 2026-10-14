@@ -105,6 +105,11 @@ export const historyQuerySchema = paginationSchema.extend({
   line: lineSchema.optional(),
   themeId: themeIdSchema.optional(),
   status: z.enum(['queued', 'running', 'succeeded', 'partially_failed', 'failed', 'cancelled']).optional(),
+  branch: branchSchema.optional(),
+  includeUnknownBranch: z
+    .enum(['true', 'false', '1', '0'])
+    .optional()
+    .transform((v) => v === 'true' || v === '1'),
 });
 
 export const updatesQuerySchema = z.object({
@@ -195,6 +200,7 @@ export const baselineSchema = z
     line: lineSchema,
     sha: commitShaSchema,
     themeId: themeIdSchema.optional(),
+    branch: branchSchema.optional(),
   })
   .strict();
 
