@@ -28,10 +28,10 @@ interface Props {
 function StateBadge({ item }: { item: UpdateListItem }) {
   return (
     <s-stack direction="inline" gap="small-200" alignItems="center">
-      {item.applied && item.state !== 'current' && <s-badge tone="success">Added</s-badge>}
+      {item.state === 'current' && <s-badge tone="success">Last synced</s-badge>}
+      {item.applied && item.state !== 'current' && <s-badge tone="success">Synced</s-badge>}
       {item.verified && !item.applied && <s-badge tone="info">Tested</s-badge>}
-      {item.state === 'new' && <s-badge tone="caution">New</s-badge>}
-      {item.state === 'current' && <s-badge tone="success">Current</s-badge>}
+      {item.state === 'new' && !item.applied && <s-badge tone="caution">Pending sync</s-badge>}
       {item.state === 'older' && !item.applied && <s-text color="subdued">Earlier</s-text>}
     </s-stack>
   );
@@ -94,18 +94,33 @@ export function UpdateList({ mode, line = 'staging', themeId, branch, canApply =
         <>
           <s-stack gap="small-300">
             <s-text type="strong">{`${themeLabel} · ${data.repository}${data.branch ? ` (${data.branch})` : ''}`}</s-text>
-            <s-text color="subdued">
-              {mode === 'update'
-                ? data.current
-                  ? data.currentFound
-                    ? `${data.waiting}${data.waitingMore ? '+' : ''} ${data.waiting === 1 ? 'update' : 'updates'} waiting · click a commit to see its files`
-                    : `Last synced ${data.current.shortSha} is not in the latest updates of this branch`
-                  : `${themeLabel} has no last synced update yet`
-                : data.current
-                  ? `Currently on ${data.current.shortSha} ${firstLine(data.current.message)}`
-                  : 'This theme has no last synced update yet'}
-            </s-text>
+            {data.current ? (
+              <s-text>
+                {'Last synced: '}
+                <s-text type="strong">{data.current.shortSha}</s-text>
+                {` ${firstLine(data.current.message)}${data.current.branch ? ` · from ${data.current.branch}` : ''}${
+                  data.current.syncedAt ? ` · ${formatDay(data.current.syncedAt)}` : ''
+                }`}
+              </s-text>
+            ) : (
+              <s-text color="subdued">{`${themeLabel} has no last synced update yet`}</s-text>
+            )}
+            {mode === 'update' && data.current && data.currentFound && (
+              <s-text color="subdued">
+                {data.waiting === 0
+                  ? `Up to date with ${data.branch ?? 'this branch'}`
+                  : `${data.waiting}${data.waitingMore ? '+' : ''} ${data.waiting === 1 ? 'commit' : 'commits'} pending sync on ${data.branch ?? 'this branch'} · click a commit to see its files`}
+              </s-text>
+            )}
           </s-stack>
+
+          {mode === 'update' && data.current && !data.currentFound && (
+            <s-banner tone="warning" heading={`The last synced commit is not on ${data.branch ?? 'this branch'}`}>
+              <s-paragraph>
+                {`${data.current.shortSha} came from ${data.current.branch ?? 'another branch'}. Commits of ${data.branch ?? 'this branch'} below are all marked pending; updating to one applies exactly the difference between ${data.current.shortSha} and that commit.`}
+              </s-paragraph>
+            </s-banner>
+          )}
 
           {!canApply && (
             <s-banner tone="info" heading="Test before Live">

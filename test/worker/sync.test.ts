@@ -367,7 +367,9 @@ describe('Theme Sync workflow', () => {
       const res = await api<UpdateRun>('POST', '/api/updates/baseline', { line: 'staging', sha: C1 });
       expect(res.status).toBe(201);
       expect(res.body.data).toMatchObject({ kind: 'baseline', status: 'succeeded' });
-      expect(world.upserts).toHaveLength(0);
+      // Only the sync file is written, so a duplicate of the theme keeps the record.
+      expect(world.upserts.flatMap((u) => u.files.map((f) => f.filename))).toEqual(['assets/theme-sync.json']);
+      expect(JSON.parse(text(staging(), 'assets/theme-sync.json')!)).toMatchObject({ lastSyncedUpdate: C1, branch: 'main' });
       expect((await api('POST', '/api/updates/baseline', { line: 'staging', sha: C2 })).status).toBe(409);
     });
 
@@ -447,6 +449,50 @@ describe('Theme Sync workflow', () => {
       const res = await plan({ kind: 'update', targetSha: C3, themeId: THEME_LIVE.id });
       expect(res.status).toBe(422);
       expect(res.body.error.code).toBe('NOT_VERIFIED_ON_STAGING');
+    });
+  });
+
+  describe('review choices and the sync file', () => {
+    it('skips files and turns deletions off like the earlier flow; checks follow the selection', async () => {
+      await setup();
+      world.addCommit('4'.repeat(40), 'Broken cart', (files) => ({ ...files, 'sections/cart.liquid': '{% if cart %}' }));
+      const { body } = await plan({ kind: 'update', targetSha: '4'.repeat(40) });
+      expect(body.data.actions.blockedByCodeErrors).toBe(true);
+
+      const sel = await api<UpdateRun>('POST', `/api/updates/${body.data.id}/selection`, {
+        allowDeletes: false,
+        skippedPaths: ['sections/cart.liquid'],
+      });
+      expect(sel.status).toBe(200);
+      expect(sel.body.data).toMatchObject({
+        selection: { allowDeletes: false, skippedPaths: ['sections/cart.liquid'] },
+        actions: { blockedByCodeErrors: false, canConfirm: true },
+        totals: { removed: 0 },
+      });
+      const detail = await get(body.data.id);
+      expect(detail.files.find((f) => f.path === 'snippets/old-cart.liquid')).toMatchObject({ status: 'skipped', skipReason: 'Deletions turned off' });
+      expect(detail.files.find((f) => f.path === 'sections/cart.liquid')).toMatchObject({ status: 'skipped', skipReason: 'Skipped by you' });
+
+      await api('POST', `/api/updates/${body.data.id}/confirm`, {});
+      await drainQueue();
+      expect((await get(body.data.id)).status).toBe('succeeded');
+      expect(text(staging(), 'sections/cart.liquid')).toBe(REPO_FILES.C1['sections/cart.liquid']); // skipped
+      expect(staging().has('snippets/old-cart.liquid')).toBe(true); // not deleted
+      expect(text(staging(), 'snippets/cart-item.liquid')).toBe(REPO_FILES.C3['snippets/cart-item.liquid']);
+    });
+
+    it('shows the theme\u2019s sync file and the branch of the last sync; can save the file again', async () => {
+      await setup();
+      await updateStagingTo(C2);
+      let theme = (await api<ThemeOverviewItem>('GET', '/api/themes/111')).body.data;
+      expect(theme.lastSynced).toMatchObject({ sha: C2, branch: 'main' });
+      expect(theme.syncFile).toMatchObject({ path: 'assets/theme-sync.json', present: true, sha: C2, branch: 'main', matchesRecord: true });
+
+      staging().delete('assets/theme-sync.json');
+      theme = (await api<ThemeOverviewItem>('GET', '/api/themes/111')).body.data;
+      expect(theme.syncFile).toMatchObject({ present: false, matchesRecord: false });
+      expect((await api('POST', '/api/themes/111/sync-file', {})).status).toBe(200);
+      expect(JSON.parse(text(staging(), 'assets/theme-sync.json')!)).toMatchObject({ lastSyncedUpdate: C2, branch: 'main' });
     });
   });
 

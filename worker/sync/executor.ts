@@ -303,21 +303,46 @@ async function processDeletes(ctx: Ctx, ops: SyncOperationRow[]): Promise<void> 
 // ---------------------------------------------------------------------------
 const LINE_LABEL = { staging: 'Staging', live: 'Live', other: 'Theme' } as const;
 
-export function markerContent(run: SyncHistoryRow, syncedAt: Date, verifiedOnStagingAt: Date | null): string {
+/**
+ * assets/theme-sync.json: the theme's own record of its last synced update.
+ * It travels with the theme (a duplicated theme keeps it), so Theme Sync can
+ * tell which commit any theme runs.
+ */
+export function buildMarker(fields: {
+  sha: string;
+  message: string | null;
+  line: SyncHistoryRow['line'];
+  syncedAt: Date;
+  verifiedOnStagingAt: Date | null;
+  repository: string | null;
+  branch: string | null;
+}): string {
   return `${JSON.stringify(
     {
       app: 'Theme Sync',
-      lastSyncedUpdate: run.commitSha,
-      description: (run.commitMessage ?? '').split('\n')[0] ?? '',
-      themeRole: LINE_LABEL[run.line],
-      verifiedOnStaging: verifiedOnStagingAt ? verifiedOnStagingAt.toISOString() : null,
-      syncedOn: syncedAt.toISOString(),
-      repository: run.repository,
-      branch: run.branch,
+      lastSyncedUpdate: fields.sha,
+      description: (fields.message ?? '').split('\n')[0] ?? '',
+      themeRole: LINE_LABEL[fields.line],
+      verifiedOnStaging: fields.verifiedOnStagingAt ? fields.verifiedOnStagingAt.toISOString() : null,
+      syncedOn: fields.syncedAt.toISOString(),
+      repository: fields.repository,
+      branch: fields.branch,
     },
     null,
     2,
   )}\n`;
+}
+
+export function markerContent(run: SyncHistoryRow, syncedAt: Date, verifiedOnStagingAt: Date | null): string {
+  return buildMarker({
+    sha: run.commitSha,
+    message: run.commitMessage,
+    line: run.line,
+    syncedAt,
+    verifiedOnStagingAt,
+    repository: run.repository,
+    branch: run.branch,
+  });
 }
 
 /** Saves the theme's last synced update (only called when every file succeeded). */
@@ -331,6 +356,7 @@ async function recordLastSynced(ctx: Ctx, completedAt: Date, verifiedAt: Date | 
       await upsertThemeState(db, shopId, run.themeId, {
         lastSyncedSha: previous?.lastSyncedSha ?? null,
         lastSyncedMessage: previous?.lastSyncedMessage ?? null,
+        lastSyncedBranch: previous?.lastSyncedBranch ?? null,
         lastSyncedAt: previous?.lastSyncedAt ? new Date(previous.lastSyncedAt) : null,
         lastSyncId: previous?.lastSyncId ?? null,
         verifiedOnStagingAt: previous?.verifiedOnStagingAt ? new Date(previous.verifiedOnStagingAt) : null,
@@ -347,6 +373,7 @@ async function recordLastSynced(ctx: Ctx, completedAt: Date, verifiedAt: Date | 
         ? {
             lastSyncedSha: before.lastSyncedSha,
             lastSyncedMessage: before.lastSyncedMessage,
+            lastSyncedBranch: before.lastSyncedBranch,
             lastSyncedAt: before.lastSyncedAt?.getTime() ?? null,
             lastSyncId: before.lastSyncId,
             verifiedOnStagingAt: before.verifiedOnStagingAt?.getTime() ?? null,
@@ -357,6 +384,7 @@ async function recordLastSynced(ctx: Ctx, completedAt: Date, verifiedAt: Date | 
   await upsertThemeState(db, shopId, run.themeId, {
     lastSyncedSha: run.commitSha,
     lastSyncedMessage: run.commitMessage,
+    lastSyncedBranch: run.branch,
     lastSyncedAt: completedAt,
     lastSyncId: run.id,
     verifiedOnStagingAt: verifiedAt,

@@ -5,7 +5,8 @@
  *   GET /api/themes/:id        one theme (numeric ID or GID) with its last synced update and runs
  */
 import { Hono } from 'hono';
-import type { ShopifyTheme, ThemeOverviewItem } from '../../shared/api-types';
+import type { ShopifyTheme, ThemeOverviewItem, ThemeSyncFile } from '../../shared/api-types';
+import { THEME_SYNC_MARKER_PATH } from '../../shared/theme-paths';
 import type { AppEnv } from '../env';
 import {
   countOperations,
@@ -19,7 +20,7 @@ import { parseOrThrow, themeIdSchema } from '../lib/validators';
 import { lineForTheme } from '../sync/plan';
 import { describeRun, toUpdateRun } from '../sync/runs';
 import { mapLimit, type ShopRuntime } from '../sync/runtime';
-import { importThemeMarker, requestRuntime, themesFor } from './helpers';
+import { importThemeMarker, readThemeMarker, requestRuntime, themesFor, writeThemeMarker } from './helpers';
 
 async function overviewItem(rt: ShopRuntime, theme: ShopifyTheme): Promise<ThemeOverviewItem> {
   await importThemeMarker(rt, theme.id);
@@ -52,5 +53,24 @@ export const themesRoutes = new Hono<AppEnv>()
     const rt = await requestRuntime(c);
     const theme = (await themesFor(rt, c.req.query('refresh') === '1')).find((t) => t.id === id);
     if (!theme) throw new ApiError(404, 'NOT_FOUND', 'Theme not found in this store');
-    return ok<ThemeOverviewItem>(c, await overviewItem(rt, theme));
+    const item = await overviewItem(rt, theme);
+    let syncFile: ThemeSyncFile | null = null;
+    try {
+      const marker = await readThemeMarker(rt, theme.id);
+      syncFile = { path: THEME_SYNC_MARKER_PATH, ...marker, matchesRecord: !!marker.sha && marker.sha === item.lastSynced?.sha };
+    } catch (err) {
+      rt.logger.warn('theme.marker_read_failed', { error: err instanceof Error ? err.message : String(err) });
+    }
+    return ok<ThemeOverviewItem>(c, { ...item, syncFile });
+  })
+  /** Writes assets/theme-sync.json from the theme's last synced update (only that file changes). */
+  .post('/:id/sync-file', async (c) => {
+    const id = parseOrThrow(themeIdSchema, c.req.param('id'));
+    const rt = await requestRuntime(c);
+    const theme = (await themesFor(rt)).find((t) => t.id === id);
+    if (!theme) throw new ApiError(404, 'NOT_FOUND', 'Theme not found in this store');
+    if (!theme.writable) throw new ApiError(409, 'THEME_NOT_WRITABLE', `A ${theme.role} theme cannot be changed`);
+    const result = await writeThemeMarker(rt, theme);
+    if (!result.written) throw new ApiError(422, 'VALIDATION_ERROR', result.message);
+    return ok(c, { written: true }, result.message);
   });

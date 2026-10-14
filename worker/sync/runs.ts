@@ -48,9 +48,36 @@ function phaseOf(row: SyncHistoryRow, counts: OperationCounts): UpdatePhase {
   return 'done';
 }
 
+export const SKIPPED_BY_YOU = 'Skipped by you';
+export const DELETIONS_OFF = 'Deletions turned off';
+
+/** Checks for what will actually be applied: issues in skipped files no longer count. */
+export function effectiveChecks(row: SyncHistoryRow): UpdateChecks | null {
+  const checks = (row.checks ?? null) as UpdateChecks | null;
+  const skipped = new Set(((row.options ?? {}) as Partial<RunOptions>).skippedPaths ?? []);
+  if (!checks || skipped.size === 0) return checks;
+  const issues = checks.code.issues.filter((i) => !skipped.has(i.path));
+  const files = checks.directEdits.files.filter((f) => !skipped.has(f.path));
+  return {
+    code: { ...checks.code, issues, status: issues.length > 0 ? 'failed' : 'passed' },
+    directEdits: {
+      ...checks.directEdits,
+      files,
+      status: checks.directEdits.status === 'skipped' ? 'skipped' : files.length > 0 ? 'warning' : 'passed',
+    },
+  };
+}
+
 export function toUpdateRun(row: SyncHistoryRow, counts: OperationCounts, shopDomain: string, extras: RunExtras = {}): UpdateRun {
   const options = (row.options ?? {}) as Partial<RunOptions>;
-  const checks = (row.checks ?? null) as UpdateChecks | null;
+  const checks = effectiveChecks(row);
+  const skippedPaths = options.skippedPaths ?? [];
+  const selectionWarnings = [
+    ...(skippedPaths.length > 0
+      ? [`${skippedPaths.length} file(s) skipped by you stay as they are in the theme; the theme is still recorded as on this update.`]
+      : []),
+    ...(options.allowDeletes === false ? ['Deletions are turned off: files the update removes stay in the theme.'] : []),
+  ];
   const details = row.errorDetails as { code?: string; message?: string } | null;
   const finished = ['succeeded', 'partially_failed', 'failed'].includes(row.status);
   const expired = row.status === 'previewed' && (!row.previewExpiresAt || row.previewExpiresAt.getTime() < Date.now());
@@ -59,6 +86,7 @@ export function toUpdateRun(row: SyncHistoryRow, counts: OperationCounts, shopDo
 
   return {
     id: row.id,
+    selection: { allowDeletes: options.allowDeletes !== false, skippedPaths },
     kind: row.kind,
     line: row.line,
     status: expired ? 'expired' : row.status,
@@ -80,7 +108,7 @@ export function toUpdateRun(row: SyncHistoryRow, counts: OperationCounts, shopDo
       pending: counts.pending,
       backedUp: counts.backedUp,
     },
-    warnings: options.warnings ?? [],
+    warnings: [...(options.warnings ?? []), ...selectionWarnings],
     errorDetails: details?.message ? { code: details.code ?? 'ERROR', message: details.message } : null,
     attempt: row.attempt,
     verifiedOnStagingAt: iso(row.verifiedOnStagingAt),
@@ -172,7 +200,7 @@ export async function confirmRun(
     await transitionSyncRun(db, shop.id, run.id, ['previewed'], 'expired');
     throw new ApiError(410, 'PREVIEW_EXPIRED', 'This review expired. Start the update again to see the latest changes.');
   }
-  const checks = run.checks as UpdateChecks | null;
+  const checks = effectiveChecks(run);
   if (checks?.code.status === 'failed') {
     throw new ApiError(422, 'CODE_ERRORS', 'The code check found errors. Ask your developer to fix them and save a new update.', {
       details: { issues: checks.code.issues },

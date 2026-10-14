@@ -189,6 +189,10 @@ The screens follow the client guide (*Theme Sync Client Guide v1.1*):
 
 **Test before Live.** The published theme is the Live theme. It never receives a commit directly: apply the commit to any unpublished theme first; once that update fully completes the commit is **Tested** and can be published to Live from the published theme's page or from the update result.
 
+**Sync options on the review page** (like the earlier flow): every file of the update is listed with a checkbox — untick a file to skip it (it stays as it is in the theme) — and *Allow deletions* decides whether files the update removes are removed from the theme. Checks follow the selection (skipping a file with a code error unblocks the update). During the run the same table shows each file's progress and, for failures, the error and whether it *can be retried* or *needs a developer fix*.
+
+**Last synced per theme and branch.** The theme page shows the last synced commit, the branch it came from and the state of `assets/theme-sync.json`; the commit list marks **Last synced**, **Pending sync**, **Synced** and **Tested** for the selected branch. `assets/theme-sync.json` (written after every complete update, and by *Already running this*) holds the last synced commit, its branch and date; a duplicated theme keeps it, so Theme Sync recognises the copy. *Save sync file to theme* writes it again when it is missing.
+
 **Protected vs. ignored files.** *Protected* files are files the store edits in Shopify (brand settings, theme-editor content): if the file already exists in a theme it is never replaced or removed, so those edits are kept; if it does not exist yet (a new template) it is created once. *Ignored* files are repository files that must never go to Shopify: they are skipped completely — never created, changed or removed.
 
 ### One-time setup (per store)

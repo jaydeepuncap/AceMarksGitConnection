@@ -404,36 +404,106 @@ const FILE_STATUS: Record<UpdateFile['status'], { label: string; tone: 'info' | 
   skipped: { label: 'Untouched', tone: 'neutral' },
 };
 
-function AllFiles({ run }: { run: UpdateRunDetail }) {
-  const [open, setOpen] = useState(false);
+const USER_SKIP_REASONS = ['Skipped by you', 'Deletions turned off'];
+const CHANGE_LABEL = { added: 'New', modified: 'Updated', removed: 'Removed', skipped: '—' } as const;
+
+/**
+ * Every file of the run. While reviewing, files can be skipped and deletions
+ * turned off (like the earlier sync flow); during and after the run it shows
+ * each file's progress and any error.
+ */
+function FileTable({ run, onChanged }: { run: UpdateRunDetail; onChanged: () => void }) {
+  const reviewing = run.status === 'previewed';
+  const active = run.status === 'queued' || run.status === 'running';
+  const problems = run.status === 'failed' || run.status === 'partially_failed';
+  const [open, setOpen] = useState(reviewing || active || problems);
+  const save = useMutation(api.updates.selection);
+  const choosable = (f: UpdateFile) => f.status === 'pending' || (f.status === 'skipped' && USER_SKIP_REASONS.includes(f.skipReason ?? ''));
+  const deletes = run.files.filter((f) => f.action === 'delete' && choosable(f)).length;
+  const toApply = run.files.filter((f) => f.status !== 'skipped').length;
+
+  const apply = async (selection: { allowDeletes: boolean; skippedPaths: string[] }) => {
+    if (await save.run(run.id, selection)) onChanged();
+  };
+  const toggleFile = (path: string, include: boolean) => {
+    const skipped = new Set(run.selection.skippedPaths);
+    if (include) skipped.delete(path);
+    else skipped.add(path);
+    void apply({ allowDeletes: run.selection.allowDeletes, skippedPaths: [...skipped] });
+  };
+
   return (
-    <s-section heading={`All files (${run.files.length})`}>
+    <s-section heading={reviewing ? `Files in this update (${toApply} to apply)` : `Files (${run.files.length})`}>
       <s-button slot="secondary-actions" variant="tertiary" onClick={() => setOpen((v) => !v)}>
         {open ? 'Hide' : 'Show'}
       </s-button>
       {open && (
-        <s-table>
-          <s-table-header-row>
-            <s-table-header listSlot="primary">File</s-table-header>
-            <s-table-header>Change</s-table-header>
-            <s-table-header listSlot="inline">Status</s-table-header>
-            <s-table-header listSlot="secondary">Details</s-table-header>
-          </s-table-header-row>
-          <s-table-body>
-            {run.files.map((file) => (
-              <s-table-row key={file.id}>
-                <s-table-cell>{file.path}</s-table-cell>
-                <s-table-cell>{file.change === 'skipped' ? '—' : file.change === 'added' ? 'New' : file.change === 'removed' ? 'Removed' : 'Updated'}</s-table-cell>
-                <s-table-cell>
-                  <s-badge tone={FILE_STATUS[file.status].tone}>{FILE_STATUS[file.status].label}</s-badge>
-                </s-table-cell>
-                <s-table-cell>
-                  <s-text color="subdued">{file.error ?? file.skipReason ?? (file.introducedBy ? `from ${file.introducedBy}` : '')}</s-text>
-                </s-table-cell>
-              </s-table-row>
-            ))}
-          </s-table-body>
-        </s-table>
+        <s-stack gap="base">
+          <ErrorBanner error={save.error} heading="The selection was not saved" onDismiss={save.clearError} />
+          {reviewing && (
+            <s-stack gap="small-200">
+              <s-checkbox
+                label="Allow deletions"
+                details={`Remove the ${deletes} file(s) this update removes from the repository. When off, they stay in the theme.`}
+                checked={run.selection.allowDeletes}
+                disabled={save.pending || deletes === 0}
+                onChange={(event) => void apply({ allowDeletes: event.currentTarget.checked, skippedPaths: run.selection.skippedPaths })}
+              />
+              <s-text color="subdued">
+                Untick a file to skip it: it stays as it is in the theme. Protected and required files are never replaced.
+              </s-text>
+            </s-stack>
+          )}
+          <s-table loading={save.pending}>
+            <s-table-header-row>
+              {reviewing && <s-table-header>Apply</s-table-header>}
+              <s-table-header listSlot="primary">File</s-table-header>
+              <s-table-header>Change</s-table-header>
+              <s-table-header listSlot="inline">Status</s-table-header>
+              <s-table-header listSlot="secondary">Details</s-table-header>
+            </s-table-header-row>
+            <s-table-body>
+              {run.files.map((file) => (
+                <s-table-row key={file.id}>
+                  {reviewing && (
+                    <s-table-cell>
+                      {choosable(file) && !(file.action === 'delete' && !run.selection.allowDeletes) ? (
+                        <s-checkbox
+                          label={`Apply ${file.path}`}
+                          labelAccessibilityVisibility="exclusive"
+                          checked={file.status === 'pending'}
+                          disabled={save.pending}
+                          onChange={(event) => toggleFile(file.path, event.currentTarget.checked)}
+                        />
+                      ) : (
+                        <s-text color="subdued">—</s-text>
+                      )}
+                    </s-table-cell>
+                  )}
+                  <s-table-cell>{file.path}</s-table-cell>
+                  <s-table-cell>
+                    {file.status === 'skipped' ? CHANGE_LABEL.skipped : CHANGE_LABEL[file.action === 'delete' ? 'removed' : file.change === 'added' ? 'added' : 'modified']}
+                  </s-table-cell>
+                  <s-table-cell>
+                    <s-stack direction="inline" gap="small-200">
+                      <s-badge tone={FILE_STATUS[file.status].tone}>
+                        {reviewing && file.status === 'pending' ? 'Will apply' : FILE_STATUS[file.status].label}
+                      </s-badge>
+                      {file.status === 'failed' && (
+                        <s-badge tone={ERROR_KIND_BADGE[file.errorKind ?? 'other'].tone}>{ERROR_KIND_BADGE[file.errorKind ?? 'other'].label}</s-badge>
+                      )}
+                    </s-stack>
+                  </s-table-cell>
+                  <s-table-cell>
+                    <s-text tone={file.status === 'failed' ? 'critical' : 'auto'} color={file.status === 'failed' ? 'base' : 'subdued'}>
+                      {file.error ?? file.skipReason ?? (file.introducedBy ? `from ${file.introducedBy}` : '')}
+                    </s-text>
+                  </s-table-cell>
+                </s-table-row>
+              ))}
+            </s-table-body>
+          </s-table>
+        </s-stack>
       )}
     </s-section>
   );
@@ -626,7 +696,7 @@ export default function UpdateRun() {
           {(run.status === 'failed' || run.status === 'partially_failed') && (
             <Incomplete run={run} pending={pending} onRetry={() => doAction('retry')} onRerun={() => doAction('rerun')} onRestore={() => doAction('restore')} />
           )}
-          {run.files.length > 0 && <AllFiles run={run} />}
+          {run.files.length > 0 && <FileTable key={run.status} run={run} onChanged={query.reload} />}
         </>
       )}
     </AppLayout>

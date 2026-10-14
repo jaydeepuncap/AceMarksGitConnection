@@ -336,6 +336,8 @@ export const themeStates = sqliteTable(
     themeId: text('theme_id').notNull(),
     lastSyncedSha: text('last_synced_sha'),
     lastSyncedMessage: text('last_synced_message'),
+    /** Branch the last synced update was chosen from. */
+    lastSyncedBranch: text('last_synced_branch'),
     lastSyncedAt: integer('last_synced_at', { mode: 'timestamp_ms' }),
     lastSyncId: text('last_sync_id'),
     verifiedOnStagingAt: integer('verified_on_staging_at', { mode: 'timestamp_ms' }),

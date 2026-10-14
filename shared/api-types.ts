@@ -291,6 +291,8 @@ export interface SyncedUpdate {
   sha: string;
   shortSha: string;
   message: string | null;
+  /** Branch the update was chosen from (null when unknown). */
+  branch: string | null;
   syncedAt: string | null;
   verifiedOnStagingAt: string | null;
 }
@@ -389,8 +391,17 @@ export interface UpdateActions {
   canPublish: boolean;
 }
 
+/** Choices made on the review page (like the earlier sync flow). */
+export interface UpdateSelection {
+  /** Remove files the update removes. When off, they stay in the theme. */
+  allowDeletes: boolean;
+  /** Files you chose not to apply; they stay as they are in the theme. */
+  skippedPaths: string[];
+}
+
 export interface UpdateRun {
   id: string;
+  selection: UpdateSelection;
   kind: UpdateKind;
   line: ThemeLine;
   status: UpdateStatus;
@@ -455,6 +466,8 @@ export interface CreateUpdatePlanRequest {
   /** Branch the update was chosen from (recorded in the history). */
   branch?: string;
 }
+
+export type UpdateSelectionRequest = UpdateSelection;
 
 export interface ConfirmUpdateRequest {
   /** "Replace and continue": replace files that were edited directly in Shopify. */
@@ -555,6 +568,17 @@ export interface PublishOptionsResponse {
   defaultThemeId: string | null;
 }
 
+/** assets/theme-sync.json in a theme: the theme's own record of its last synced update. */
+export interface ThemeSyncFile {
+  path: string;
+  present: boolean;
+  sha: string | null;
+  branch: string | null;
+  syncedOn: string | null;
+  /** The file names the same update as Theme Sync's record. */
+  matchesRecord: boolean;
+}
+
 /** One theme of the store with its last synced update (from assets/theme-sync.json). */
 export interface ThemeOverviewItem {
   theme: ShopifyTheme;
@@ -562,6 +586,8 @@ export interface ThemeOverviewItem {
   lastSynced: SyncedUpdate | null;
   activeRun: UpdateRun | null;
   lastRun: UpdateRun | null;
+  /** Only on GET /api/themes/:id. */
+  syncFile?: ThemeSyncFile | null;
 }
 
 // ---------------------------------------------------------------------------

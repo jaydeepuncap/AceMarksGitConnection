@@ -309,6 +309,7 @@ export function toSyncedUpdate(row: ThemeStateRow | undefined | null): SyncedUpd
     sha: row.lastSyncedSha,
     shortSha: row.lastSyncedSha.slice(0, 7),
     message: row.lastSyncedMessage,
+    branch: row.lastSyncedBranch,
     syncedAt: iso(row.lastSyncedAt),
     verifiedOnStagingAt: iso(row.verifiedOnStagingAt),
   };

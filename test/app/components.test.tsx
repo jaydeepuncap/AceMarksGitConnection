@@ -65,6 +65,7 @@ const C3 = '3'.repeat(40);
 function makeRun(overrides: Partial<UpdateRunDetail> = {}): UpdateRunDetail {
   return {
     id: '11111111-1111-4111-8111-111111111111',
+    selection: { allowDeletes: true, skippedPaths: [] },
     kind: 'update',
     line: 'staging',
     status: 'previewed',
@@ -141,7 +142,7 @@ describe('update screens', () => {
       theme: { id: 'gid://shopify/OnlineStoreTheme/1', name: 'Staging' },
       repository: 'acemarks-collection/master-theme',
       branch: 'main',
-      current: { sha: C1, shortSha: '1111111', message: 'Add custom CSS', syncedAt: null, verifiedOnStagingAt: null },
+      current: { sha: C1, shortSha: '1111111', message: 'Add custom CSS', branch: 'main', syncedAt: null, verifiedOnStagingAt: null },
       currentFound: true,
       waiting: 1,
       waitingMore: false,
@@ -155,9 +156,9 @@ describe('update screens', () => {
     mocked.updates.list.mockResolvedValue(list);
     wrap(<UpdateList mode="update" themeId="gid://shopify/OnlineStoreTheme/1" />, '/themes/1');
     await waitFor(() => expect(screen.getByText('Update cart functionality')).toBeInTheDocument());
-    expect(screen.getByText(/1 update waiting/)).toBeInTheDocument();
-    expect(screen.getByText('New')).toBeInTheDocument();
-    expect(screen.getByText('Current')).toBeInTheDocument();
+    expect(screen.getByText(/1 commit pending sync on main/)).toBeInTheDocument();
+    expect(screen.getByText('Pending sync')).toBeInTheDocument();
+    expect(screen.getByText('Last synced')).toBeInTheDocument();
     expect(screen.getByText('~2')).toBeInTheDocument();
     expect(screen.getAllByText('Update to this →')).toHaveLength(1);
   });
@@ -220,8 +221,8 @@ describe('update screens', () => {
     await waitFor(() =>
       expect(document.querySelector('s-banner[heading="Update incomplete · 5 of 7 files updated"]')).not.toBeNull(),
     );
-    expect(screen.getByText('Can be retried')).toBeInTheDocument();
-    expect(screen.getByText('Needs developer fix')).toBeInTheDocument();
+    expect(screen.getAllByText('Can be retried').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Needs developer fix').length).toBeGreaterThan(0);
     for (const label of ['Retry failed files', 'Run full update again', 'Restore backup']) {
       expect(screen.getAllByText(label).some((el) => el.tagName.toLowerCase() === 's-button')).toBe(true);
     }

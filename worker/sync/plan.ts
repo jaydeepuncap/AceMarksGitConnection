@@ -72,12 +72,16 @@ export const BACKUP_TTL_SECONDS = 30 * 24 * 60 * 60;
 
 export interface RunOptions {
   direction: UpdateDirection;
+  /** Review choices: deletions on/off and files skipped by the user. */
+  allowDeletes?: boolean;
+  skippedPaths?: string[];
   totals: UpdateTotals;
   warnings: string[];
   /** Theme state before the run, so a restore can put it back. */
   previousState?: {
     lastSyncedSha: string | null;
     lastSyncedMessage: string | null;
+    lastSyncedBranch?: string | null;
     lastSyncedAt: number | null;
     lastSyncId: string | null;
     verifiedOnStagingAt: number | null;

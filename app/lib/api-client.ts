@@ -36,6 +36,7 @@ import type {
   UpdateRun,
   UpdateRunDetail,
   UpdatesResponse,
+  UpdateSelectionRequest,
   UpdateSettingsRequest,
 } from './types';
 import { getSessionToken, redirectTopLevel } from './app-bridge';
@@ -173,6 +174,8 @@ export const api = {
     overview: (refresh = false) =>
       apiRequest<ThemeOverviewItem[]>('GET', '/api/themes/overview', { query: { refresh: refresh ? 1 : undefined } }),
     get: (id: string) => apiRequest<ThemeOverviewItem>('GET', `/api/themes/${encodeURIComponent(id)}`),
+    writeSyncFile: (id: string) =>
+      apiRequest<{ written: boolean }>('POST', `/api/themes/${encodeURIComponent(id)}/sync-file`, { body: {} }),
   },
   commits: {
     files: (sha: string, query: { page?: number; perPage?: number } = {}) =>
@@ -193,6 +196,8 @@ export const api = {
     rerun: (id: string) => apiRequest<UpdateRun>('POST', `/api/updates/${encodeURIComponent(id)}/rerun`, { body: {} }),
     restore: (id: string) => apiRequest<UpdateRun>('POST', `/api/updates/${encodeURIComponent(id)}/restore`, { body: {} }),
     cancel: (id: string) => apiRequest<UpdateRun>('POST', `/api/updates/${encodeURIComponent(id)}/cancel`, { body: {} }),
+    selection: (id: string, body: UpdateSelectionRequest) =>
+      apiRequest<UpdateRun>('POST', `/api/updates/${encodeURIComponent(id)}/selection`, { body }),
   },
   history: (
     query: { page?: number; perPage?: number; line?: ThemeLine; themeId?: string; branch?: string; includeUnknownBranch?: boolean } = {},

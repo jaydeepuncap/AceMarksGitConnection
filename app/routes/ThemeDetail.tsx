@@ -7,7 +7,8 @@ import { PublishedBadge } from '../components/ThemeBadges';
 import { UpdateList } from '../components/UpdateList';
 import { api } from '../lib/api-client';
 import { firstLine, formatDate, KIND_LABEL, STATUS_BADGE } from '../lib/format';
-import { useApiQuery } from '../lib/hooks';
+import { useApiQuery, useMutation } from '../lib/hooks';
+import { showToast } from '../lib/app-bridge';
 import { RoleText } from './Themes';
 
 /** Select value for "use the store's branch" (an empty option value is not reliable in <s-select>). */
@@ -34,7 +35,15 @@ export default function ThemeDetail() {
   const storeBranchName = settings.data?.settings.branch ?? null;
   // Every update on this theme, from any branch.
   const [historyPage, setHistoryPage] = useState(1);
+  const writeFile = useMutation(api.themes.writeSyncFile);
   const history = useApiQuery(() => api.history({ themeId: id, page: historyPage, perPage: 20 }), [id, historyPage]);
+
+  const saveSyncFile = async () => {
+    if (await writeFile.run(id)) {
+      showToast('Saved assets/theme-sync.json in the theme');
+      detail.reload();
+    }
+  };
 
   if (detail.loading && !detail.data) return <LoadingState title="Theme" />;
   const item = detail.data;
@@ -47,7 +56,12 @@ export default function ThemeDetail() {
     <AppLayout
       title={theme?.name ?? 'Theme'}
       backAction={{ content: 'Themes', onAction: () => navigate('/themes') }}
-      banners={<ErrorBanner error={detail.error} onRetry={detail.reload} />}
+      banners={
+        <>
+          <ErrorBanner error={detail.error} onRetry={detail.reload} />
+          <ErrorBanner error={writeFile.error} heading="The sync file was not saved" onDismiss={writeFile.clearError} />
+        </>
+      }
     >
       {item && theme && (
         <>
@@ -63,6 +77,10 @@ export default function ThemeDetail() {
                     <s-text>
                       <s-text type="strong">{item.lastSynced.shortSha}</s-text> {firstLine(item.lastSynced.message)}
                     </s-text>
+                  </KeyValue>
+                  <s-divider />
+                  <KeyValue label="Branch">
+                    <s-text>{item.lastSynced.branch ?? storeBranch ?? '—'}</s-text>
                   </KeyValue>
                   <s-divider />
                   <KeyValue label="Synced on">
@@ -87,7 +105,34 @@ export default function ThemeDetail() {
                   one the theme already runs.
                 </s-paragraph>
               )}
-              <s-text color="subdued">Saved in Theme Sync and in the theme as assets/theme-sync.json after every complete update.</s-text>
+              <s-divider />
+              <KeyValue label="Sync file in Shopify">
+                {item.syncFile ? (
+                  <s-stack direction="inline" gap="small-200" alignItems="center">
+                    <s-text>{item.syncFile.path}</s-text>
+                    {!item.syncFile.present ? (
+                      <s-badge tone="warning">Missing</s-badge>
+                    ) : item.syncFile.matchesRecord ? (
+                      <s-badge tone="success">{`Up to date · ${item.syncFile.sha?.slice(0, 7) ?? ''}`}</s-badge>
+                    ) : (
+                      <s-badge tone="caution">{`Shows ${item.syncFile.sha?.slice(0, 7) ?? 'another update'}`}</s-badge>
+                    )}
+                  </s-stack>
+                ) : (
+                  <s-text color="subdued">Could not be read</s-text>
+                )}
+              </KeyValue>
+              <s-text color="subdued">
+                Every complete update writes assets/theme-sync.json into the theme with the last synced commit and branch. A
+                duplicated theme keeps this file, so Theme Sync knows which commit the copy runs.
+              </s-text>
+              {item.lastSynced && item.syncFile && !item.syncFile.matchesRecord && theme.writable && (
+                <s-stack direction="inline">
+                  <s-button loading={writeFile.pending} onClick={saveSyncFile}>
+                    Save sync file to theme
+                  </s-button>
+                </s-stack>
+              )}
               {shopDomain && (
                 <s-stack direction="inline">
                   <s-button href={`https://${shopDomain}/?preview_theme_id=${theme.numericId}`} target="_blank">

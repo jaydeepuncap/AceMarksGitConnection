@@ -40,6 +40,7 @@ import {
   listSyncOperations,
   toSyncedUpdate,
   transitionSyncRun,
+  updateOperations,
   upsertThemeState,
 } from '../lib/database';
 import { ApiError, ok } from '../lib/response';
@@ -47,6 +48,7 @@ import {
   baselineSchema,
   confirmUpdateSchema,
   createPlanSchema,
+  updateSelectionSchema,
   historyQuerySchema,
   parseOrThrow,
   readJsonBody,
@@ -55,11 +57,11 @@ import {
 } from '../lib/validators';
 import { rateLimit } from '../middleware/error-handler';
 import { dispatchSync, STALE_RUN_MS } from '../sync/dispatch';
-import { lineForTheme, planRestore, planRun, toIncludedFiles, type RunOptions } from '../sync/plan';
+import { lineForTheme, planRestore, planRun, toIncludedFiles, totalsOf, type RunOptions } from '../sync/plan';
 import { getTheme } from '../lib/shopify-graphql';
-import { cancelRun, confirmRun, describeRun, retryRun, toUpdateFile, toUpdateRun } from '../sync/runs';
+import { cancelRun, confirmRun, DELETIONS_OFF, describeRun, retryRun, SKIPPED_BY_YOU, toUpdateFile, toUpdateRun } from '../sync/runs';
 import { commitFilesCached, countAfter, mapLimit, requireRepo, resolveBranch, type ShopRuntime } from '../sync/runtime';
-import { dispatchCtx, importThemeMarker, requestActor, requestRuntime, themesFor } from './helpers';
+import { dispatchCtx, importThemeMarker, requestActor, requestRuntime, themesFor, writeThemeMarker } from './helpers';
 
 const writeLimiter = rateLimit({
   binding: 'SYNC_RATE_LIMITER',
@@ -242,6 +244,7 @@ export const updatesRoutes = new Hono<AppEnv>()
     if (commit.commit.sha.toLowerCase() !== body.sha) throw new ApiError(404, 'GITHUB_NOT_FOUND', 'Update not found in the repository');
     const now = new Date();
     const id = crypto.randomUUID();
+    const runBranch = body.branch ?? (await resolveBranch(rt).catch(() => repo.branch));
     const options: RunOptions = {
       direction: 'none',
       totals: { added: 0, updated: 0, removed: 0, protectedUntouched: 0, skipped: 0 },
@@ -253,7 +256,7 @@ export const updatesRoutes = new Hono<AppEnv>()
       {
         id,
         repository: repo.fullName,
-        branch: body.branch ?? (await resolveBranch(rt).catch(() => repo.branch)),
+        branch: runBranch,
         commitSha: body.sha,
         commitMessage: commit.commit.commit.message.slice(0, 1000),
         themeId: theme.id,
@@ -274,11 +277,20 @@ export const updatesRoutes = new Hono<AppEnv>()
     await upsertThemeState(rt.db, rt.shop.id, theme.id, {
       lastSyncedSha: body.sha,
       lastSyncedMessage: commit.commit.commit.message.slice(0, 1000),
+      lastSyncedBranch: runBranch,
       lastSyncedAt: now,
       lastSyncId: id,
       verifiedOnStagingAt: null,
     });
-    return respondRun(c, rt, id, 'Recorded. No theme files were changed.', 201);
+    // Save the record in the theme too, so duplicates of it keep it.
+    const marker = await writeThemeMarker(rt, { id: theme.id, isLive: role === 'MAIN' });
+    return respondRun(
+      c,
+      rt,
+      id,
+      marker.written ? 'Recorded, and saved in assets/theme-sync.json.' : `Recorded. ${marker.message}`,
+      201,
+    );
   })
   .get('/publish-options', async (c) => {
     const rt = await requestRuntime(c);
@@ -328,6 +340,48 @@ export const updatesRoutes = new Hono<AppEnv>()
       .filter((op) => op.contentSource !== 'marker')
       .map(toUpdateFile);
     return ok<UpdateRunDetail>(c, { ...summary, files });
+  })
+  /** Review choices like the earlier sync flow: skip files, allow or block deletions. */
+  .post('/:id/selection', async (c) => {
+    const run = await loadRun(c);
+    const body = parseOrThrow(updateSelectionSchema, await readJsonBody(c.req.raw, 512 * 1024));
+    if (run.status !== 'previewed') throw new ApiError(409, 'CONFLICT', `This update was already ${run.status}`);
+    const rt = await requestRuntime(c);
+    const skip = new Set(body.skippedPaths);
+    const ops = (await listSyncOperations(rt.db, rt.shop.id, run.id)).filter((op) => op.contentSource !== 'marker');
+    const userChoice = (op: { status: string; skipReason: string | null }) =>
+      op.status === 'pending' || op.skipReason === SKIPPED_BY_YOU || op.skipReason === DELETIONS_OFF;
+
+    const toPending: string[] = [];
+    const toSkip = new Map<string, string[]>();
+    const next = ops.map((op) => {
+      if (!userChoice(op)) return op;
+      const reason = op.action === 'delete' && !body.allowDeletes ? DELETIONS_OFF : skip.has(op.path) ? SKIPPED_BY_YOU : null;
+      if (reason) {
+        if (op.skipReason !== reason) toSkip.set(reason, [...(toSkip.get(reason) ?? []), op.id]);
+        return { ...op, status: 'skipped' as const, skipReason: reason };
+      }
+      if (op.status !== 'pending') toPending.push(op.id);
+      return { ...op, status: 'pending' as const, skipReason: null };
+    });
+    await updateOperations(rt.db, rt.shop.id, toPending, { status: 'pending', skipReason: null, backupState: 'pending' });
+    for (const [reason, ids] of toSkip) {
+      await updateOperations(rt.db, rt.shop.id, ids, { status: 'skipped', skipReason: reason, backupState: null });
+    }
+
+    const options = (run.options ?? {}) as RunOptions;
+    const applied = next.filter((op) => op.status === 'pending');
+    await transitionSyncRun(rt.db, rt.shop.id, run.id, ['previewed'], 'previewed', {
+      filesChanged: applied.length,
+      filesSkipped: next.length - applied.length,
+      options: {
+        ...options,
+        allowDeletes: body.allowDeletes,
+        skippedPaths: next.filter((op) => op.skipReason === SKIPPED_BY_YOU).map((op) => op.path),
+        totals: totalsOf(next),
+      },
+    });
+    return respondRun(c, rt, run.id, 'Selection saved. Nothing has changed in the theme yet.');
   })
   .post('/:id/confirm', writeLimiter, async (c) => {
     const run = await loadRun(c);

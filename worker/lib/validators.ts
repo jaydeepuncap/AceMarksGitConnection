@@ -193,6 +193,13 @@ export const createPlanSchema = z
   })
   .strict();
 
+export const updateSelectionSchema = z
+  .object({
+    allowDeletes: z.boolean(),
+    skippedPaths: z.array(themePathSchema).max(5000),
+  })
+  .strict();
+
 export const confirmUpdateSchema = z
   .object({
     acceptDirectEdits: z.boolean().optional(),
