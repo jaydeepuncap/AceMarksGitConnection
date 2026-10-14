@@ -135,6 +135,7 @@ describe('update screens', () => {
   it('Updates lists commits newest first with NEW / CURRENT', async () => {
     const list: UpdatesResponse = {
       line: 'staging',
+      shopifyTheme: null,
       theme: { id: 'gid://shopify/OnlineStoreTheme/1', name: 'Staging' },
       repository: 'acemarks-collection/master-theme',
       branch: 'main',

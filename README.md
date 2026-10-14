@@ -180,7 +180,8 @@ The screens follow the client guide (*Theme Sync Client Guide v1.1*):
 | Screen | Route | What it does |
 |---|---|---|
 | Overview | `/` | Store, master repository, Staging and Live cards with their last synced update, updates waiting / to publish |
-| Themes (step 01) | `/themes` | Staging and Live with status and last synced update; *Select →* and *Publish from Staging* |
+| Themes (step 01) | `/themes` | **Every theme** of the store with its Staging/Live tag, published status, last synced update (from `assets/theme-sync.json`) and last run |
+| Theme page | `/themes/:id` | One theme: its last synced update, a **branch** picker, that branch's commits (NEW / CURRENT, files per commit) with *Update to this →* / *Go back to this →* / *Already running this*, and its recent updates. Any unpublished theme can receive a commit directly; the published/Live theme only through *Publish to Live*. |
 | Updates (step 02) | `/updates` | Commits newest first, marked **NEW** / **CURRENT**, with `+a ~m −r` counts; expand a commit to see its files |
 | Checks + Review (03–04) | `/updates/:id` | Code check, direct edit detection, every included update with its files, totals, *Confirm update to Staging* |
 | Progress + result (05–06, 08) | `/updates/:id` | Backup, file-by-file progress, *Preview Staging in Shopify*, *Publish to Live*; for incomplete runs *Retry failed files*, *Run full update again*, *Restore backup* |
@@ -429,9 +430,11 @@ Status codes: `400` validation, `401` session (with `X-Shopify-Retry-Invalid-Ses
 | `GET/POST/DELETE /api/github/connection` | `{ token }` | `{ connected, connection, usingSharedToken }` (never the token) |
 | `GET /api/github/branches` | `?repository&page&perPage` | `Paginated<GithubBranch>` |
 | `GET /api/themes` | `?refresh=1` | `ShopifyTheme[]` |
+| `GET /api/themes/overview` | `?refresh=1` | Every theme with its line and last synced update |
+| `GET /api/themes/:id` | – | One theme (numeric ID or GID) with its last synced update and runs |
 | `GET /api/commits/:sha/files` | `?page&perPage` | Files of one commit with their theme paths |
-| `GET /api/updates` | `?line=staging\|live&ref=branch\|current&page&perPage` | Updates with `new`/`current`/`older`, counts, waiting |
-| `POST /api/updates/plan` | `{ kind: "update"\|"publish"\|"rollback", targetSha, themeId?, line? }` | `201 UpdateRun` (checks + review) |
+| `GET /api/updates` | `?line=staging\|live&themeId&branch&ref=branch\|current&page&perPage` | Updates with `new`/`current`/`older`, counts, waiting |
+| `POST /api/updates/plan` | `{ kind: "update"\|"publish"\|"rollback", targetSha, themeId?, line?, branch? }` | `201 UpdateRun` (checks + review) |
 | `POST /api/updates/baseline` | `{ line, sha }` | `201 UpdateRun` — records the update a theme already runs |
 | `GET /api/updates/publish-options` | – | Staging-verified update and Live theme choices |
 | `GET /api/updates/:id` | – | `UpdateRunDetail` (run + files); resumes stalled runs without Queues |

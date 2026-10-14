@@ -202,7 +202,7 @@ function Progress({ run }: { run: UpdateRunDetail }) {
           value={backingUp ? run.progress.backedUp : run.progress.succeeded + run.progress.failed}
         />
         <s-text color="subdued">
-          {run.line === 'staging' ? 'The Live theme is not touched.' : 'Customers see the update as soon as every file succeeds.'}
+          {run.line === 'live' ? 'Customers see the update as soon as every file succeeds.' : 'The Live theme is not touched.'}
         </s-text>
       </s-stack>
     </s-section>
@@ -226,7 +226,7 @@ function Result({
 }) {
   const numericId = run.theme.id.split('/').pop();
   const previewUrl = `https://${shopDomain}/?preview_theme_id=${numericId}`;
-  const label = LINE_LABEL[run.line];
+  const label = run.line === 'other' ? run.theme.name : LINE_LABEL[run.line];
   return (
     <s-section>
       <s-stack gap="base">
@@ -478,7 +478,7 @@ export default function UpdateRun() {
     const result = await cancel.run(id);
     if (result) {
       showToast('Update cancelled. Nothing changed.');
-      navigate(run?.line === 'live' ? '/publish' : '/updates');
+      navigate(!run ? '/updates' : run.kind === 'publish' ? '/publish' : run.line === 'staging' ? '/updates' : `/themes/${run.theme.id.split('/').pop()}`);
     }
   };
   const doAction = async (kind: 'retry' | 'rerun' | 'restore') => {
@@ -505,7 +505,9 @@ export default function UpdateRun() {
         ? 'Restore backup'
         : run.kind === 'rollback'
           ? `Confirm going back on ${LINE_LABEL[run.line]}`
-          : 'Confirm update to Staging';
+          : run.line === 'staging'
+            ? 'Confirm update to Staging'
+            : `Confirm update to ${run.theme.name}`;
 
   const liveSummary = overview.data
     ? { sha: overview.data.live.lastSynced?.sha ?? null, waiting: overview.data.live.waiting }
@@ -536,7 +538,7 @@ export default function UpdateRun() {
           {run.status === 'expired' && (
             <s-banner tone="warning" heading="This review expired">
               <s-paragraph>Reviews are valid for 30 minutes so you always confirm the latest state. Start again.</s-paragraph>
-              <s-button slot="secondary-actions" onClick={() => navigate(run.line === 'live' ? '/publish' : '/updates')}>
+              <s-button slot="secondary-actions" onClick={() => navigate(`/themes/${run.theme.id.split('/').pop()}`)}>
                 Start again
               </s-button>
             </s-banner>
@@ -587,7 +589,7 @@ export default function UpdateRun() {
                     </s-text>
                     <s-text color="subdued">
                       {`A backup of the affected files is saved first. ${
-                        run.line === 'staging' ? 'The Live theme is not touched.' : 'Only this Live theme is changed.'
+                        run.line === 'live' ? 'Only this Live theme is changed.' : 'The Live theme is not touched.'
                       }`}
                     </s-text>
                     <s-stack direction="inline" gap="small-200" justifyContent="end">

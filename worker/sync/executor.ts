@@ -301,7 +301,7 @@ async function processDeletes(ctx: Ctx, ops: SyncOperationRow[]): Promise<void> 
 // ---------------------------------------------------------------------------
 // Phase 3: finish
 // ---------------------------------------------------------------------------
-const LINE_LABEL = { staging: 'Staging', live: 'Live' } as const;
+const LINE_LABEL = { staging: 'Staging', live: 'Live', other: 'Theme' } as const;
 
 export function markerContent(run: SyncHistoryRow, syncedAt: Date, verifiedOnStagingAt: Date | null): string {
   return `${JSON.stringify(

@@ -32,6 +32,7 @@ import type {
   ShopifyTheme,
   StoreSummary,
   ThemeLine,
+  ThemeOverviewItem,
   UpdateRun,
   UpdateRunDetail,
   UpdatesResponse,
@@ -169,13 +170,18 @@ export const api = {
   },
   themes: {
     list: (refresh = false) => apiRequest<ShopifyTheme[]>('GET', '/api/themes', { query: { refresh: refresh ? 1 : undefined } }),
+    overview: (refresh = false) =>
+      apiRequest<ThemeOverviewItem[]>('GET', '/api/themes/overview', { query: { refresh: refresh ? 1 : undefined } }),
+    get: (id: string) => apiRequest<ThemeOverviewItem>('GET', `/api/themes/${encodeURIComponent(id)}`),
   },
   commits: {
     files: (sha: string, query: { page?: number; perPage?: number } = {}) =>
       apiRequest<CommitFilesResponse>('GET', `/api/commits/${encodeURIComponent(sha)}/files`, { query }),
   },
   updates: {
-    list: (query: { line?: ThemeLine; ref?: 'branch' | 'current'; page?: number; perPage?: number } = {}) =>
+    list: (
+      query: { line?: ThemeLine; themeId?: string; branch?: string; ref?: 'branch' | 'current'; page?: number; perPage?: number } = {},
+    ) =>
       apiRequest<UpdatesResponse>('GET', '/api/updates', { query }),
     plan: (body: CreateUpdatePlanRequest) => apiRequest<UpdateRun>('POST', '/api/updates/plan', { body }),
     baseline: (body: BaselineRequest) => apiRequest<UpdateRun>('POST', '/api/updates/baseline', { body }),
@@ -188,7 +194,7 @@ export const api = {
     restore: (id: string) => apiRequest<UpdateRun>('POST', `/api/updates/${encodeURIComponent(id)}/restore`, { body: {} }),
     cancel: (id: string) => apiRequest<UpdateRun>('POST', `/api/updates/${encodeURIComponent(id)}/cancel`, { body: {} }),
   },
-  history: (query: { page?: number; perPage?: number; line?: ThemeLine } = {}) =>
+  history: (query: { page?: number; perPage?: number; line?: ThemeLine; themeId?: string } = {}) =>
     apiRequest<Paginated<UpdateRun>>('GET', '/api/history', { query }),
   rollout: {
     get: (sha?: string) => apiRequest<RolloutResponse>('GET', '/api/rollout', { query: { sha } }),

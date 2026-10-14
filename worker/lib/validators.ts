@@ -99,7 +99,7 @@ export const commitFilesQuerySchema = paginationSchema.extend({
   perPage: z.coerce.number().int().min(1).max(300).default(100),
 });
 
-export const lineSchema = z.enum(['staging', 'live']);
+export const lineSchema = z.enum(['staging', 'live', 'other']);
 
 export const historyQuerySchema = paginationSchema.extend({
   line: lineSchema.optional(),
@@ -109,6 +109,10 @@ export const historyQuerySchema = paginationSchema.extend({
 
 export const updatesQuerySchema = z.object({
   line: lineSchema.default('staging'),
+  /** Any theme of the store (overrides `line`). */
+  themeId: themeIdSchema.optional(),
+  /** Branch to list (defaults to the store's branch). */
+  branch: branchSchema.optional(),
   /** branch – newest updates first; current – the theme's update and earlier ones (going back). */
   ref: z.enum(['branch', 'current']).default('branch'),
   page: z.coerce.number().int().min(1).max(50).default(1),
@@ -176,6 +180,7 @@ export const createPlanSchema = z
     targetSha: commitShaSchema,
     themeId: themeIdSchema.optional(),
     line: lineSchema.optional(),
+    branch: branchSchema.optional(),
   })
   .strict();
 
@@ -189,6 +194,7 @@ export const baselineSchema = z
   .object({
     line: lineSchema,
     sha: commitShaSchema,
+    themeId: themeIdSchema.optional(),
   })
   .strict();
 

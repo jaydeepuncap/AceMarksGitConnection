@@ -11,7 +11,7 @@
  */
 import { createHash } from 'node:crypto';
 import { graphqlHandler, installFetchMock, json } from './fetch-mock';
-import { THEME_DEV, THEME_LIVE } from './fixtures';
+import { THEME_DEV, THEME_LIVE, THEME_OTHER } from './fixtures';
 
 export const blobSha = (content: string | Buffer) => {
   const buf = typeof content === 'string' ? Buffer.from(content) : content;
@@ -117,6 +117,7 @@ export function installWorld(opts: WorldOptions = {}) {
       themes = new Map([
         [THEME_DEV.id, themeFilesFor(FILES_C1)],
         [THEME_LIVE.id, themeFilesFor(FILES_C1)],
+        [THEME_OTHER.id, themeFilesFor(FILES_C1)],
       ]);
       stores.set(shop, themes);
     }
@@ -215,7 +216,7 @@ export function installWorld(opts: WorldOptions = {}) {
     if (!req.url.includes('/graphql.json')) return undefined;
     const shop = new URL(req.url).hostname;
     const themes = themesFor(shop);
-    const themeList = [THEME_DEV, THEME_LIVE];
+    const themeList = [THEME_DEV, THEME_LIVE, THEME_OTHER];
     let clock = Date.parse('2026-10-10T00:00:00Z');
     const now = () => new Date((clock += 1000)).toISOString();
     return graphqlHandler({

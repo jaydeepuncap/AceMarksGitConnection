@@ -182,7 +182,8 @@ export type SyncStrategy = (typeof SYNC_STRATEGIES)[number];
 export const SYNC_KINDS = ['update', 'publish', 'rollback', 'restore', 'baseline'] as const;
 export type SyncKind = (typeof SYNC_KINDS)[number];
 
-export const THEME_LINES = ['staging', 'live'] as const;
+/** staging / live: the store's configured themes; other: any other unpublished theme. */
+export const THEME_LINES = ['staging', 'live', 'other'] as const;
 export type ThemeLine = (typeof THEME_LINES)[number];
 
 export const syncHistory = sqliteTable(

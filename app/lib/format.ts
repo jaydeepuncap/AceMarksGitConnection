@@ -25,7 +25,7 @@ export function plural(n: number, word: string, many = `${word}s`): string {
   return `${n} ${n === 1 ? word : many}`;
 }
 
-export const LINE_LABEL: Record<ThemeLine, string> = { staging: 'Staging', live: 'Live' };
+export const LINE_LABEL: Record<ThemeLine, string> = { staging: 'Staging', live: 'Live', other: 'Theme' };
 
 export const KIND_LABEL: Record<UpdateKind, string> = {
   update: 'Update',

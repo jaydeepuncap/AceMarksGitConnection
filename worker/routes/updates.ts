@@ -15,6 +15,8 @@
  */
 import { Hono, type Context } from 'hono';
 import type {
+  ShopifyTheme,
+  ThemeRef,
   Paginated,
   PublishOptionsResponse,
   ThemeLine,
@@ -51,7 +53,8 @@ import {
 } from '../lib/validators';
 import { rateLimit } from '../middleware/error-handler';
 import { dispatchSync, STALE_RUN_MS } from '../sync/dispatch';
-import { planRestore, planRun, toIncludedFiles, type RunOptions } from '../sync/plan';
+import { lineForTheme, planRestore, planRun, toIncludedFiles, type RunOptions } from '../sync/plan';
+import { getTheme } from '../lib/shopify-graphql';
 import { cancelRun, confirmRun, describeRun, retryRun, toUpdateFile, toUpdateRun } from '../sync/runs';
 import { commitFilesCached, countAfter, mapLimit, requireRepo, resolveBranch, type ShopRuntime } from '../sync/runtime';
 import { dispatchCtx, importThemeMarker, requestActor, requestRuntime, themesFor } from './helpers';
@@ -91,8 +94,18 @@ export const updatesRoutes = new Hono<AppEnv>()
     const rt = await requestRuntime(c);
     const repo = requireRepo(rt);
     const github = await rt.github();
-    const branch = await resolveBranch(rt);
-    const theme = query.line === 'staging' ? rt.settings.stagingTheme : rt.settings.liveTheme;
+    const branch = query.branch ?? (await resolveBranch(rt));
+    let shopifyTheme: ShopifyTheme | null = null;
+    let theme: ThemeRef | null;
+    let line: ThemeLine = query.line;
+    if (query.themeId) {
+      shopifyTheme = await getTheme(await rt.admin(), query.themeId);
+      if (!shopifyTheme) throw new ApiError(404, 'NOT_FOUND', 'Theme not found in this store');
+      theme = { id: shopifyTheme.id, name: shopifyTheme.name };
+      line = lineForTheme(rt.settings, shopifyTheme);
+    } else {
+      theme = query.line === 'staging' ? rt.settings.stagingTheme : query.line === 'live' ? rt.settings.liveTheme : null;
+    }
     if (theme) await importThemeMarker(rt, theme.id);
     const current = theme ? toSyncedUpdate(await getThemeState(rt.db, rt.shop.id, theme.id)) : null;
 
@@ -144,7 +157,8 @@ export const updatesRoutes = new Hono<AppEnv>()
     );
 
     return ok<UpdatesResponse>(c, {
-      line: query.line,
+      line,
+      shopifyTheme,
       theme,
       repository: repo.fullName,
       branch,
@@ -162,24 +176,48 @@ export const updatesRoutes = new Hono<AppEnv>()
     const rt = await requestRuntime(c);
     let line: ThemeLine;
     let themeId: string;
-    if (body.kind === 'update') {
-      line = 'staging';
-      themeId = lineTheme(rt, 'staging').id;
-    } else if (body.kind === 'publish') {
+    if (body.kind === 'publish') {
       line = 'live';
       themeId = body.themeId ?? lineTheme(rt, 'live').id;
+    } else if (body.themeId) {
+      // Any theme of the store, chosen on its theme page.
+      themeId = body.themeId;
+      const theme = await getTheme(await rt.admin(), themeId);
+      if (!theme) throw new ApiError(404, 'NOT_FOUND', 'Theme not found in this store');
+      line = lineForTheme(rt.settings, theme);
+    } else if (body.kind === 'update') {
+      line = 'staging';
+      themeId = lineTheme(rt, 'staging').id;
     } else {
-      line = body.line ?? 'staging';
-      themeId = line === 'staging' ? lineTheme(rt, 'staging').id : (body.themeId ?? lineTheme(rt, 'live').id);
+      line = body.line === 'live' ? 'live' : 'staging';
+      themeId = lineTheme(rt, line).id;
     }
     await importThemeMarker(rt, themeId);
-    const run = await planRun(rt, { kind: body.kind, line, themeId, targetSha: body.targetSha, userId: requestActor(c).userId });
+    const run = await planRun(rt, {
+      kind: body.kind,
+      line,
+      themeId,
+      targetSha: body.targetSha,
+      branch: body.branch ?? null,
+      userId: requestActor(c).userId,
+    });
     return respondRun(c, rt, run.id, 'Checks complete. Nothing has changed in the theme yet.', 201);
   })
   .post('/baseline', writeLimiter, async (c) => {
     const body = parseOrThrow(baselineSchema, await readJsonBody(c.req.raw));
     const rt = await requestRuntime(c);
-    const theme = lineTheme(rt, body.line);
+    let theme: ThemeRef;
+    let line: ThemeLine = body.line;
+    let role = body.line === 'live' ? 'MAIN' : 'UNPUBLISHED';
+    if (body.themeId) {
+      const found = await getTheme(await rt.admin(), body.themeId);
+      if (!found) throw new ApiError(404, 'NOT_FOUND', 'Theme not found in this store');
+      theme = { id: found.id, name: found.name };
+      line = lineForTheme(rt.settings, found);
+      role = found.role;
+    } else {
+      theme = lineTheme(rt, body.line);
+    }
     const state = await getThemeState(rt.db, rt.shop.id, theme.id);
     if (state?.lastSyncedSha) {
       throw new ApiError(409, 'CONFLICT', 'This theme already has a last synced update. Use an update or "Go back" instead.');
@@ -208,10 +246,10 @@ export const updatesRoutes = new Hono<AppEnv>()
         commitMessage: commit.commit.commit.message.slice(0, 1000),
         themeId: theme.id,
         themeName: theme.name,
-        themeRole: body.line === 'live' ? 'MAIN' : 'UNPUBLISHED',
+        themeRole: role,
         strategy: 'commit_changes',
         kind: 'baseline',
-        line: body.line,
+        line,
         options,
         initiatedBy: requestActor(c).userId,
         confirmedAt: now,

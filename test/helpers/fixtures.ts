@@ -61,3 +61,6 @@ export const THEME_DEV = {
 };
 
 export const THEME_LIVE = { ...THEME_DEV, id: 'gid://shopify/OnlineStoreTheme/222', name: 'Live', role: 'MAIN' };
+
+/** Another unpublished theme (neither Staging nor Live). */
+export const THEME_OTHER = { ...THEME_DEV, id: 'gid://shopify/OnlineStoreTheme/333', name: 'Holiday 2026' };

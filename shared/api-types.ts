@@ -272,7 +272,8 @@ export interface ShopifyTheme {
 // ---------------------------------------------------------------------------
 // Theme Sync: lines of work, updates and runs
 // ---------------------------------------------------------------------------
-export type ThemeLine = 'staging' | 'live';
+/** staging / live: the store's configured themes; other: any other unpublished theme. */
+export type ThemeLine = 'staging' | 'live' | 'other';
 export type UpdateKind = 'update' | 'publish' | 'rollback' | 'restore' | 'baseline';
 
 export type UpdateStatus =
@@ -445,9 +446,14 @@ export interface CreateUpdatePlanRequest {
   kind: 'update' | 'publish' | 'rollback';
   /** Full 40-character commit SHA of the update to apply (or go back to). */
   targetSha: string;
-  /** Required for publish (the Live theme to publish to). Rollback defaults to the line's theme. */
+  /**
+   * update: any unpublished theme (default: Staging). publish: the Live theme.
+   * rollback: defaults to the line's theme.
+   */
   themeId?: string;
   line?: ThemeLine;
+  /** Branch the update was chosen from (recorded in the history). */
+  branch?: string;
 }
 
 export interface ConfirmUpdateRequest {
@@ -459,6 +465,8 @@ export interface BaselineRequest {
   line: ThemeLine;
   /** The update the theme already runs. Nothing in the theme is changed. */
   sha: string;
+  /** Any theme of the store (overrides `line`). */
+  themeId?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -511,6 +519,8 @@ export interface UpdateListItem extends CommitSummary {
 
 export interface UpdatesResponse {
   line: ThemeLine;
+  /** Shopify data of the theme (null when it no longer exists). */
+  shopifyTheme: ShopifyTheme | null;
   theme: ThemeRef | null;
   repository: string;
   branch: string | null;
@@ -537,6 +547,15 @@ export interface PublishOptionsResponse {
   reason: string | null;
   themes: PublishThemeOption[];
   defaultThemeId: string | null;
+}
+
+/** One theme of the store with its last synced update (from assets/theme-sync.json). */
+export interface ThemeOverviewItem {
+  theme: ShopifyTheme;
+  line: ThemeLine;
+  lastSynced: SyncedUpdate | null;
+  activeRun: UpdateRun | null;
+  lastRun: UpdateRun | null;
 }
 
 // ---------------------------------------------------------------------------

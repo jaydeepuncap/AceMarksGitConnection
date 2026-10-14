@@ -6,6 +6,7 @@ import History from './routes/History';
 import Publish from './routes/Publish';
 import Rollout from './routes/Rollout';
 import Settings from './routes/Settings';
+import ThemeDetail from './routes/ThemeDetail';
 import Themes from './routes/Themes';
 import UpdateRun from './routes/UpdateRun';
 import Updates from './routes/Updates';
@@ -59,6 +60,7 @@ export default function App() {
       <Routes>
         <Route path="/" element={<Dashboard />} />
         <Route path="/themes" element={<Themes />} />
+        <Route path="/themes/:id" element={<ThemeDetail />} />
         <Route path="/updates" element={<Updates key="update" mode="update" />} />
         <Route path="/updates/:id" element={<UpdateRun />} />
         <Route path="/go-back" element={<Updates key="goback" mode="goback" />} />

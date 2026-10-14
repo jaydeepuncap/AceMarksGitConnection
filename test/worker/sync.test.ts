@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { UpdateRun, UpdateRunDetail, UpdatesResponse, OverviewResponse, PublishOptionsResponse, Paginated } from '../../shared/api-types';
+import type { ThemeOverviewItem, UpdateRun, UpdateRunDetail, UpdatesResponse, OverviewResponse, PublishOptionsResponse, Paginated } from '../../shared/api-types';
 import { app } from '../../worker/index';
 import { createLogger } from '../../worker/lib/logger';
 import { handleSyncMessage } from '../../worker/sync/dispatch';
 import { createTestEnv, sessionToken, type TestContext } from '../helpers/env';
-import { seedShop, THEME_DEV, THEME_LIVE } from '../helpers/fixtures';
+import { seedShop, THEME_DEV, THEME_LIVE, THEME_OTHER } from '../helpers/fixtures';
 import { C1, C2, C3, installWorld, PNG, REPO_FILES, type WorldOptions } from '../helpers/sync-world';
 
 const SHOP = 'alpha.myshopify.com';
@@ -310,7 +310,7 @@ describe('Theme Sync workflow', () => {
       await updateStagingTo(C3);
       const options = (await api<PublishOptionsResponse>('GET', '/api/updates/publish-options')).body.data;
       expect(options).toMatchObject({ verified: true, update: { sha: C3 }, defaultThemeId: THEME_LIVE.id });
-      expect(options.themes.map((o) => o.theme.id)).toEqual([THEME_LIVE.id]); // Staging is not offered
+      expect(options.themes.map((o) => o.theme.id)).toEqual([THEME_LIVE.id, THEME_OTHER.id]); // Staging is not offered
 
       const { status, body } = await plan({ kind: 'publish', targetSha: C3, themeId: THEME_LIVE.id });
       expect(status).toBe(201);
@@ -387,6 +387,46 @@ describe('Theme Sync workflow', () => {
       const { body } = await plan({ kind: 'update', targetSha: C3 });
       expect(body.data).toMatchObject({ direction: 'initial', totals: { removed: 0 } });
       expect(body.data.checks?.directEdits.status).toBe('skipped');
+    });
+  });
+
+  describe('every theme', () => {
+    it('lists all themes with their line and last synced update (read from assets/theme-sync.json)', async () => {
+      await setup();
+      world.editInShopify(SHOP, THEME_OTHER.id, 'assets/theme-sync.json', JSON.stringify({ lastSyncedUpdate: C2, description: 'Update product template' }));
+      const { body } = await api<ThemeOverviewItem[]>('GET', '/api/themes/overview');
+      const rows = Object.fromEntries(body.data.map((i) => [i.theme.name, [i.line, i.lastSynced?.sha ?? null]]));
+      expect(rows).toEqual({ Staging: ['staging', C1], Live: ['live', C1], 'Holiday 2026': ['other', C2] });
+      const one = await api<ThemeOverviewItem>('GET', '/api/themes/333');
+      expect(one.body.data).toMatchObject({ theme: { name: 'Holiday 2026' }, lastSynced: { sha: C2 } });
+    });
+
+    it('applies a commit of a chosen branch to any unpublished theme, like the old flow', async () => {
+      await setup();
+      const list = await api<UpdatesResponse>('GET', `/api/updates?themeId=333&branch=main`);
+      expect(list.body.data).toMatchObject({ line: 'other', theme: { name: 'Holiday 2026' }, branch: 'main', current: null });
+      expect(list.body.data.items.every((i) => i.state === 'new')).toBe(true);
+
+      // No last synced update yet: record the one it runs, then update it.
+      await api('POST', '/api/updates/baseline', { line: 'other', themeId: THEME_OTHER.id, sha: C1 });
+      const planned = await plan({ kind: 'update', targetSha: C3, themeId: THEME_OTHER.id, branch: 'main' });
+      expect(planned.status).toBe(201);
+      expect(planned.body.data).toMatchObject({ line: 'other', branch: 'main', theme: { name: 'Holiday 2026' }, base: { sha: C1 } });
+      await api('POST', `/api/updates/${planned.body.data.id}/confirm`, {});
+      await drainQueue();
+      const files = world.theme(SHOP, THEME_OTHER.id);
+      expect(text(files, 'sections/cart.liquid')).toBe(REPO_FILES.C3['sections/cart.liquid']);
+      expect(JSON.parse(text(files, 'assets/theme-sync.json')!)).toMatchObject({ lastSyncedUpdate: C3, themeRole: 'Theme' });
+      // Staging and Live are untouched; another theme's update never counts as verified on Staging.
+      expect(text(staging(), 'sections/cart.liquid')).toBe(REPO_FILES.C1['sections/cart.liquid']);
+      expect((await plan({ kind: 'publish', targetSha: C3, themeId: THEME_LIVE.id })).status).toBe(422);
+    });
+
+    it('the published theme cannot receive a commit directly', async () => {
+      await setup();
+      const res = await plan({ kind: 'update', targetSha: C3, themeId: THEME_LIVE.id });
+      expect(res.status).toBe(422);
+      expect(res.body.error.code).toBe('NOT_VERIFIED_ON_STAGING');
     });
   });
 

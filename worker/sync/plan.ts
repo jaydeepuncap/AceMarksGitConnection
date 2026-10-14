@@ -183,11 +183,19 @@ export function diffTrees(base: Map<string, TreeFile> | null, target: Map<string
 // ---------------------------------------------------------------------------
 // Planning
 // ---------------------------------------------------------------------------
+/** Which line of work a theme belongs to. */
+export function lineForTheme(settings: { stagingTheme: { id: string } | null; liveTheme: { id: string } | null }, theme: Pick<ShopifyTheme, 'id' | 'isLive'>): ThemeLine {
+  if (theme.id === settings.stagingTheme?.id) return 'staging';
+  if (theme.id === settings.liveTheme?.id || theme.isLive) return 'live';
+  return 'other';
+}
+
 export interface PlanInput {
   kind: 'update' | 'publish' | 'rollback';
   line: ThemeLine;
   themeId: string;
   targetSha: string;
+  branch?: string | null;
   userId: string | null;
   rolloutId?: string | null;
 }
@@ -238,18 +246,12 @@ export async function verifiedOnStaging(rt: ShopRuntime, sha: string): Promise<D
 
 function assertThemeForKind(rt: ShopRuntime, input: PlanInput, theme: ShopifyTheme): void {
   const stagingId = rt.settings.stagingTheme?.id ?? null;
-  if (input.kind === 'update') {
-    if (!stagingId) throw new ApiError(400, 'SETUP_INCOMPLETE', 'Choose the Staging theme in Settings first');
-    if (theme.id !== stagingId) {
-      throw new ApiError(422, 'VALIDATION_ERROR', 'New updates always go to the Staging theme first');
-    }
-    if (theme.isLive) {
-      throw new ApiError(
-        409,
-        'THEME_NOT_WRITABLE',
-        'The Staging theme is now the published theme. Choose an unpublished Staging theme in Settings.',
-      );
-    }
+  if (input.kind === 'update' && (theme.isLive || input.line === 'live')) {
+    throw new ApiError(
+      422,
+      'NOT_VERIFIED_ON_STAGING',
+      'The Live theme only receives updates that fully completed on Staging. Update Staging first, then use Publish to Live.',
+    );
   }
   if (input.kind === 'publish' && theme.id === stagingId) {
     throw new ApiError(422, 'VALIDATION_ERROR', 'Choose a Live theme other than the Staging theme');
@@ -581,7 +583,7 @@ export async function planRun(rt: ShopRuntime, input: PlanInput): Promise<SyncHi
   await createRun(rt.db, rt.shop.id, {
     id,
     repository: repo.fullName,
-    branch: await resolveBranch(rt).catch(() => repo.branch),
+    branch: input.branch ?? (await resolveBranch(rt).catch(() => repo.branch)),
     commitSha: target.sha,
     commitMessage: target.message.slice(0, 1000),
     themeId: theme.id,
