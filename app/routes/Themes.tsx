@@ -98,9 +98,9 @@ export default function Themes() {
                           <s-button
                             variant="tertiary"
                             disabled={!theme.writable}
-                            onClick={go(`/commits?themeId=${encodeURIComponent(theme.id)}`)}
+                            onClick={go(`/mappings/${mappings.data!.items.find((x) => x.themeId === theme.id)!.id}`)}
                           >
-                            Sync commits →
+                            Open mapping →
                           </s-button>
                         ) : (
                           <s-button

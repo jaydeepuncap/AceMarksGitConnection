@@ -6,7 +6,8 @@ import Settings from './routes/Settings';
 import Repositories from './routes/Repositories';
 import Themes from './routes/Themes';
 import ThemeMapping from './routes/ThemeMapping';
-import Commits from './routes/Commits';
+import CommitsRedirect from './routes/CommitsRedirect';
+import MappingDetail from './routes/MappingDetail';
 import SyncHistory from './routes/SyncHistory';
 import { isEmbedded } from './lib/app-bridge';
 
@@ -49,7 +50,6 @@ export default function App() {
           Dashboard
         </Link>
         <Link to="/mappings">Theme mapping</Link>
-        <Link to="/commits">Commit sync</Link>
         <Link to="/sync-history">Sync history</Link>
         <Link to="/themes">Themes</Link>
         <Link to="/repositories">Repositories</Link>
@@ -61,7 +61,8 @@ export default function App() {
         <Route path="/repositories" element={<Repositories />} />
         <Route path="/themes" element={<Themes />} />
         <Route path="/mappings" element={<ThemeMapping />} />
-        <Route path="/commits" element={<Commits />} />
+        <Route path="/mappings/:id" element={<MappingDetail />} />
+        <Route path="/commits" element={<CommitsRedirect />} />
         <Route path="/sync-history" element={<SyncHistory />} />
         <Route path="*" element={<Dashboard />} />
       </Routes>

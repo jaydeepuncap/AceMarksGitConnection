@@ -24,7 +24,7 @@ export default function Dashboard() {
   return (
     <AppLayout
       title="Dashboard"
-      primaryAction={{ content: 'Sync a commit', onAction: go('/commits'), disabled: !github?.connected }}
+      primaryAction={{ content: 'Theme mapping', onAction: go('/mappings'), disabled: !github?.connected }}
       banners={<ErrorBanner error={error} onRetry={reload} />}
     >
       <s-grid gridTemplateColumns="repeat(auto-fit, minmax(280px, 1fr))" gap="base">
@@ -87,9 +87,9 @@ export default function Dashboard() {
               <s-text color="subdued">No branch is mapped to a theme yet.</s-text>
             ) : (
               mappings.slice(0, 4).map((m) => (
-                <s-text key={m.id}>
-                  <s-text type="strong">{m.branch}</s-text> → {m.themeName}
-                </s-text>
+                <s-button key={m.id} variant="tertiary" onClick={go(`/mappings/${m.id}`)}>
+                  {`${m.branch} → ${m.themeName}`}
+                </s-button>
               ))
             )}
             {mappings.length > 4 && <s-text color="subdued">{`and ${mappings.length - 4} more`}</s-text>}

@@ -173,7 +173,7 @@ npm run db:migrate:remote    # production D1 (--env production)
 ## Updating a theme, step by step
 
 1. **Choose a theme** — *Theme mapping* connects each branch to its own theme (e.g. `main → Live theme`, `staging → Staging copy`; one theme per branch, one branch per theme) and offers the first **Full sync**; *Themes* shows every theme with its mapped branch and **last update** (last synced commit, branch, date); *Select →* opens Commits for that theme.
-2. **Choose an update** — *Commit sync* (branch → its mapped theme) labels every commit **New** (waiting), **Last synced** or **Added** (already in the theme) and shows "N updates waiting". With one commit selected, **Push** chooses what is sent (default: from the last sync); with several selected they are combined:
+2. **Choose an update** — the mapping's own page (*Theme mapping → Open*, branch and theme fixed) labels every commit **New** (waiting), **Last synced** or **Added** (already in the theme) and shows "N updates waiting". With one commit selected, **Push** chooses what is sent (default: from the last sync); with several selected they are combined:
    - **From the last sync to the selected commit** (default) — the selected commit together with every earlier commit on the branch that is not in the theme yet, in one step. The preview lists every file with the commit(s) it comes from (e.g. `snippets/size-chart.liquid · from 50924bd`). A theme that was never synced gets the complete theme at the selected commit.
    - **Only the selected commit** — just the files that commit changed; the preview warns how many earlier un-added commits are left out.
    - **Full snapshot** — every theme file as it is at the selected commit (never deletes).
@@ -207,7 +207,7 @@ The sync history of the selected theme and branch is shown under the commit list
 
 ## Sync workflow
 
-**Pages:** Settings (GitHub connection, repository and branch, ignore files) → **Theme mapping** (connect a branch to one theme, first Full sync, Last sync) → **Commit sync** (one or several commits) → **Sync history** (filters, file-by-file results, retry, restore).
+**Pages:** Settings (GitHub connection, repository and branch, theme root, ignore files) → **Theme mapping** (all branch → theme mappings, add / change / remove) → **a mapping's page** `/mappings/:id` (branch and theme fixed: where the theme stands, updates waiting, last sync, commit sync with one or several commits, full sync, applied syncs) → **Sync history** (filters, file-by-file results, retry, restore).
 
 - **Ignore files** (Settings): add, edit and remove patterns — `config/settings_data.json`, `assets/development.js`, `templates/*.json`, `sections/development-section.liquid`, `locales/` (a trailing `/` or a bare folder name means everything inside it). "Check matching files" lists what each pattern matches on the branch (`POST /api/settings/ignore-preview`). Ignored files appear in every preview as *ignored* and are never uploaded, changed or deleted — also when the pattern is added after the preview.
 - **Mapping:** one theme per branch, one branch per theme, enforced by the API and the database. Previews, confirmations and retries only accept the theme mapped to the branch (`MAPPING_REQUIRED` / `MAPPING_CONFLICT`); the mapping, repository access and branch are checked again right before writing.
@@ -217,7 +217,7 @@ The sync history of the selected theme and branch is shown under the commit list
 - **Last sync** shows only syncs with a recorded result (successful, partially successful or failed), never a queued job.
 
 1. Choose the **branch** (its mapped theme is used).
-2. Pick one or more **commits** (Commit sync page). The full 40-character SHA is the source of truth from here on.
+2. Pick one or more **commits** on the mapping's page. The full 40-character SHA is the source of truth from here on.
 3. The app shows the commit's changed files with added/modified/renamed/removed status and the theme path each one maps to, or why it can't be synced.
 4. **Preview** (`POST /api/sync/preview`). The backend:
    - verifies the theme exists *in this shop* and is writable (not `LOCKED`, `DEMO`, `ARCHIVED` or processing);
