@@ -12,6 +12,7 @@ import type {
 } from '../lib/types';
 import { ErrorBanner } from './ErrorBanner';
 import { LoadingInline } from './LoadingState';
+import { Modal } from './ui';
 
 export const COMMITS_PER_PAGE = 20;
 const FILES_PER_PAGE = 100;
@@ -22,7 +23,7 @@ export const COMMIT_STATUS: Record<CommitSyncStatus, { label: string; tone: Tone
   added: { label: 'Added', tone: 'neutral' },
 };
 
-/** Files changed by one commit and the theme path each maps to. */
+/** Files changed by one commit and the theme path each maps to (shown in the files modal). */
 function CommitFiles({ sha, repository }: { sha: string; repository: string }) {
   const [filePage, setFilePage] = useState(1);
   useEffect(() => setFilePage(1), [sha]);
@@ -39,73 +40,71 @@ function CommitFiles({ sha, repository }: { sha: string; repository: string }) {
   const commit = detail.data;
 
   return (
-    <s-box padding="base" background="subdued" borderRadius="base">
-      <s-stack gap="base">
-        <ErrorBanner error={detail.error ?? files.error} onRetry={() => (detail.reload(), files.reload())} />
-        {detail.loading && !commit ? (
-          <LoadingInline label="Loading commit…" />
-        ) : (
-          commit && (
-            <s-stack gap="small-200">
-              <s-text type="strong">{`${commit.sha.slice(0, 7)} · ${firstLine(commit.message)}`}</s-text>
-              <s-text color="subdued">
-                {`${commit.authorLogin ?? commit.authorName ?? 'Unknown author'} · ${formatDate(commit.date)} · ${commit.filesCount} file(s) · +${commit.stats.additions} −${commit.stats.deletions}`}
-              </s-text>
-              {commit.filesTruncated && (
-                <s-banner tone="warning" heading="Large commit">
-                  <s-paragraph>
-                    GitHub lists at most 3000 changed files per commit and this commit reached that limit. Use a full
-                    sync to sync it completely.
-                  </s-paragraph>
-                </s-banner>
-              )}
-            </s-stack>
-          )
-        )}
-        <s-table
-          variant="auto"
-          loading={files.loading}
-          paginate
-          hasPreviousPage={filePage > 1}
-          hasNextPage={!!files.data?.hasNextPage}
-          onPreviousPage={() => setFilePage((p) => Math.max(1, p - 1))}
-          onNextPage={() => setFilePage((p) => p + 1)}
-        >
-          <s-table-header-row>
-            <s-table-header listSlot="inline">Change</s-table-header>
-            <s-table-header listSlot="primary">File</s-table-header>
-            <s-table-header listSlot="secondary">In the theme</s-table-header>
-            <s-table-header format="numeric">Lines</s-table-header>
-          </s-table-header-row>
-          <s-table-body>
-            {(files.data?.items ?? []).map((file) => {
-              const badge = FILE_STATUS_BADGE[file.status];
-              return (
-                <s-table-row key={`${file.filename}:${file.previousFilename ?? ''}`}>
-                  <s-table-cell>
-                    <s-badge tone={badge.tone}>{badge.label}</s-badge>
-                  </s-table-cell>
-                  <s-table-cell>
-                    <s-stack gap="none">
-                      <s-text>{file.filename}</s-text>
-                      {file.previousFilename && <s-text color="subdued">from {file.previousFilename}</s-text>}
-                    </s-stack>
-                  </s-table-cell>
-                  <s-table-cell>
-                    {file.themePathError ? (
-                      <s-text color="subdued">Not synced: {file.themePathError}</s-text>
-                    ) : (
-                      <s-text tone="success">{file.themePath}</s-text>
-                    )}
-                  </s-table-cell>
-                  <s-table-cell>{`+${file.additions} −${file.deletions}`}</s-table-cell>
-                </s-table-row>
-              );
-            })}
-          </s-table-body>
-        </s-table>
-      </s-stack>
-    </s-box>
+    <s-stack gap="base">
+      <ErrorBanner error={detail.error ?? files.error} onRetry={() => (detail.reload(), files.reload())} />
+      {detail.loading && !commit ? (
+        <LoadingInline label="Loading commit…" />
+      ) : (
+        commit && (
+          <s-stack gap="small-200">
+            <s-text type="strong">{`${commit.sha.slice(0, 7)} · ${firstLine(commit.message)}`}</s-text>
+            <s-text color="subdued">
+              {`${commit.authorLogin ?? commit.authorName ?? 'Unknown author'} · ${formatDate(commit.date)} · ${commit.filesCount} file(s) · +${commit.stats.additions} −${commit.stats.deletions}`}
+            </s-text>
+            {commit.filesTruncated && (
+              <s-banner tone="warning" heading="Large commit">
+                <s-paragraph>
+                  GitHub lists at most 3000 changed files per commit and this commit reached that limit. Use a full sync
+                  to sync it completely.
+                </s-paragraph>
+              </s-banner>
+            )}
+          </s-stack>
+        )
+      )}
+      <s-table
+        variant="auto"
+        loading={files.loading}
+        paginate
+        hasPreviousPage={filePage > 1}
+        hasNextPage={!!files.data?.hasNextPage}
+        onPreviousPage={() => setFilePage((p) => Math.max(1, p - 1))}
+        onNextPage={() => setFilePage((p) => p + 1)}
+      >
+        <s-table-header-row>
+          <s-table-header listSlot="inline">Change</s-table-header>
+          <s-table-header listSlot="primary">File</s-table-header>
+          <s-table-header listSlot="secondary">In the theme</s-table-header>
+          <s-table-header format="numeric">Lines</s-table-header>
+        </s-table-header-row>
+        <s-table-body>
+          {(files.data?.items ?? []).map((file) => {
+            const badge = FILE_STATUS_BADGE[file.status];
+            return (
+              <s-table-row key={`${file.filename}:${file.previousFilename ?? ''}`}>
+                <s-table-cell>
+                  <s-badge tone={badge.tone}>{badge.label}</s-badge>
+                </s-table-cell>
+                <s-table-cell>
+                  <s-stack gap="none">
+                    <s-text>{file.filename}</s-text>
+                    {file.previousFilename && <s-text color="subdued">from {file.previousFilename}</s-text>}
+                  </s-stack>
+                </s-table-cell>
+                <s-table-cell>
+                  {file.themePathError ? (
+                    <s-text color="subdued">Not synced: {file.themePathError}</s-text>
+                  ) : (
+                    <s-text tone="success">{file.themePath}</s-text>
+                  )}
+                </s-table-cell>
+                <s-table-cell>{`+${file.additions} −${file.deletions}`}</s-table-cell>
+              </s-table-row>
+            );
+          })}
+        </s-table-body>
+      </s-table>
+    </s-stack>
   );
 }
 
@@ -142,7 +141,8 @@ export function CommitSyncPanel({
   const repository = mapping.repository;
   const [picked, setPicked] = useState<Picked[]>([]);
   const [allowDeletes, setAllowDeletes] = useState(false);
-  const [showFiles, setShowFiles] = useState(false);
+  // The commit whose changed files are shown in the modal.
+  const [filesOf, setFilesOf] = useState<{ sha: string; shortSha: string } | null>(null);
   const previewMutation = useMutation(api.sync.preview);
 
   const listed = commits.data?.items ?? [];
@@ -341,9 +341,7 @@ export function CommitSyncPanel({
             <s-text accessibilityVisibility="exclusive">Select</s-text>
           </s-table-header>
           <s-table-header listSlot="primary">Commit</s-table-header>
-          <s-table-header listSlot="labeled" format="numeric">
-            Files
-          </s-table-header>
+          <s-table-header listSlot="labeled">Changed files</s-table-header>
           <s-table-header listSlot="inline">Status</s-table-header>
         </s-table-header-row>
         <s-table-body>
@@ -376,7 +374,18 @@ export function CommitSyncPanel({
                   </s-stack>
                 </s-table-cell>
                 <s-table-cell>
-                  {count ? `${count.files}${count.truncated ? '+' : ''}` : stats.loading ? '…' : '—'}
+                  <s-button
+                    variant="secondary"
+                    icon="file"
+                    accessibilityLabel={`View files changed in ${commit.shortSha}`}
+                    onClick={() => setFilesOf({ sha: commit.sha, shortSha: commit.shortSha })}
+                  >
+                    {count
+                      ? `${count.files}${count.truncated ? '+' : ''} file${count.files === 1 ? '' : 's'}`
+                      : stats.loading
+                        ? '…'
+                        : 'View files'}
+                  </s-button>
                 </s-table-cell>
                 <s-table-cell>
                   {commit.syncStatus ? (
@@ -412,16 +421,18 @@ export function CommitSyncPanel({
         </s-stack>
       </s-stack>
 
-      {selectedSha && (
-        <s-stack gap="small-200">
-          <s-stack direction="inline">
-            <s-button variant="tertiary" onClick={() => setShowFiles((v) => !v)}>
-              {showFiles ? 'Hide changed files' : `Show files changed in ${selectedSha.slice(0, 7)}`}
-            </s-button>
-          </s-stack>
-          {showFiles && <CommitFiles sha={selectedSha} repository={repository} />}
-        </s-stack>
-      )}
+      <Modal
+        id="commit-files"
+        open={filesOf !== null}
+        heading={filesOf ? `Files changed in ${filesOf.shortSha}` : 'Files changed'}
+        size="large"
+        onHide={() => setFilesOf(null)}
+      >
+        {filesOf && <CommitFiles sha={filesOf.sha} repository={repository} />}
+        <s-button slot="primary-action" variant="primary" onClick={() => setFilesOf(null)}>
+          Close
+        </s-button>
+      </Modal>
     </s-stack>
   );
 }

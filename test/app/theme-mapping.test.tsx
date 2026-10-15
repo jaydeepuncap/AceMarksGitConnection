@@ -130,6 +130,30 @@ vi.mock('../../app/lib/api-client', async (importOriginal) => {
           ['d'.repeat(40)]: { files: 3, truncated: false },
           ['e'.repeat(40)]: { files: 1, truncated: false },
         }),
+        get: vi.fn().mockResolvedValue({
+          sha: 'd'.repeat(40),
+          message: 'Add banner',
+          authorLogin: 'dev',
+          authorName: 'Dev',
+          date: '2026-10-14T11:00:00Z',
+          filesCount: 1,
+          filesTruncated: false,
+          stats: { additions: 10, deletions: 2 },
+        }),
+        files: vi.fn().mockResolvedValue({
+          items: [
+            {
+              filename: 'sections/banner.liquid',
+              status: 'added',
+              additions: 10,
+              deletions: 2,
+              themePath: 'sections/banner.liquid',
+            },
+          ],
+          page: 1,
+          perPage: 100,
+          hasNextPage: false,
+        }),
       },
     },
   };
@@ -273,6 +297,26 @@ describe('Commit selection on the mapping page', () => {
     fireEvent.click(reviewSync());
     await waitFor(() => expect(preview).toHaveBeenCalledTimes(2), wait);
     expect(preview.mock.calls[1]![0]).toMatchObject({ commitSha: 'e'.repeat(40), strategy: 'commit_changes' });
+  });
+});
+
+describe('Changed files of a commit', () => {
+  it('opens in a modal from the commit row', async () => {
+    const { container } = render(
+      <MemoryRouter initialEntries={['/mappings/m1']}>
+        <Routes>
+          <Route path="/mappings/:id" element={<MappingDetail />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    const wait = { timeout: 5000 };
+    await screen.findByText('Add banner', {}, wait);
+    expect(await screen.findByText('3 files', {}, wait)).toBeInTheDocument();
+    expect(screen.getByText('1 file')).toBeInTheDocument();
+    expect(screen.queryByText(/Show files changed in/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText('3 files'));
+    expect(container.querySelector('s-modal[heading="Files changed in ddddddd"]')).not.toBeNull();
+    expect(await screen.findAllByText('sections/banner.liquid', {}, wait)).toHaveLength(2);
   });
 });
 
