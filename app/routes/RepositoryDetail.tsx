@@ -121,7 +121,6 @@ export default function RepositoryDetail() {
   return (
     <AppLayout
       title={fullName}
-      inlineSize="large"
       subtitle={
         data ? `${data.private ? 'Private' : 'Public'} repository · default branch ${data.defaultBranch}` : undefined
       }

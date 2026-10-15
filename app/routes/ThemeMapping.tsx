@@ -204,7 +204,6 @@ export default function ThemeMapping() {
     <AppLayout
       title="Theme mapping"
       subtitle={`${repository} · each branch syncs to its own theme`}
-      inlineSize="large"
       primaryAction={
         showForm ? undefined : { content: 'Add mapping', onAction: () => setAdding(true), disabled: nothingFree }
       }

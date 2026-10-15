@@ -166,7 +166,6 @@ export default function MappingDetail() {
   return (
     <AppLayout
       title={`${mapping.branch} → ${mapping.themeName}`}
-      inlineSize="large"
       subtitle={mapping.repository}
       backAction={{ content: 'Theme mapping', onAction: () => navigate('/mappings') }}
       secondaryActions={[

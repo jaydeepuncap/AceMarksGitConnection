@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { Page } from './ui';
 
 export interface PageAction {
   content: string;
@@ -17,15 +18,16 @@ interface Props {
   backAction?: { content: string; onAction: () => void };
   /** Banners rendered above the content (errors, warnings). */
   banners?: ReactNode;
-  /** Page width: "large" for list and detail pages with wide cards and tables. */
+  /** Page width; defaults to the shared Page's width. */
   inlineSize?: 'small' | 'base' | 'large';
   children: ReactNode;
 }
 
 /**
- * Standard page frame built on <s-page>. Inside Shopify Admin, App Bridge
- * renders the page heading and the primary/secondary action slots in the
- * Admin title bar. App navigation is the <NavMenu> declared in App.tsx.
+ * Standard page frame, built on the shared <Page> (components/ui/page.jsx):
+ * page heading, primary/secondary actions and breadcrumb (rendered by App
+ * Bridge in the Admin title bar), the page width, and the help footer.
+ * App navigation is the <NavMenu> declared in App.tsx.
  */
 export function AppLayout({
   title,
@@ -34,52 +36,43 @@ export function AppLayout({
   secondaryActions,
   backAction,
   banners,
-  inlineSize = 'base',
+  inlineSize,
   children,
 }: Props) {
   return (
-    <s-page heading={title} inlineSize={inlineSize}>
-      {backAction && (
-        <s-link
-          slot="breadcrumb-actions"
-          href="#"
-          onClick={(event) => {
+    <Page
+      heading={title}
+      inlineSize={inlineSize}
+      breadcrumbAction={
+        backAction && {
+          label: backAction.content,
+          onClick: (event: Event) => {
             event.preventDefault();
             backAction.onAction();
-          }}
-        >
-          {backAction.content}
-        </s-link>
-      )}
-      {primaryAction && (
-        <s-button
-          slot="primary-action"
-          variant="primary"
-          onClick={primaryAction.onAction}
-          loading={primaryAction.loading}
-          disabled={primaryAction.disabled}
-          tone={primaryAction.tone}
-        >
-          {primaryAction.content}
-        </s-button>
-      )}
-      {secondaryActions?.map((action) => (
-        <s-button
-          key={action.content}
-          slot="secondary-actions"
-          onClick={action.onAction}
-          loading={action.loading}
-          disabled={action.disabled}
-          tone={action.tone}
-        >
-          {action.content}
-        </s-button>
-      ))}
+          },
+        }
+      }
+      primaryAction={
+        primaryAction && {
+          label: primaryAction.content,
+          onClick: primaryAction.onAction,
+          disabled: primaryAction.disabled,
+          loading: primaryAction.loading,
+        }
+      }
+      secondaryAction={secondaryActions?.map((action) => ({
+        key: action.content,
+        label: action.content,
+        onClick: action.onAction,
+        disabled: action.disabled || action.loading,
+        tone: action.tone,
+      }))}
+    >
       <s-stack gap="base">
         {subtitle && <s-text color="subdued">{subtitle}</s-text>}
         {banners}
         {children}
       </s-stack>
-    </s-page>
+    </Page>
   );
 }

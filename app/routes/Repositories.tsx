@@ -34,7 +34,6 @@ export default function Repositories() {
   return (
     <AppLayout
       title="Repositories"
-      inlineSize="large"
       subtitle="Repositories the connected GitHub token can access · open one to see its branches and themes"
       backAction={{ content: 'Settings', onAction: () => go('/settings')() }}
       banners={
