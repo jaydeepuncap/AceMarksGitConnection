@@ -465,8 +465,6 @@ function SyncList({ onOpen }: { onOpen: (id: string) => void }) {
   const [themeId, setThemeId] = useState('');
   const [branch, setBranch] = useState('');
   const [strategy, setStrategy] = useState<SyncStrategy | ''>('');
-  const [from, setFrom] = useState('');
-  const [to, setTo] = useState('');
   const settings = useApiQuery(() => api.settings.get(), []);
   const themes = useApiQuery(() => api.themes.list(), []);
   const repository = settings.data?.settings.defaultRepository ?? '';
@@ -480,10 +478,8 @@ function SyncList({ onOpen }: { onOpen: (id: string) => void }) {
         themeId: themeId || undefined,
         branch: branch || undefined,
         strategy: strategy || undefined,
-        from: from || undefined,
-        to: to || undefined,
       }),
-    [page, status, themeId, branch, strategy, from, to],
+    [page, status, themeId, branch, strategy],
   );
   const filter =
     <T,>(set: (v: T) => void) =>
@@ -491,7 +487,7 @@ function SyncList({ onOpen }: { onOpen: (id: string) => void }) {
       set(value);
       setPage(1);
     };
-  const filtered = !!(status || themeId || branch || strategy || from || to);
+  const filtered = !!(status || themeId || branch || strategy);
 
   return (
     <AppLayout
@@ -553,8 +549,6 @@ function SyncList({ onOpen }: { onOpen: (id: string) => void }) {
               </s-option>
             ))}
           </s-select>
-          <s-date-field label="From" value={from} onChange={(event) => filter(setFrom)(event.currentTarget.value)} />
-          <s-date-field label="To" value={to} onChange={(event) => filter(setTo)(event.currentTarget.value)} />
         </s-grid>
         {filtered && (
           <s-button
@@ -565,8 +559,6 @@ function SyncList({ onOpen }: { onOpen: (id: string) => void }) {
               setThemeId('');
               setBranch('');
               setStrategy('');
-              setFrom('');
-              setTo('');
               setPage(1);
             }}
           >
@@ -590,7 +582,6 @@ function SyncList({ onOpen }: { onOpen: (id: string) => void }) {
             <s-table-header listSlot="secondary">Repository · branch → theme</s-table-header>
             <s-table-header listSlot="labeled">Type</s-table-header>
             <s-table-header listSlot="inline">Status</s-table-header>
-            <s-table-header>Files</s-table-header>
             <s-table-header listSlot="labeled">Started</s-table-header>
             <s-table-header listSlot="labeled">Completed</s-table-header>
             <s-table-header>Details</s-table-header>
@@ -619,9 +610,6 @@ function SyncList({ onOpen }: { onOpen: (id: string) => void }) {
                   <s-table-cell>{syncTypeLabel(run.strategy)}</s-table-cell>
                   <s-table-cell>
                     <s-badge tone={SYNC_STATUS_BADGE[run.status].tone}>{SYNC_STATUS_BADGE[run.status].label}</s-badge>
-                  </s-table-cell>
-                  <s-table-cell>
-                    {`${run.filesSucceeded} ok · ${run.filesFailed} failed · ${run.filesSkipped - run.filesIgnored} skipped · ${run.filesIgnored} ignored`}
                   </s-table-cell>
                   <s-table-cell>{formatDate(run.startedAt ?? run.initiatedAt)}</s-table-cell>
                   <s-table-cell>{formatDate(run.completedAt)}</s-table-cell>

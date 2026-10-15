@@ -80,7 +80,7 @@ describe('loading and error states', () => {
 });
 
 describe('pages', () => {
-  it('Sync history lists runs with status and file counts', async () => {
+  it('Sync history lists runs with their status', async () => {
     mocked.sync.history.mockResolvedValue({
       items: [
         {
@@ -122,7 +122,8 @@ describe('pages', () => {
     await waitFor(() => expect(screen.getByText('bbbbbbb')).toBeInTheDocument());
     expect(screen.getByText('Update header')).toBeInTheDocument();
     expect(screen.getAllByText('Partially failed').length).toBeGreaterThan(0);
-    expect(screen.getByText('2 ok · 1 failed · 0 skipped · 0 ignored')).toBeInTheDocument();
+    // File counts are on the sync's own page, not in the list.
+    expect(screen.queryByText(/ok · .* failed/)).not.toBeInTheDocument();
     expect(screen.getAllByText('Single commit').length).toBeGreaterThan(1); // type column + filter option
     expect(screen.getByText('View / retry')).toBeInTheDocument();
   });
