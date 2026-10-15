@@ -183,12 +183,15 @@ describe('Theme mapping page when everything is mapped', () => {
         <ThemeMapping />
       </MemoryRouter>,
     );
-    const reason = /Every branch of acme\/theme is already mapped to a theme/;
+    const reason = /Each branch of acme\/theme already syncs to a theme/;
     expect((await screen.findAllByText(reason, {}, { timeout: 5000 })).length).toBeGreaterThan(0);
     const add = [...container.querySelectorAll('s-button')].filter((b) => b.textContent === 'Add mapping');
     expect(add.length).toBeGreaterThan(0);
     for (const button of add) expect(button.hasAttribute('disabled')).toBe(true);
-    expect(container.querySelector('s-tooltip#add-mapping-blocked')).not.toBeNull();
+    // Only the page header offers "Add mapping"; a banner explains why it is disabled.
+    expect(add).toHaveLength(1);
+    expect(add[0]!.getAttribute('slot')).toBe('primary-action');
+    expect(container.querySelector('s-banner[heading^="Every branch is mapped"]')).not.toBeNull();
   });
 });
 
@@ -221,6 +224,46 @@ describe('Mapping page', () => {
     // Change theme and Remove mapping are page actions at the top.
     expect(screen.getAllByText('Change theme').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Remove mapping').length).toBeGreaterThan(0);
+  });
+});
+
+describe('Commit selection on the mapping page', () => {
+  it('syncs everything up to a new commit and re-applies only the files of a commit already in the theme', async () => {
+    const { api } = await import('../../app/lib/api-client');
+    const preview = api.sync.preview as unknown as ReturnType<typeof vi.fn>;
+    preview.mockReset();
+    preview.mockResolvedValue(null);
+    const { container } = render(
+      <MemoryRouter initialEntries={['/mappings/m1']}>
+        <Routes>
+          <Route path="/mappings/:id" element={<MappingDetail />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    const wait = { timeout: 5000 };
+    await screen.findByText('Add banner', {}, wait);
+    const toggle = (shortSha: string) =>
+      fireEvent(
+        [...container.querySelectorAll('s-checkbox')].find(
+          (c) => c.getAttribute('accessibilityLabel') === `Select commit ${shortSha}`,
+        )!,
+        new Event('change', { bubbles: true }),
+      );
+    expect(screen.queryByText('When you select one commit, sync')).not.toBeInTheDocument();
+    const reviewSync = () => screen.getByText('Review sync');
+
+    toggle('ddddddd');
+    expect(screen.getByText('1 selected')).toBeInTheDocument();
+    fireEvent.click(reviewSync());
+    await waitFor(() => expect(preview).toHaveBeenCalledTimes(1), wait);
+    expect(preview.mock.calls[0]![0]).toMatchObject({ commitSha: 'd'.repeat(40), strategy: 'since_last_sync' });
+
+    toggle('ddddddd');
+    toggle('eeeeeee');
+    expect(container.querySelector('s-banner[heading="eeeeeee is already in the theme"]')).not.toBeNull();
+    fireEvent.click(reviewSync());
+    await waitFor(() => expect(preview).toHaveBeenCalledTimes(2), wait);
+    expect(preview.mock.calls[1]![0]).toMatchObject({ commitSha: 'e'.repeat(40), strategy: 'commit_changes' });
   });
 });
 

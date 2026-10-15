@@ -5,7 +5,7 @@ import { ErrorBanner } from '../components/ErrorBanner';
 import { LoadingState } from '../components/LoadingState';
 import { themeLabel } from '../components/MappingControls';
 import { BranchThemeTitle, Card, CardSection, KeyValue, StatusBadge } from '../components/Common';
-import { Button, Stack, Text, Tooltip } from '../components/ui';
+import { Stack, Text } from '../components/ui';
 import { api } from '../lib/api-client';
 import { showToast } from '../lib/app-bridge';
 import { firstLine, formatDate, mappingStatus, RESULT_BADGE, syncTypeLabel } from '../lib/format';
@@ -173,12 +173,18 @@ export default function ThemeMapping() {
   const freeThemes = allThemes.filter((t) => !themeBlocked(t));
   const showForm = adding || repoItems.length === 0;
   const nothingFree = !branches.loading && !themes.loading && (freeBranches.length === 0 || freeThemes.length === 0);
-  /** Why no mapping can be added right now (tooltip of the disabled "Add mapping"). */
-  const addBlockedReason = !nothingFree
+  /** Why "Add mapping" in the page header is disabled, shown in a banner below it. */
+  const addBlocked = !nothingFree
     ? null
     : freeBranches.length === 0
-      ? `Every branch of ${repository} is already mapped to a theme. Change or remove a mapping to free a branch.`
-      : 'Every theme that can be synced is already mapped to a branch. Change or remove a mapping to free a theme, or duplicate a theme in Shopify.';
+      ? {
+          heading: 'Every branch is mapped',
+          text: `Each branch of ${repository} already syncs to a theme. Open a mapping to change its theme or remove it, then add a new one.`,
+        }
+      : {
+          heading: 'Every theme is mapped',
+          text: 'Each theme that can be synced already receives a branch. Open a mapping to change or remove it, or duplicate a theme in Shopify, then add a new one.',
+        };
 
   const refresh = () => {
     mappings.reload();
@@ -221,6 +227,11 @@ export default function ThemeMapping() {
           />
           <ErrorBanner error={themes.error} heading="Themes could not be loaded" onRetry={themes.reload} />
           <ErrorBanner error={branches.error} heading="Branches could not be loaded" onRetry={branches.reload} />
+          {addBlocked && !showForm && (
+            <s-banner tone="info" heading={`${addBlocked.heading} — Add mapping is unavailable`}>
+              <s-paragraph>{addBlocked.text}</s-paragraph>
+            </s-banner>
+          )}
         </>
       }
     >
@@ -313,35 +324,7 @@ export default function ThemeMapping() {
       {repoItems.length > 0 && (
         // Cards sit directly on the page (not inside a section) so their titles render as larger headings.
         <Stack gap="base" accessibilityLabel={`Mappings (${repoItems.length})`}>
-          <Stack direction="inline" gap="small-200" alignItems="center" justifyContent="space-between">
-            <Text type="strong">{`Mappings (${repoItems.length})`}</Text>
-            {!showForm && (
-              <Stack direction="inline" gap="small-200" alignItems="center">
-                {addBlockedReason && (
-                  <>
-                    <Tooltip id="add-mapping-blocked">
-                      <Text>{addBlockedReason}</Text>
-                    </Tooltip>
-                    <Button
-                      variant="tertiary"
-                      icon="info"
-                      interestFor="add-mapping-blocked"
-                      accessibilityLabel="Why can't I add a mapping?"
-                    />
-                  </>
-                )}
-                <Button
-                  icon="plus"
-                  disabled={nothingFree}
-                  interestFor={addBlockedReason ? 'add-mapping-blocked' : undefined}
-                  onClick={() => setAdding(true)}
-                >
-                  Add mapping
-                </Button>
-              </Stack>
-            )}
-          </Stack>
-          {addBlockedReason && !showForm && <Text color="subdued">{addBlockedReason}</Text>}
+          <Text type="strong">{`Mappings (${repoItems.length})`}</Text>
           {repoItems.map((m) => (
             <MappingCard
               key={`${m.id}:${refreshKey}`}

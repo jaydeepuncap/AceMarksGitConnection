@@ -115,11 +115,14 @@ interface Picked {
   shortSha: string;
   message: string;
   position: number;
+  status: CommitSyncStatus | null;
 }
 
 /**
- * Commit list of a mapped branch with single and multiple selection, the push
- * choice and the preview. The branch and theme are fixed by the mapping.
+ * Commit list of a mapped branch with single and multiple selection and the
+ * preview. The branch and theme are fixed by the mapping. One new commit brings
+ * every commit up to it; one commit already in the theme re-applies only its
+ * own files; several commits are combined.
  */
 export function CommitSyncPanel({
   mapping,
@@ -138,7 +141,6 @@ export function CommitSyncPanel({
 }) {
   const repository = mapping.repository;
   const [picked, setPicked] = useState<Picked[]>([]);
-  const [strategy, setStrategy] = useState<SyncStrategy>('since_last_sync');
   const [allowDeletes, setAllowDeletes] = useState(false);
   const [showFiles, setShowFiles] = useState(false);
   const previewMutation = useMutation(api.sync.preview);
@@ -168,6 +170,7 @@ export function CommitSyncPanel({
               shortSha: commit.shortSha,
               message: commit.message,
               position: offset + index,
+              status: commit.syncStatus,
             },
           ],
     );
@@ -182,6 +185,7 @@ export function CommitSyncPanel({
           shortSha: c.shortSha,
           message: c.message,
           position: offset + i,
+          status: c.syncStatus,
         }))
         .filter((c) => !current.some((p) => p.sha === c.sha)),
     ]);
@@ -195,23 +199,28 @@ export function CommitSyncPanel({
           shortSha: c.shortSha,
           message: c.message,
           position: offset + i,
+          status: c.syncStatus,
         })),
     );
 
   const multiple = picked.length > 1;
   const ordered = [...picked].sort((a, b) => a.position - b.position); // newest first
   const newest = ordered[0] ?? null;
-  const selectedSha = picked.length === 1 ? picked[0]!.sha : null;
-  const effectiveStrategy: SyncStrategy = multiple ? 'selected_commits' : strategy;
+  const selected = picked.length === 1 ? picked[0]! : null;
+  const selectedSha = selected?.sha ?? null;
+  // A commit already in the theme is re-applied on its own instead of rolling the theme back to it.
+  const reapply = !!selected && (selected.status === 'added' || selected.status === 'last_synced');
+  const effectiveStrategy: SyncStrategy = multiple
+    ? 'selected_commits'
+    : reapply
+      ? 'commit_changes'
+      : 'since_last_sync';
 
   const selectedIndex = listed.findIndex((c) => c.sha === selectedSha);
   const catchUp =
-    selectedIndex >= 0 && strategy !== 'full_snapshot' && listed[selectedIndex]!.syncStatus === 'new'
+    selectedIndex >= 0 && !reapply && listed[selectedIndex]!.syncStatus === 'new'
       ? listed.slice(selectedIndex + 1).filter((c) => c.syncStatus === 'new').length
       : 0;
-  const selectedStatus = selectedIndex >= 0 ? listed[selectedIndex]!.syncStatus : null;
-  const alreadyOn = !multiple && strategy === 'since_last_sync' && !!selectedSha && selectedSha === lastSynced?.sha;
-  const goesBack = !multiple && strategy === 'since_last_sync' && selectedStatus === 'added';
   const gaps = multiple ? ordered[ordered.length - 1]!.position - ordered[0]!.position + 1 - ordered.length : 0;
   const waitingOnPage = listed.filter((c) => c.syncStatus === 'new').length;
 
@@ -268,43 +277,17 @@ export function CommitSyncPanel({
           </s-stack>
         </s-banner>
       ) : null}
-      <s-grid gridTemplateColumns="repeat(auto-fit, minmax(260px, 1fr))" gap="base" alignItems="start">
-        {!multiple && (
-          <s-select
-            label="When you select one commit, sync"
-            value={strategy}
-            details={
-              strategy === 'commit_changes'
-                ? 'Only the files that commit changed; earlier commits not in the theme are left out.'
-                : lastSynced
-                  ? `Every commit after ${lastSynced.shortSha} up to the selected one, so nothing is skipped.`
-                  : 'Never synced from this branch: the complete theme at the selected commit.'
-            }
-            onChange={(event) => setStrategy(event.currentTarget.value as SyncStrategy)}
-          >
-            <s-option value="since_last_sync">Everything up to that commit (recommended)</s-option>
-            <s-option value="commit_changes">Only that commit</s-option>
-          </s-select>
-        )}
-        <s-checkbox
-          label="Also delete files the commits removed"
-          details="Off by default; every deletion is listed in the review first."
-          checked={allowDeletes}
-          onChange={(event) => setAllowDeletes(event.currentTarget.checked)}
-        />
-      </s-grid>
+      <s-checkbox
+        label="Also delete files the commits removed"
+        details="Off by default; every deletion is listed in the review first."
+        checked={allowDeletes}
+        onChange={(event) => setAllowDeletes(event.currentTarget.checked)}
+      />
 
-      {alreadyOn && lastSynced && (
-        <s-banner tone="info" heading="Already up to date">
+      {reapply && selected && (
+        <s-banner tone="info" heading={`${selected.shortSha} is already in the theme`}>
           <s-paragraph>
-            {`${mapping.themeName} is already on ${lastSynced.shortSha}, so there is nothing new to bring in. Select a newer commit, or choose "Only the selected commit" to apply this commit's files again.`}
-          </s-paragraph>
-        </s-banner>
-      )}
-      {goesBack && lastSynced && selectedSha && (
-        <s-banner tone="warning" heading="This commit is already in the theme">
-          <s-paragraph>
-            {`${selectedSha.slice(0, 7)} is older than the theme's commit ${lastSynced.shortSha}. Syncing up to it undoes the updates made after it — the review shows exactly which files change.`}
+            {`Only the files ${selected.shortSha} changed are synced to ${mapping.themeName} again. Newer commits in the theme stay as they are.`}
           </s-paragraph>
         </s-banner>
       )}
@@ -324,12 +307,12 @@ export function CommitSyncPanel({
             </s-button>
           </s-stack>
           <s-stack direction="inline" gap="small-200" alignItems="center">
-            {catchUp > 0 && !multiple && strategy === 'since_last_sync' && (
+            {catchUp > 0 && !multiple && (
               <s-text color="subdued">{`+ ${catchUp} earlier commit${catchUp === 1 ? '' : 's'} not in the theme yet`}</s-text>
             )}
             <s-button
               variant="primary"
-              disabled={picked.length === 0 || alreadyOn || !theme}
+              disabled={picked.length === 0 || !theme}
               loading={previewMutation.pending}
               onClick={runPreview}
             >
