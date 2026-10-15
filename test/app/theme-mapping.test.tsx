@@ -5,6 +5,7 @@ import type * as ApiClientModule from '../../app/lib/api-client';
 import { Route, Routes } from 'react-router-dom';
 import MappingDetail from '../../app/routes/MappingDetail';
 import Settings from '../../app/routes/Settings';
+import Themes from '../../app/routes/Themes';
 import ThemeMapping from '../../app/routes/ThemeMapping';
 
 // vi.mock is hoisted above imports, so its fixtures must be hoisted too.
@@ -181,6 +182,8 @@ describe('Theme mapping page', () => {
       </MemoryRouter>,
     );
     expect(await screen.findByText('Mappings (2)', {}, { timeout: 5000 })).toBeInTheDocument();
+    // The store's theme list is on the Themes page, not here.
+    expect(container.querySelector('s-section[heading="Store themes"]')).toBeNull();
     // Each card says where its theme stands (the mocked commits list has 1 commit waiting).
     expect(await screen.findAllByText('1 update waiting', {}, { timeout: 5000 })).toHaveLength(2);
     expect(screen.getAllByText('Sync updates')).toHaveLength(2);
@@ -334,24 +337,30 @@ describe('Changed files of a commit', () => {
   });
 });
 
-describe('Store themes on the Theme mapping page', () => {
-  it('lists every theme with the branch it receives and offers to map a free theme', async () => {
+describe('Themes page', () => {
+  it('lists every theme with the branch it receives; "Map a branch" opens the add form with the theme', async () => {
     const { container } = render(
-      <MemoryRouter initialEntries={['/mappings']}>
-        <ThemeMapping />
+      <MemoryRouter initialEntries={['/themes']}>
+        <Routes>
+          <Route path="/themes" element={<Themes />} />
+          <Route path="/mappings" element={<ThemeMapping />} />
+        </Routes>
       </MemoryRouter>,
     );
     const wait = { timeout: 5000 };
     expect(await screen.findByText('spare', {}, wait)).toBeInTheDocument();
     // main → abc and staging → xyz open their mapping; "spare" can receive a free branch.
-    expect(await screen.findAllByText('Open mapping', {}, wait)).not.toHaveLength(0);
+    expect(await screen.findAllByText('Open mapping', {}, wait)).toHaveLength(2);
+    expect(screen.getByText('main')).toBeInTheDocument();
     fireEvent.click(screen.getByText('Map a branch'));
     await waitFor(() => expect(container.querySelector('s-section[heading="Add a mapping"]')).not.toBeNull(), wait);
-    // The theme is preselected in the form.
-    const themeSelect = [...container.querySelectorAll('s-select')].find(
-      (el) => el.getAttribute('label') === 'Shopify theme',
-    );
-    expect(themeSelect?.getAttribute('value')).toBe('gid://shopify/OnlineStoreTheme/3');
+    // The theme is preselected in the form once branches and themes have loaded.
+    await waitFor(() => {
+      const themeSelect = [...container.querySelectorAll('s-select')].find(
+        (el) => el.getAttribute('label') === 'Shopify theme',
+      );
+      expect(themeSelect?.getAttribute('value')).toBe('gid://shopify/OnlineStoreTheme/3');
+    }, wait);
   });
 });
 
@@ -369,5 +378,6 @@ describe('Settings', () => {
     expect(labels).toContain('Repository');
     expect(labels).not.toContain('Branch');
     expect(screen.queryByText('Browse repositories')).not.toBeInTheDocument();
+    expect(container.querySelector('s-text-field[label="Theme root folder"]')).toBeNull();
   });
 });

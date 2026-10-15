@@ -4,6 +4,7 @@ import { NavMenu } from '@shopify/app-bridge-react';
 import Dashboard from './routes/Dashboard';
 import Settings from './routes/Settings';
 import ThemeMapping from './routes/ThemeMapping';
+import Themes from './routes/Themes';
 import CommitsRedirect from './routes/CommitsRedirect';
 import MappingDetail from './routes/MappingDetail';
 import SyncHistory from './routes/SyncHistory';
@@ -48,15 +49,16 @@ export default function App() {
           Dashboard
         </Link>
         <Link to="/mappings">Theme mapping</Link>
+        <Link to="/themes">Themes</Link>
         <Link to="/sync-history">Sync history</Link>
         <Link to="/settings">Settings</Link>
       </NavMenu>
       <Routes>
         <Route path="/" element={<Dashboard />} />
         <Route path="/settings" element={<Settings />} />
-        {/* The repository is chosen in Settings and themes are listed on Theme mapping; old links land there. */}
+        {/* The repository is chosen in Settings; old repository links land there. */}
         <Route path="/repositories/*" element={<Navigate to="/settings" replace />} />
-        <Route path="/themes" element={<Navigate to="/mappings" replace />} />
+        <Route path="/themes" element={<Themes />} />
         <Route path="/mappings" element={<ThemeMapping />} />
         <Route path="/mappings/:id" element={<MappingDetail />} />
         <Route path="/commits" element={<CommitsRedirect />} />

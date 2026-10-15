@@ -9,7 +9,7 @@ import { formatDate } from '../lib/format';
 import { useApiQuery, useMutation } from '../lib/hooks';
 import type { UpdateSettingsRequest } from '../lib/types';
 import { ignorePatternError } from '../../shared/theme-paths';
-import { validateGithubToken, validateRepository, validateThemeRootInput } from '../lib/validation';
+import { validateGithubToken, validateRepository } from '../lib/validation';
 
 /** Select value for "no choice" — an empty option value is not reliable in <s-select>. */
 const NONE = '__none__';
@@ -158,14 +158,12 @@ export default function Settings() {
   const save = useMutation(api.settings.update);
 
   const [repository, setRepository] = useState('');
-  const [themeRoot, setThemeRoot] = useState('');
   const [ignorePatterns, setIgnorePatterns] = useState<string[]>([]);
 
   const settings = settingsQuery.data?.settings;
   useEffect(() => {
     if (!settings) return;
     setRepository(settings.defaultRepository ?? '');
-    setThemeRoot(settings.syncPreferences.themeRoot);
     setIgnorePatterns(settings.syncPreferences.ignorePatterns);
   }, [settings]);
 
@@ -179,16 +177,15 @@ export default function Settings() {
   );
 
   const repoError = repository.trim() ? validateRepository(repository) : null;
-  const rootError = validateThemeRootInput(themeRoot);
   const ignoreInvalid = ignorePatterns.some((p, i) => !!ignorePatternError(p) || ignorePatterns.indexOf(p) !== i);
-  const invalid = !!(repoError || rootError || ignoreInvalid);
+  const invalid = !!(repoError || ignoreInvalid);
   const reposQuery = useApiQuery(() => api.github.repositories({ perPage: 100 }), [connected], connected);
   const repos = reposQuery.data?.items ?? [];
 
   const onSave = useCallback(async () => {
     if (invalid) return;
     const body: UpdateSettingsRequest = {
-      syncPreferences: { themeRoot, ignorePatterns: ignorePatterns.map((p) => p.trim()) },
+      syncPreferences: { ignorePatterns: ignorePatterns.map((p) => p.trim()) },
     };
     // Each mapping chooses its own branch, so only the repository is saved here.
     if (repository.trim() !== savedRepository) {
@@ -200,7 +197,7 @@ export default function Settings() {
       settingsQuery.setData(result);
       showToast('Settings saved');
     }
-  }, [invalid, themeRoot, ignorePatterns, repository, savedRepository, save, settingsQuery]);
+  }, [invalid, ignorePatterns, repository, savedRepository, save, settingsQuery]);
 
   if (settingsQuery.loading && !settingsQuery.data) return <LoadingState title="Settings" />;
 
@@ -276,15 +273,6 @@ export default function Settings() {
               </s-stack>
             </s-box>
           )}
-          <s-text-field
-            label="Theme root folder"
-            placeholder="e.g. theme (leave empty if the theme is at the repository root)"
-            details="Only needed when the theme files (assets/, sections/, …) live in a subfolder of the repository."
-            value={themeRoot}
-            autocomplete="off"
-            error={rootError ?? undefined}
-            onInput={(event) => setThemeRoot(event.currentTarget.value)}
-          />
         </s-stack>
       </s-section>
 
