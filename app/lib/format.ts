@@ -89,3 +89,50 @@ export const RESULT_BADGE: Partial<Record<SyncStatus, { label: string; tone: Ton
   partially_failed: { label: 'Partially successful', tone: 'warning' },
   failed: { label: 'Failed', tone: 'critical' },
 };
+
+export interface MappingStatus {
+  label: string;
+  tone: Tone;
+  /** One sentence that tells the merchant where the theme stands and what to do next. */
+  description: string;
+}
+
+/** Where a mapped theme stands, in plain words. */
+export function mappingStatus(input: {
+  themeName: string;
+  branch: string;
+  lastSyncedSha: string | null;
+  waiting: number | null;
+  waitingMore: boolean;
+  lastRunStatus: SyncStatus | null;
+}): MappingStatus {
+  const { themeName, branch, lastSyncedSha, waiting, waitingMore, lastRunStatus } = input;
+  if (lastRunStatus === 'failed' || lastRunStatus === 'partially_failed') {
+    return {
+      label: lastRunStatus === 'failed' ? 'Last sync failed' : 'Last sync incomplete',
+      tone: 'critical',
+      description: `The last sync to ${themeName} did not finish. Open it in the sync history to retry the failed files, or restore the backup.`,
+    };
+  }
+  if (!lastSyncedSha) {
+    return {
+      label: 'Not synced yet',
+      tone: 'caution',
+      description: `${themeName} has not been synced from ${branch} yet. Start with a full sync so the theme matches the branch.`,
+    };
+  }
+  if (waiting === null) return { label: 'Checking…', tone: 'neutral', description: 'Checking for new commits…' };
+  if (waiting > 0) {
+    const n = `${waiting}${waitingMore ? '+' : ''}`;
+    return {
+      label: `${n} update${waiting === 1 && !waitingMore ? '' : 's'} waiting`,
+      tone: 'info',
+      description: `${n} new commit${waiting === 1 && !waitingMore ? ' is' : 's are'} on ${branch} but not in ${themeName} yet. Select them below and review the sync.`,
+    };
+  }
+  return {
+    label: 'Up to date',
+    tone: 'success',
+    description: `${themeName} has every commit of ${branch} (${lastSyncedSha.slice(0, 7)}).`,
+  };
+}

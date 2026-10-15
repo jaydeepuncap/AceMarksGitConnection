@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import type * as ApiClientModule from '../../app/lib/api-client';
 import { Route, Routes } from 'react-router-dom';
@@ -91,9 +91,13 @@ describe('Theme mapping page', () => {
       </MemoryRouter>,
     );
     await waitFor(() => expect(container.querySelector('s-section[heading="Mappings (2)"]')).not.toBeNull(), { timeout: 5000 });
-    expect(screen.getAllByText('Open')).toHaveLength(2);
-    expect(await screen.findAllByText('Last sync: no sync performed yet', {}, { timeout: 5000 })).toHaveLength(2);
+    // Each card says where its theme stands (the mocked commits list has 1 commit waiting).
+    expect(await screen.findAllByText('1 update waiting', {}, { timeout: 5000 })).toHaveLength(2);
+    expect(screen.getAllByText('Sync updates')).toHaveLength(2);
+    expect(screen.getAllByText('No sync performed yet')).toHaveLength(2);
 
+    // The add form opens from the page action and only offers free branches and themes.
+    fireEvent.click(screen.getByText('Add mapping'));
     const option = (text: string) => [...container.querySelectorAll('s-option')].find((o) => o.textContent === text);
     await waitFor(() => expect(option('main — mapped to abc')).toBeDefined(), { timeout: 5000 });
     expect(option('main — mapped to abc')!.hasAttribute('disabled')).toBe(true);
@@ -105,7 +109,7 @@ describe('Theme mapping page', () => {
 
 describe('Mapping page', () => {
   it('shows where the theme stands, its commits and applied syncs for the fixed branch and theme', async () => {
-    render(
+    const { container } = render(
       <MemoryRouter initialEntries={['/mappings/m1']}>
         <Routes>
           <Route path="/mappings/:id" element={<MappingDetail />} />
@@ -115,9 +119,10 @@ describe('Mapping page', () => {
     const wait = { timeout: 5000 };
     expect(await screen.findByText('eeeeeee Fix header', {}, wait)).toBeInTheDocument(); // "Theme is on"
     expect(await screen.findByText('Add banner', {}, wait)).toBeInTheDocument();
-    expect(screen.getByText('New')).toBeInTheDocument();
-    expect(screen.getByText('Last synced')).toBeInTheDocument();
-    expect(screen.getByText('1 new on this page')).toBeInTheDocument();
+    expect(screen.getAllByText('New').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Last synced').length).toBeGreaterThan(0);
+    expect(screen.getByText('Select new (1)')).toBeInTheDocument();
+    await waitFor(() => expect(container.querySelector('s-banner[heading="1 update waiting"]')).not.toBeNull(), wait); // status banner
     expect(await screen.findByText('No syncs applied to this theme from this branch yet.', {}, wait)).toBeInTheDocument();
     expect(screen.getByText('Review full sync')).toBeInTheDocument();
   });
