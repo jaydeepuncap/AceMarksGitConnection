@@ -5,7 +5,7 @@ import { COMMITS_PER_PAGE, CommitSyncPanel } from '../components/CommitSyncPanel
 import { ConfirmSyncModal } from '../components/ConfirmSyncModal';
 import { ErrorBanner } from '../components/ErrorBanner';
 import { LoadingState } from '../components/LoadingState';
-import { BranchThemeTitle, StatTile, StatusBadge } from '../components/ui';
+import { BranchThemeTitle, StatTile, StatusBadge } from '../components/Common';
 import { FullSyncControls, ManageMappingControls, themeOptionsFor } from '../components/MappingControls';
 import { SyncRunsTable } from '../components/SyncRunsTable';
 import { api } from '../lib/api-client';
@@ -164,7 +164,7 @@ export default function MappingDetail() {
               role={theme?.role}
               themeMissing={!!themes.data && !theme}
             />
-            {status && <StatusBadge label={status.label} tone={status.tone} />}
+            {status && <StatusBadge status={status.key} label={status.label} />}
           </s-stack>
           <s-text color="subdued">{`${mapping.repository} · Theme ID ${mapping.themeId.split('/').pop()}`}</s-text>
           <s-grid gridTemplateColumns="repeat(auto-fit, minmax(180px, 1fr))" gap="base">

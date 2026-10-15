@@ -4,7 +4,7 @@ import { showToast } from '../lib/app-bridge';
 import { useMutation } from '../lib/hooks';
 import type { ShopifyTheme, SyncPreview, ThemeMapping } from '../lib/types';
 import { ErrorBanner } from './ErrorBanner';
-import { ConfirmModal } from './ui';
+import { ConfirmModal } from './Common/ConfirmModal';
 
 const NONE = '__none__';
 
@@ -143,7 +143,6 @@ export function ManageMappingControls({
         </s-stack>
       )}
       <ConfirmModal
-        id={`mapping-confirm-${mapping.id}`}
         open={confirm !== null}
         heading={
           confirm === 'remove'
@@ -155,8 +154,9 @@ export function ManageMappingControls({
             ? `${mapping.branch} will no longer sync to ${mapping.themeName}. Nothing in the theme changes. Its sync history and last synced commit are kept, so mapping it again later continues where it left off.`
             : `${mapping.branch} will sync to ${newTheme?.name ?? 'the selected theme'} instead of ${mapping.themeName}. Nothing in either theme changes now; ${mapping.themeName} keeps its sync history.`
         }
-        actionLabel={confirm === 'remove' ? 'Remove mapping' : 'Change theme'}
-        pending={remove.pending || update.pending}
+        confirmLabel={confirm === 'remove' ? 'Remove mapping' : 'Change theme'}
+        destructive
+        loading={remove.pending || update.pending}
         onClose={() => setConfirm(null)}
         onConfirm={confirm === 'remove' ? doRemove : doChange}
       />

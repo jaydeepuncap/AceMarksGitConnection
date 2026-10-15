@@ -16,7 +16,13 @@ export type StatusKey =
   | "no-page"
   | "trial"
   | "incomplete"
-  | "error";
+  | "error"
+  // Branch → theme mappings
+  | "up-to-date"
+  | "updates-waiting"
+  | "not-synced"
+  | "sync-failed"
+  | "checking";
 
 type StatusDef = {
   label: string;
@@ -34,6 +40,11 @@ const STATUS_MAP: Record<StatusKey, StatusDef> = {
   trial: { label: "Trial", tone: "warning" },
   incomplete: { label: "Needs setup", tone: "warning" },
   error: { label: "Error", tone: "critical" },
+  "up-to-date": { label: "Up to date", tone: "success", icon: "check-circle" },
+  "updates-waiting": { label: "Updates waiting", tone: "info", icon: "arrow-down" },
+  "not-synced": { label: "Not synced yet", tone: "caution", icon: "alert-circle" },
+  "sync-failed": { label: "Last sync failed", tone: "critical", icon: "alert-triangle" },
+  checking: { label: "Checking…", tone: "neutral" },
 };
 
 type Props = {

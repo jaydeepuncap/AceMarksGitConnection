@@ -4,7 +4,8 @@ import { AppLayout } from '../components/AppLayout';
 import { ErrorBanner } from '../components/ErrorBanner';
 import { LoadingState } from '../components/LoadingState';
 import { themeLabel } from '../components/MappingControls';
-import { BranchThemeTitle, Card, CardSection, KeyValue, StatusBadge } from '../components/ui';
+import { BranchThemeTitle, Card, CardSection, KeyValue, StatusBadge } from '../components/Common';
+import { Stack, Text } from '../components/ui';
 import { api } from '../lib/api-client';
 import { showToast } from '../lib/app-bridge';
 import { firstLine, formatDate, mappingStatus, RESULT_BADGE, syncTypeLabel } from '../lib/format';
@@ -42,7 +43,7 @@ function MappingCard({
   const result = run ? RESULT_BADGE[run.status] : undefined;
   const checking = commits.loading || last.loading;
   const status = checking
-    ? { label: 'Checking…', tone: 'neutral' as const }
+    ? { key: 'checking' as const, label: 'Checking…', tone: 'neutral' as const }
     : mappingStatus({
         themeName: mapping.themeName,
         branch: mapping.branch,
@@ -68,7 +69,7 @@ function MappingCard({
             role={theme?.role}
             themeMissing={themesLoaded && !theme}
           />
-          <StatusBadge label={status.label} tone={status.tone} />
+          <StatusBadge status={status.key} label={status.label} />
         </s-stack>
       </CardSection>
       <CardSection subdued>
@@ -303,18 +304,18 @@ export default function ThemeMapping() {
       )}
 
       {repoItems.length > 0 && (
-        <s-section heading={`Mappings (${repoItems.length})`}>
-          <s-stack gap="base">
-            {repoItems.map((m) => (
-              <MappingCard
-                key={`${m.id}:${refreshKey}`}
-                mapping={m}
-                theme={allThemes.find((t) => t.id === m.themeId)}
-                themesLoaded={!!themes.data}
-              />
-            ))}
-          </s-stack>
-        </s-section>
+        // Cards sit directly on the page (not inside a section) so their titles render as larger headings.
+        <Stack gap="base" accessibilityLabel={`Mappings (${repoItems.length})`}>
+          <Text type="strong">{`Mappings (${repoItems.length})`}</Text>
+          {repoItems.map((m) => (
+            <MappingCard
+              key={`${m.id}:${refreshKey}`}
+              mapping={m}
+              theme={allThemes.find((t) => t.id === m.themeId)}
+              themesLoaded={!!themes.data}
+            />
+          ))}
+        </Stack>
       )}
 
       {otherRepoItems.length > 0 && (

@@ -105,7 +105,7 @@ describe('Theme mapping page', () => {
         <ThemeMapping />
       </MemoryRouter>,
     );
-    await waitFor(() => expect(container.querySelector('s-section[heading="Mappings (2)"]')).not.toBeNull(), { timeout: 5000 });
+    expect(await screen.findByText('Mappings (2)', {}, { timeout: 5000 })).toBeInTheDocument();
     // Each card says where its theme stands (the mocked commits list has 1 commit waiting).
     expect(await screen.findAllByText('1 update waiting', {}, { timeout: 5000 })).toHaveLength(2);
     expect(screen.getAllByText('Sync updates')).toHaveLength(2);

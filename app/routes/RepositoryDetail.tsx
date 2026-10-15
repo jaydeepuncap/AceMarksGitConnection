@@ -4,7 +4,7 @@ import { AppLayout } from '../components/AppLayout';
 import { ErrorBanner } from '../components/ErrorBanner';
 import { LoadingState } from '../components/LoadingState';
 import { themeLabel } from '../components/MappingControls';
-import { StatTile } from '../components/ui';
+import { StatTile } from '../components/Common';
 import { api } from '../lib/api-client';
 import { showToast } from '../lib/app-bridge';
 import { formatDate, THEME_ROLE_BADGE } from '../lib/format';

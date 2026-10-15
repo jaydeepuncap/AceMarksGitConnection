@@ -91,6 +91,8 @@ export const RESULT_BADGE: Partial<Record<SyncStatus, { label: string; tone: Ton
 };
 
 export interface MappingStatus {
+  /** Status key of the shared StatusBadge (components/Common/StatusBadge). */
+  key: 'up-to-date' | 'updates-waiting' | 'not-synced' | 'sync-failed' | 'checking';
   label: string;
   tone: Tone;
   /** One sentence that tells the merchant where the theme stands and what to do next. */
@@ -109,6 +111,7 @@ export function mappingStatus(input: {
   const { themeName, branch, lastSyncedSha, waiting, waitingMore, lastRunStatus } = input;
   if (lastRunStatus === 'failed' || lastRunStatus === 'partially_failed') {
     return {
+      key: 'sync-failed',
       label: lastRunStatus === 'failed' ? 'Last sync failed' : 'Last sync incomplete',
       tone: 'critical',
       description: `The last sync to ${themeName} did not finish. Open it in the sync history to retry the failed files, or restore the backup.`,
@@ -116,21 +119,25 @@ export function mappingStatus(input: {
   }
   if (!lastSyncedSha) {
     return {
+      key: 'not-synced',
       label: 'Not synced yet',
       tone: 'caution',
       description: `${themeName} has not been synced from ${branch} yet. Start with a full sync so the theme matches the branch.`,
     };
   }
-  if (waiting === null) return { label: 'Checking…', tone: 'neutral', description: 'Checking for new commits…' };
+  if (waiting === null)
+    return { key: 'checking', label: 'Checking…', tone: 'neutral', description: 'Checking for new commits…' };
   if (waiting > 0) {
     const n = `${waiting}${waitingMore ? '+' : ''}`;
     return {
+      key: 'updates-waiting',
       label: `${n} update${waiting === 1 && !waitingMore ? '' : 's'} waiting`,
       tone: 'info',
       description: `${n} new commit${waiting === 1 && !waitingMore ? ' is' : 's are'} on ${branch} but not in ${themeName} yet. Select them below and review the sync.`,
     };
   }
   return {
+    key: 'up-to-date',
     label: 'Up to date',
     tone: 'success',
     description: `${themeName} has every commit of ${branch} (${lastSyncedSha.slice(0, 7)}).`,
