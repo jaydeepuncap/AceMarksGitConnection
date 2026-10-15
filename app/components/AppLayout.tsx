@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { Page } from './ui';
+import { Page, Stack, Text } from './ui';
 
 export interface PageAction {
   content: string;
@@ -68,11 +68,11 @@ export function AppLayout({
         tone: action.tone,
       }))}
     >
-      <s-stack gap="base">
-        {subtitle && <s-text color="subdued">{subtitle}</s-text>}
+      <Stack gap="base">
+        {subtitle && <Text color="subdued">{subtitle}</Text>}
         {banners}
         {children}
-      </s-stack>
+      </Stack>
     </Page>
   );
 }

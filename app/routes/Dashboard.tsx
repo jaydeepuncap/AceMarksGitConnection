@@ -5,6 +5,18 @@ import { LoadingState } from '../components/LoadingState';
 import { api } from '../lib/api-client';
 import { firstLine, formatDate, SYNC_STATUS_BADGE } from '../lib/format';
 import { useApiQuery, useNavigateHandler } from '../lib/hooks';
+import {
+  Badge,
+  Button,
+  Grid,
+  IndexTable,
+  IndexTableCell,
+  IndexTableRow,
+  Paragraph,
+  Section,
+  Stack,
+  Text,
+} from '../components/ui';
 
 export default function Dashboard() {
   const go = useNavigateHandler();
@@ -28,125 +40,124 @@ export default function Dashboard() {
       primaryAction={{ content: 'Theme mapping', onAction: go('/mappings'), disabled: !github?.connected }}
       banners={<ErrorBanner error={error} onRetry={reload} />}
     >
-      <s-grid gridTemplateColumns="repeat(auto-fit, minmax(280px, 1fr))" gap="base">
-        <s-section heading="Shopify store">
-          <s-stack gap="small-200">
-            <s-stack direction="inline" gap="small-200" alignItems="center">
-              <s-text type="strong">{shop?.shopDomain ?? '—'}</s-text>
+      <Grid gridTemplateColumns="repeat(auto-fit, minmax(280px, 1fr))" gap="base">
+        <Section heading="Shopify store">
+          <Stack gap="small-200">
+            <Stack direction="inline" gap="small-200" alignItems="center">
+              <Text type="strong">{shop?.shopDomain ?? '—'}</Text>
               {shop && (
-                <s-badge tone={shop.status === 'installed' ? 'success' : 'critical'}>
+                <Badge tone={shop.status === 'installed' ? 'success' : 'critical'}>
                   {shop.status === 'installed' ? 'Connected' : 'Not installed'}
-                </s-badge>
+                </Badge>
               )}
-            </s-stack>
-            <s-stack direction="inline" gap="small-200">
-              <s-badge tone={shop?.canReadThemes ? 'success' : 'critical'}>
+            </Stack>
+            <Stack direction="inline" gap="small-200">
+              <Badge tone={shop?.canReadThemes ? 'success' : 'critical'}>
                 {shop?.canReadThemes ? 'Can read themes' : 'Missing read_themes'}
-              </s-badge>
-              <s-badge tone={shop?.canWriteThemes ? 'success' : 'warning'}>
+              </Badge>
+              <Badge tone={shop?.canWriteThemes ? 'success' : 'warning'}>
                 {shop?.canWriteThemes ? 'Can write themes' : 'Missing write_themes'}
-              </s-badge>
-            </s-stack>
-          </s-stack>
-        </s-section>
+              </Badge>
+            </Stack>
+          </Stack>
+        </Section>
 
-        <s-section heading="GitHub">
-          <s-stack gap="small-200">
-            <s-stack direction="inline" gap="small-200" alignItems="center">
-              <s-badge tone={github?.connected ? 'success' : 'caution'}>
+        <Section heading="GitHub">
+          <Stack gap="small-200">
+            <Stack direction="inline" gap="small-200" alignItems="center">
+              <Badge tone={github?.connected ? 'success' : 'caution'}>
                 {github?.connected ? 'Connected' : 'Not connected'}
-              </s-badge>
-            </s-stack>
-            <s-paragraph>
+              </Badge>
+            </Stack>
+            <Paragraph>
               {github?.connection
                 ? `Signed in as ${github.connection.accountLogin}`
                 : 'Add a personal access token in Settings.'}
-            </s-paragraph>
+            </Paragraph>
             {!github?.connected && (
-              <s-stack direction="inline">
-                <s-button onClick={go('/settings')}>Connect GitHub</s-button>
-              </s-stack>
+              <Stack direction="inline">
+                <Button onClick={go('/settings')}>Connect GitHub</Button>
+              </Stack>
             )}
-          </s-stack>
-        </s-section>
+          </Stack>
+        </Section>
 
-        <s-section heading="Repository">
-          <s-stack gap="small-200">
-            <s-text type="strong">{settings?.defaultRepository ?? 'No repository selected'}</s-text>
-            <s-text color="subdued">
+        <Section heading="Repository">
+          <Stack gap="small-200">
+            <Text type="strong">{settings?.defaultRepository ?? 'No repository selected'}</Text>
+            <Text color="subdued">
               {settings?.defaultRepository
                 ? `${mappings.filter((m) => m.repository.toLowerCase() === settings.defaultRepository!.toLowerCase()).length} branch(es) mapped to themes`
                 : 'Choose the repository to sync from in Settings.'}
-            </s-text>
-            <s-stack direction="inline">
-              <s-button onClick={go('/settings')} disabled={!github?.connected}>
+            </Text>
+            <Stack direction="inline">
+              <Button onClick={go('/settings')} disabled={!github?.connected}>
                 {settings?.defaultRepository ? 'Change in Settings' : 'Choose repository'}
-              </s-button>
-            </s-stack>
-          </s-stack>
-        </s-section>
+              </Button>
+            </Stack>
+          </Stack>
+        </Section>
 
-        <s-section heading="Theme mappings">
-          <s-stack gap="small-200">
+        <Section heading="Theme mappings">
+          <Stack gap="small-200">
             {mappings.length === 0 ? (
-              <s-text color="subdued">No branch is mapped to a theme yet.</s-text>
+              <Text color="subdued">No branch is mapped to a theme yet.</Text>
             ) : (
               mappings.slice(0, 4).map((m) => (
-                <s-button key={m.id} variant="tertiary" onClick={go(`/mappings/${m.id}`)}>
+                <Button key={m.id} variant="tertiary" onClick={go(`/mappings/${m.id}`)}>
                   {`${m.branch} → ${m.themeName}`}
-                </s-button>
+                </Button>
               ))
             )}
-            {mappings.length > 4 && <s-text color="subdued">{`and ${mappings.length - 4} more`}</s-text>}
-            <s-stack direction="inline">
-              <s-button onClick={go('/mappings')} disabled={!github?.connected}>
+            {mappings.length > 4 && <Text color="subdued">{`and ${mappings.length - 4} more`}</Text>}
+            <Stack direction="inline">
+              <Button onClick={go('/mappings')} disabled={!github?.connected}>
                 {mappings.length === 0 ? 'Map a branch to a theme' : 'Manage mappings'}
-              </s-button>
-            </s-stack>
-          </s-stack>
-        </s-section>
-      </s-grid>
+              </Button>
+            </Stack>
+          </Stack>
+        </Section>
+      </Grid>
 
-      <s-section heading="Recent synchronizations">
-        <s-button slot="secondary-actions" variant="tertiary" onClick={go('/sync-history')}>
+      <Section heading="Recent synchronizations">
+        <Button slot="secondary-actions" variant="tertiary" onClick={go('/sync-history')}>
           View all
-        </s-button>
+        </Button>
         {history && history.items.length === 0 ? (
-          <s-paragraph color="subdued">No syncs yet. Pick a commit to preview your first sync.</s-paragraph>
+          <Paragraph color="subdued">No syncs yet. Pick a commit to preview your first sync.</Paragraph>
         ) : (
-          <s-table variant="auto">
-            <s-table-header-row>
-              <s-table-header listSlot="primary">Commit → theme</s-table-header>
-              <s-table-header listSlot="secondary">Started</s-table-header>
-              <s-table-header listSlot="inline">Status</s-table-header>
-              <s-table-header>Details</s-table-header>
-            </s-table-header-row>
-            <s-table-body>
-              {history?.items.map((run) => (
-                <s-table-row key={run.id}>
-                  <s-table-cell>
-                    <s-stack gap="none">
-                      <s-text type="strong">
-                        {run.commitSha.slice(0, 7)} → {run.themeName}
-                      </s-text>
-                      <s-text color="subdued">{firstLine(run.commitMessage)}</s-text>
-                    </s-stack>
-                  </s-table-cell>
-                  <s-table-cell>{formatDate(run.initiatedAt)}</s-table-cell>
-                  <s-table-cell>
-                    <s-badge tone={SYNC_STATUS_BADGE[run.status].tone}>{SYNC_STATUS_BADGE[run.status].label}</s-badge>
-                  </s-table-cell>
-                  <s-table-cell>
-                    <s-button variant="tertiary" onClick={go(`/sync-history?id=${run.id}`)}>
-                      View
-                    </s-button>
-                  </s-table-cell>
-                </s-table-row>
-              ))}
-            </s-table-body>
-          </s-table>
+          <IndexTable
+            variant="auto"
+            columns={[
+              { title: 'Commit → theme', listSlot: 'primary' },
+              { title: 'Started', listSlot: 'secondary' },
+              { title: 'Status', listSlot: 'inline' },
+              { title: 'Details' },
+            ]}
+            rows={history?.items.map((run) => (
+              <IndexTableRow key={run.id}>
+                <IndexTableCell>
+                  <Stack gap="none">
+                    <Text type="strong">
+                      {run.commitSha.slice(0, 7)} → {run.themeName}
+                    </Text>
+                    <Text color="subdued">{firstLine(run.commitMessage)}</Text>
+                  </Stack>
+                </IndexTableCell>
+                <IndexTableCell>{formatDate(run.initiatedAt)}</IndexTableCell>
+                <IndexTableCell>
+                  <Badge tone={SYNC_STATUS_BADGE[run.status].tone}>{SYNC_STATUS_BADGE[run.status].label}</Badge>
+                </IndexTableCell>
+                <IndexTableCell>
+                  <Button variant="tertiary" onClick={go(`/sync-history?id=${run.id}`)}>
+                    View
+                  </Button>
+                </IndexTableCell>
+              </IndexTableRow>
+            ))}
+          />
         )}
-      </s-section>
+      </Section>
     </AppLayout>
   );
 }

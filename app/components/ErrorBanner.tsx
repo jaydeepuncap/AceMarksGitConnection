@@ -1,5 +1,6 @@
 import { useNavigateHandler } from '../lib/hooks';
 import type { ApiClientError } from '../lib/api-client';
+import { Banner, Button, Paragraph, Text } from './ui';
 
 const HINTS: Partial<Record<string, string>> = {
   GITHUB_NOT_CONNECTED: 'Connect a GitHub account in Settings to continue.',
@@ -41,7 +42,7 @@ interface Props {
   onDismiss?: () => void;
 }
 
-/** <s-banner> for API errors (critical) and notices (info / warning) with a code-specific hint and optional actions. */
+/** <Banner> for API errors (critical) and notices (info / warning) with a code-specific hint and optional actions. */
 export function ErrorBanner({ error, heading = 'Something went wrong', onRetry, onDismiss }: Props) {
   const go = useNavigateHandler();
   if (!error) return null;
@@ -52,29 +53,29 @@ export function ErrorBanner({ error, heading = 'Something went wrong', onRetry, 
   const notice = code ? NOTICES[code] : undefined;
 
   return (
-    <s-banner
+    <Banner
       tone={notice?.tone ?? 'critical'}
       heading={notice?.heading ?? heading}
       dismissible={!!onDismiss}
       onDismiss={onDismiss}
     >
-      <s-paragraph>{error.message}</s-paragraph>
-      {(notice?.hint ?? hint) && <s-paragraph>{notice?.hint ?? hint}</s-paragraph>}
+      <Paragraph>{error.message}</Paragraph>
+      {(notice?.hint ?? hint) && <Paragraph>{notice?.hint ?? hint}</Paragraph>}
       {requestId && !notice && (
-        <s-paragraph color="subdued">
-          <s-text color="subdued">Request ID: {requestId}</s-text>
-        </s-paragraph>
+        <Paragraph color="subdued">
+          <Text color="subdued">Request ID: {requestId}</Text>
+        </Paragraph>
       )}
       {onRetry && (
-        <s-button slot="secondary-actions" onClick={onRetry}>
+        <Button slot="secondary-actions" onClick={onRetry}>
           Try again
-        </s-button>
+        </Button>
       )}
       {needsSettings && (
-        <s-button slot="secondary-actions" onClick={go('/settings')}>
+        <Button slot="secondary-actions" onClick={go('/settings')}>
           Open settings
-        </s-button>
+        </Button>
       )}
-    </s-banner>
+    </Banner>
   );
 }

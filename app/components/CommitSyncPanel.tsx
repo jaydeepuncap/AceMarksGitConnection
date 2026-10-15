@@ -12,7 +12,22 @@ import type {
 } from '../lib/types';
 import { ErrorBanner } from './ErrorBanner';
 import { LoadingInline } from './LoadingState';
-import { Modal } from './ui';
+import {
+  Badge,
+  Banner,
+  Box,
+  Button,
+  Checkbox,
+  ClickableChip,
+  IndexTable,
+  IndexTableCell,
+  IndexTableRow,
+  Link,
+  Modal,
+  Paragraph,
+  Stack,
+  Text,
+} from './ui';
 
 export const COMMITS_PER_PAGE = 20;
 const FILES_PER_PAGE = 100;
@@ -40,29 +55,29 @@ function CommitFiles({ sha, repository }: { sha: string; repository: string }) {
   const commit = detail.data;
 
   return (
-    <s-stack gap="base">
+    <Stack gap="base">
       <ErrorBanner error={detail.error ?? files.error} onRetry={() => (detail.reload(), files.reload())} />
       {detail.loading && !commit ? (
         <LoadingInline label="Loading commit…" />
       ) : (
         commit && (
-          <s-stack gap="small-200">
-            <s-text type="strong">{`${commit.sha.slice(0, 7)} · ${firstLine(commit.message)}`}</s-text>
-            <s-text color="subdued">
+          <Stack gap="small-200">
+            <Text type="strong">{`${commit.sha.slice(0, 7)} · ${firstLine(commit.message)}`}</Text>
+            <Text color="subdued">
               {`${commit.authorLogin ?? commit.authorName ?? 'Unknown author'} · ${formatDate(commit.date)} · ${commit.filesCount} file(s) · +${commit.stats.additions} −${commit.stats.deletions}`}
-            </s-text>
+            </Text>
             {commit.filesTruncated && (
-              <s-banner tone="warning" heading="Large commit">
-                <s-paragraph>
+              <Banner tone="warning" heading="Large commit">
+                <Paragraph>
                   GitHub lists at most 3000 changed files per commit and this commit reached that limit. Use a full sync
                   to sync it completely.
-                </s-paragraph>
-              </s-banner>
+                </Paragraph>
+              </Banner>
             )}
-          </s-stack>
+          </Stack>
         )
       )}
-      <s-table
+      <IndexTable
         variant="auto"
         loading={files.loading}
         paginate
@@ -70,41 +85,38 @@ function CommitFiles({ sha, repository }: { sha: string; repository: string }) {
         hasNextPage={!!files.data?.hasNextPage}
         onPreviousPage={() => setFilePage((p) => Math.max(1, p - 1))}
         onNextPage={() => setFilePage((p) => p + 1)}
-      >
-        <s-table-header-row>
-          <s-table-header listSlot="inline">Change</s-table-header>
-          <s-table-header listSlot="primary">File</s-table-header>
-          <s-table-header listSlot="secondary">In the theme</s-table-header>
-          <s-table-header format="numeric">Lines</s-table-header>
-        </s-table-header-row>
-        <s-table-body>
-          {(files.data?.items ?? []).map((file) => {
-            const badge = FILE_STATUS_BADGE[file.status];
-            return (
-              <s-table-row key={`${file.filename}:${file.previousFilename ?? ''}`}>
-                <s-table-cell>
-                  <s-badge tone={badge.tone}>{badge.label}</s-badge>
-                </s-table-cell>
-                <s-table-cell>
-                  <s-stack gap="none">
-                    <s-text>{file.filename}</s-text>
-                    {file.previousFilename && <s-text color="subdued">from {file.previousFilename}</s-text>}
-                  </s-stack>
-                </s-table-cell>
-                <s-table-cell>
-                  {file.themePathError ? (
-                    <s-text color="subdued">Not synced: {file.themePathError}</s-text>
-                  ) : (
-                    <s-text tone="success">{file.themePath}</s-text>
-                  )}
-                </s-table-cell>
-                <s-table-cell>{`+${file.additions} −${file.deletions}`}</s-table-cell>
-              </s-table-row>
-            );
-          })}
-        </s-table-body>
-      </s-table>
-    </s-stack>
+        columns={[
+          { title: 'Change', listSlot: 'inline' },
+          { title: 'File', listSlot: 'primary' },
+          { title: 'In the theme', listSlot: 'secondary' },
+          { title: 'Lines', format: 'numeric' },
+        ]}
+        rows={(files.data?.items ?? []).map((file) => {
+          const badge = FILE_STATUS_BADGE[file.status];
+          return (
+            <IndexTableRow key={`${file.filename}:${file.previousFilename ?? ''}`}>
+              <IndexTableCell>
+                <Badge tone={badge.tone}>{badge.label}</Badge>
+              </IndexTableCell>
+              <IndexTableCell>
+                <Stack gap="none">
+                  <Text>{file.filename}</Text>
+                  {file.previousFilename && <Text color="subdued">from {file.previousFilename}</Text>}
+                </Stack>
+              </IndexTableCell>
+              <IndexTableCell>
+                {file.themePathError ? (
+                  <Text color="subdued">Not synced: {file.themePathError}</Text>
+                ) : (
+                  <Text tone="success">{file.themePath}</Text>
+                )}
+              </IndexTableCell>
+              <IndexTableCell>{`+${file.additions} −${file.deletions}`}</IndexTableCell>
+            </IndexTableRow>
+          );
+        })}
+      />
+    </Stack>
   );
 }
 
@@ -247,42 +259,42 @@ export function CommitSyncPanel({
   const upToDate = !!lastSynced && commits.data?.waiting === 0 && !commits.data?.waitingMore;
 
   return (
-    <s-stack gap="base">
+    <Stack gap="base">
       <ErrorBanner error={commits.error} onRetry={commits.reload} heading="Commits could not be loaded" />
       <ErrorBanner error={previewMutation.error} heading="Preview failed" onDismiss={previewMutation.clearError} />
 
       {upToDate && picked.length === 0 && (
-        <s-banner tone="success" heading="All commits are in the theme">
-          <s-paragraph>
+        <Banner tone="success" heading="All commits are in the theme">
+          <Paragraph>
             {`${mapping.themeName} already has every commit of ${mapping.branch}. Select an older commit only if you want to apply it again.`}
-          </s-paragraph>
-        </s-banner>
+          </Paragraph>
+        </Banner>
       )}
 
       {multiple ? (
-        <s-banner tone={gaps > 0 ? 'warning' : 'info'} heading={`${picked.length} commits will be combined`}>
-          <s-paragraph>
+        <Banner tone={gaps > 0 ? 'warning' : 'info'} heading={`${picked.length} commits will be combined`}>
+          <Paragraph>
             {`They are applied oldest to newest. When several selected commits change the same file, the newest version is used, read from exactly that commit.${
               gaps > 0
                 ? ` ${gaps} commit(s) in between are not selected: files they also changed are listed as conflicts in the review.`
                 : ''
             }`}
-          </s-paragraph>
-          <s-stack direction="inline" gap="small-200">
+          </Paragraph>
+          <Stack direction="inline" gap="small-200">
             {[...ordered].reverse().map((p) => (
-              <s-clickable-chip
+              <ClickableChip
                 key={p.sha}
                 removable
                 accessibilityLabel={`Remove ${p.shortSha} from the selection`}
                 onRemove={() => setPicked((cur) => cur.filter((x) => x.sha !== p.sha))}
               >
                 {`${p.shortSha} ${firstLine(p.message).slice(0, 40)}`}
-              </s-clickable-chip>
+              </ClickableChip>
             ))}
-          </s-stack>
-        </s-banner>
+          </Stack>
+        </Banner>
       ) : null}
-      <s-checkbox
+      <Checkbox
         label="Also delete files the commits removed"
         details="Off by default; every deletion is listed in the review first."
         checked={allowDeletes}
@@ -290,44 +302,44 @@ export function CommitSyncPanel({
       />
 
       {reapply && selected && (
-        <s-banner tone="info" heading={`${selected.shortSha} is already in the theme`}>
-          <s-paragraph>
+        <Banner tone="info" heading={`${selected.shortSha} is already in the theme`}>
+          <Paragraph>
             {`Only the files ${selected.shortSha} changed are synced to ${mapping.themeName} again. Newer commits in the theme stay as they are.`}
-          </s-paragraph>
-        </s-banner>
+          </Paragraph>
+        </Banner>
       )}
 
-      <s-box padding="small" background="subdued" borderRadius="base">
-        <s-stack direction="inline" gap="small-200" alignItems="center" justifyContent="space-between">
-          <s-stack direction="inline" gap="small-200" alignItems="center">
-            <s-badge tone={picked.length ? 'info' : 'neutral'}>{`${picked.length} selected`}</s-badge>
-            <s-button variant="tertiary" disabled={waitingOnPage === 0} onClick={selectWaiting}>
+      <Box padding="small" background="subdued" borderRadius="base">
+        <Stack direction="inline" gap="small-200" alignItems="center" justifyContent="space-between">
+          <Stack direction="inline" gap="small-200" alignItems="center">
+            <Badge tone={picked.length ? 'info' : 'neutral'}>{`${picked.length} selected`}</Badge>
+            <Button variant="tertiary" disabled={waitingOnPage === 0} onClick={selectWaiting}>
               {`Select new (${waitingOnPage})`}
-            </s-button>
-            <s-button variant="tertiary" disabled={listed.length === 0 || allOnPage} onClick={selectPage}>
+            </Button>
+            <Button variant="tertiary" disabled={listed.length === 0 || allOnPage} onClick={selectPage}>
               Select all
-            </s-button>
-            <s-button variant="tertiary" disabled={picked.length === 0} onClick={() => setPicked([])}>
+            </Button>
+            <Button variant="tertiary" disabled={picked.length === 0} onClick={() => setPicked([])}>
               Clear
-            </s-button>
-          </s-stack>
-          <s-stack direction="inline" gap="small-200" alignItems="center">
+            </Button>
+          </Stack>
+          <Stack direction="inline" gap="small-200" alignItems="center">
             {catchUp > 0 && !multiple && (
-              <s-text color="subdued">{`+ ${catchUp} earlier commit${catchUp === 1 ? '' : 's'} not in the theme yet`}</s-text>
+              <Text color="subdued">{`+ ${catchUp} earlier commit${catchUp === 1 ? '' : 's'} not in the theme yet`}</Text>
             )}
-            <s-button
+            <Button
               variant="primary"
               disabled={picked.length === 0 || !theme}
               loading={previewMutation.pending}
               onClick={runPreview}
             >
               {reviewLabel}
-            </s-button>
-          </s-stack>
-        </s-stack>
-      </s-box>
+            </Button>
+          </Stack>
+        </Stack>
+      </Box>
 
-      <s-table
+      <IndexTable
         variant="auto"
         loading={commits.loading}
         paginate
@@ -335,91 +347,84 @@ export function CommitSyncPanel({
         hasNextPage={!!commits.data?.hasNextPage}
         onPreviousPage={() => setPage((p) => Math.max(1, p - 1))}
         onNextPage={() => setPage((p) => p + 1)}
-      >
-        <s-table-header-row>
-          <s-table-header>
-            <s-text accessibilityVisibility="exclusive">Select</s-text>
-          </s-table-header>
-          <s-table-header listSlot="primary">Commit</s-table-header>
-          <s-table-header listSlot="labeled">Changed files</s-table-header>
-          <s-table-header listSlot="inline">Status</s-table-header>
-        </s-table-header-row>
-        <s-table-body>
-          {listed.map((commit, index) => {
-            const count = stats.data?.[commit.sha];
-            const on = isPicked(commit.sha);
-            return (
-              <s-table-row key={commit.sha}>
-                <s-table-cell>
-                  <s-checkbox
-                    accessibilityLabel={`Select commit ${commit.shortSha}`}
-                    checked={on}
-                    // Keep the box showing the selection after every render; the element keeps its own
-                    // checked state otherwise, which can drift from what is actually selected.
-                    ref={(el: (HTMLElement & { checked: boolean }) | null) => {
-                      if (el && el.checked !== on) el.checked = on;
-                    }}
-                    onChange={(event) => setCommitPicked(index, !!event.currentTarget.checked)}
-                  />
-                </s-table-cell>
-                <s-table-cell>
-                  <s-stack gap="none">
-                    <s-text type={on ? 'strong' : 'generic'}>{firstLine(commit.message)}</s-text>
-                    <s-text color="subdued">
-                      <s-link href={commit.htmlUrl} target="_blank">
-                        {commit.shortSha}
-                      </s-link>
-                      {` · ${commit.authorLogin ?? commit.authorName ?? 'unknown'} · ${formatDate(commit.date)}`}
-                    </s-text>
-                  </s-stack>
-                </s-table-cell>
-                <s-table-cell>
-                  <s-button
-                    variant="secondary"
-                    icon="file"
-                    accessibilityLabel={`View files changed in ${commit.shortSha}`}
-                    onClick={() => setFilesOf({ sha: commit.sha, shortSha: commit.shortSha })}
-                  >
-                    {count
-                      ? `${count.files}${count.truncated ? '+' : ''} file${count.files === 1 ? '' : 's'}`
-                      : stats.loading
-                        ? '…'
-                        : 'View files'}
-                  </s-button>
-                </s-table-cell>
-                <s-table-cell>
-                  {commit.syncStatus ? (
-                    <s-badge tone={COMMIT_STATUS[commit.syncStatus].tone}>
-                      {COMMIT_STATUS[commit.syncStatus].label}
-                    </s-badge>
-                  ) : (
-                    <s-text color="subdued">—</s-text>
-                  )}
-                </s-table-cell>
-              </s-table-row>
-            );
-          })}
-        </s-table-body>
-      </s-table>
+        columns={[
+          { title: <Text accessibilityVisibility="exclusive">Select</Text> },
+          { title: 'Commit', listSlot: 'primary' },
+          { title: 'Changed files', listSlot: 'labeled' },
+          { title: 'Status', listSlot: 'inline' },
+        ]}
+        rows={listed.map((commit, index) => {
+          const count = stats.data?.[commit.sha];
+          const on = isPicked(commit.sha);
+          return (
+            <IndexTableRow key={commit.sha}>
+              <IndexTableCell>
+                <Checkbox
+                  accessibilityLabel={`Select commit ${commit.shortSha}`}
+                  checked={on}
+                  // Keep the box showing the selection after every render; the element keeps its own
+                  // checked state otherwise, which can drift from what is actually selected.
+                  ref={(el: (HTMLElement & { checked: boolean }) | null) => {
+                    if (el && el.checked !== on) el.checked = on;
+                  }}
+                  onChange={(event) => setCommitPicked(index, !!event.currentTarget.checked)}
+                />
+              </IndexTableCell>
+              <IndexTableCell>
+                <Stack gap="none">
+                  <Text type={on ? 'strong' : 'generic'}>{firstLine(commit.message)}</Text>
+                  <Text color="subdued">
+                    <Link href={commit.htmlUrl} target="_blank">
+                      {commit.shortSha}
+                    </Link>
+                    {` · ${commit.authorLogin ?? commit.authorName ?? 'unknown'} · ${formatDate(commit.date)}`}
+                  </Text>
+                </Stack>
+              </IndexTableCell>
+              <IndexTableCell>
+                <Button
+                  variant="secondary"
+                  icon="file"
+                  accessibilityLabel={`View files changed in ${commit.shortSha}`}
+                  onClick={() => setFilesOf({ sha: commit.sha, shortSha: commit.shortSha })}
+                >
+                  {count
+                    ? `${count.files}${count.truncated ? '+' : ''} file${count.files === 1 ? '' : 's'}`
+                    : stats.loading
+                      ? '…'
+                      : 'View files'}
+                </Button>
+              </IndexTableCell>
+              <IndexTableCell>
+                {commit.syncStatus ? (
+                  <Badge tone={COMMIT_STATUS[commit.syncStatus].tone}>{COMMIT_STATUS[commit.syncStatus].label}</Badge>
+                ) : (
+                  <Text color="subdued">—</Text>
+                )}
+              </IndexTableCell>
+            </IndexTableRow>
+          );
+        })}
+      />
       {commits.loading && listed.length === 0 && <LoadingInline label="Loading commits…" />}
       {!commits.loading && !commits.error && listed.length === 0 && (
-        <s-paragraph color="subdued">{`${mapping.branch} has no commits.`}</s-paragraph>
+        <Paragraph color="subdued">{`${mapping.branch} has no commits.`}</Paragraph>
       )}
-      <s-stack direction="inline" gap="base" alignItems="center">
-        <s-text color="subdued">Status:</s-text>
-        <s-stack direction="inline" gap="small-200" alignItems="center">
-          <s-badge tone="info">New</s-badge>
-          <s-text color="subdued">not in the theme yet</s-text>
-        </s-stack>
-        <s-stack direction="inline" gap="small-200" alignItems="center">
-          <s-badge tone="success">Last synced</s-badge>
-          <s-text color="subdued">the commit the theme is on</s-text>
-        </s-stack>
-        <s-stack direction="inline" gap="small-200" alignItems="center">
-          <s-badge tone="neutral">Added</s-badge>
-          <s-text color="subdued">already in the theme</s-text>
-        </s-stack>
-      </s-stack>
+      <Stack direction="inline" gap="base" alignItems="center">
+        <Text color="subdued">Status:</Text>
+        <Stack direction="inline" gap="small-200" alignItems="center">
+          <Badge tone="info">New</Badge>
+          <Text color="subdued">not in the theme yet</Text>
+        </Stack>
+        <Stack direction="inline" gap="small-200" alignItems="center">
+          <Badge tone="success">Last synced</Badge>
+          <Text color="subdued">the commit the theme is on</Text>
+        </Stack>
+        <Stack direction="inline" gap="small-200" alignItems="center">
+          <Badge tone="neutral">Added</Badge>
+          <Text color="subdued">already in the theme</Text>
+        </Stack>
+      </Stack>
 
       <Modal
         id="commit-files"
@@ -429,10 +434,10 @@ export function CommitSyncPanel({
         onHide={() => setFilesOf(null)}
       >
         {filesOf && <CommitFiles sha={filesOf.sha} repository={repository} />}
-        <s-button slot="primary-action" variant="primary" onClick={() => setFilesOf(null)}>
+        <Button slot="primary-action" variant="primary" onClick={() => setFilesOf(null)}>
           Close
-        </s-button>
+        </Button>
       </Modal>
-    </s-stack>
+    </Stack>
   );
 }

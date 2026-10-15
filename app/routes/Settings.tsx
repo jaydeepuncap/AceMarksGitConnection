@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { AppLayout } from '../components/AppLayout';
 import { ErrorBanner } from '../components/ErrorBanner';
 import { IgnorePatternsEditor } from '../components/IgnorePatternsEditor';
@@ -10,8 +10,25 @@ import { useApiQuery, useMutation } from '../lib/hooks';
 import type { UpdateSettingsRequest } from '../lib/types';
 import { ignorePatternError } from '../../shared/theme-paths';
 import { validateGithubToken, validateRepository } from '../lib/validation';
+import {
+  Badge,
+  Banner,
+  Box,
+  Button,
+  Icon,
+  Link,
+  Modal,
+  Option,
+  Paragraph,
+  PasswordField,
+  Section,
+  Select,
+  Stack,
+  Text,
+  TextField,
+} from '../components/ui';
 
-/** Select value for "no choice" — an empty option value is not reliable in <s-select>. */
+/** Select value for "no choice" — an empty option value is not reliable in <Select>. */
 const NONE = '__none__';
 
 function GithubConnectionSection({ onChanged }: { onChanged: () => void }) {
@@ -51,49 +68,49 @@ function GithubConnectionSection({ onChanged }: { onChanged: () => void }) {
 
   const info = connection.data?.connection;
   return (
-    <s-section heading="GitHub connection">
+    <Section heading="GitHub connection">
       {connection.data && (
-        <s-badge slot="secondary-actions" tone={connection.data.connected ? 'success' : 'caution'}>
+        <Badge slot="secondary-actions" tone={connection.data.connected ? 'success' : 'caution'}>
           {connection.data.connected ? 'Connected' : 'Not connected'}
-        </s-badge>
+        </Badge>
       )}
-      <s-stack gap="base">
+      <Stack gap="base">
         <ErrorBanner error={connection.error ?? connect.error ?? disconnect.error} onDismiss={connect.clearError} />
 
         {info && (
-          <s-stack gap="small-200">
-            <s-paragraph>
-              Account <s-text type="strong">{info.accountLogin}</s-text> ·{' '}
+          <Stack gap="small-200">
+            <Paragraph>
+              Account <Text type="strong">{info.accountLogin}</Text> ·{' '}
               {info.authType === 'fine_grained_pat' ? 'fine-grained token' : 'classic token'}
-            </s-paragraph>
-            <s-text color="subdued">
+            </Paragraph>
+            <Text color="subdued">
               Verified {formatDate(info.lastVerifiedAt)}
               {info.tokenExpiresAt ? ` · token expires ${formatDate(info.tokenExpiresAt)}` : ''}
-            </s-text>
-            <s-stack direction="inline">
-              <s-button tone="critical" loading={disconnect.pending} onClick={() => setConfirmOpen(true)}>
+            </Text>
+            <Stack direction="inline">
+              <Button tone="critical" loading={disconnect.pending} onClick={() => setConfirmOpen(true)}>
                 Disconnect
-              </s-button>
-            </s-stack>
-          </s-stack>
+              </Button>
+            </Stack>
+          </Stack>
         )}
 
-        <s-paragraph color="subdued">
+        <Paragraph color="subdued">
           Create a{' '}
-          <s-link href="https://github.com/settings/personal-access-tokens/new" target="_blank">
+          <Link href="https://github.com/settings/personal-access-tokens/new" target="_blank">
             fine-grained personal access token
-          </s-link>{' '}
+          </Link>{' '}
           limited to your theme repository with Contents: Read-only and Metadata: Read-only. The token is encrypted on
           the server and is never shown again.
-        </s-paragraph>
-        <s-password-field
+        </Paragraph>
+        <PasswordField
           label={info ? 'Replace token' : 'Personal access token'}
           value={token}
           autocomplete="off"
           error={tokenError ?? undefined}
           onInput={(event) => setToken(event.currentTarget.value)}
         />
-        <s-text-field
+        <TextField
           label="Repository (optional)"
           placeholder="owner/name"
           value={repository}
@@ -102,12 +119,12 @@ function GithubConnectionSection({ onChanged }: { onChanged: () => void }) {
           error={repoError ?? undefined}
           onInput={(event) => setRepository(event.currentTarget.value)}
         />
-        <s-stack direction="inline">
-          <s-button variant="primary" loading={connect.pending} onClick={submit}>
+        <Stack direction="inline">
+          <Button variant="primary" loading={connect.pending} onClick={submit}>
             {info ? 'Update connection' : 'Connect GitHub'}
-          </s-button>
-        </s-stack>
-      </s-stack>
+          </Button>
+        </Stack>
+      </Stack>
       <DisconnectModal
         open={confirmOpen}
         account={info?.accountLogin ?? ''}
@@ -115,7 +132,7 @@ function GithubConnectionSection({ onChanged }: { onChanged: () => void }) {
         onClose={() => setConfirmOpen(false)}
         onConfirm={remove}
       />
-    </s-section>
+    </Section>
   );
 }
 
@@ -132,23 +149,18 @@ function DisconnectModal({
   onClose: () => void;
   onConfirm: () => void;
 }) {
-  const ref = useRef<HTMLElementTagNameMap['s-modal']>(null);
-  useEffect(() => {
-    if (open) ref.current?.showOverlay?.();
-    else ref.current?.hideOverlay?.();
-  }, [open]);
   return (
-    <s-modal ref={ref} id="disconnect-github-modal" heading="Disconnect GitHub?" onHide={onClose}>
-      <s-paragraph>
+    <Modal id="disconnect-github-modal" open={open} heading="Disconnect GitHub?" onHide={onClose}>
+      <Paragraph>
         {`The saved token for ${account} is deleted. Syncs stop until you connect again. Theme mappings, ignore settings and the sync history are kept.`}
-      </s-paragraph>
-      <s-button slot="primary-action" variant="primary" tone="critical" loading={pending} onClick={onConfirm}>
+      </Paragraph>
+      <Button slot="primary-action" variant="primary" tone="critical" loading={pending} onClick={onConfirm}>
         Disconnect
-      </s-button>
-      <s-button slot="secondary-actions" onClick={onClose}>
+      </Button>
+      <Button slot="secondary-actions" onClick={onClose}>
         Cancel
-      </s-button>
-    </s-modal>
+      </Button>
+    </Modal>
   );
 }
 
@@ -219,12 +231,12 @@ export default function Settings() {
         }}
       />
 
-      <s-section heading="Repository">
-        <s-stack gap="base">
-          <s-paragraph color="subdued">
+      <Section heading="Repository">
+        <Stack gap="base">
+          <Paragraph color="subdued">
             The app syncs from one repository. Each branch is connected to its own theme on the Theme mapping page.
-          </s-paragraph>
-          <s-select
+          </Paragraph>
+          <Select
             label="Repository"
             value={repository || NONE}
             disabled={!connected || reposQuery.loading}
@@ -238,51 +250,51 @@ export default function Settings() {
             error={repoError ?? undefined}
             onChange={(event) => setRepository(event.currentTarget.value === NONE ? '' : event.currentTarget.value)}
           >
-            <s-option value={NONE}>No repository</s-option>
+            <Option value={NONE}>No repository</Option>
             {repos.map((r) => (
-              <s-option key={r.fullName} value={r.fullName}>
+              <Option key={r.fullName} value={r.fullName}>
                 {`${r.fullName}${r.private ? ' (private)' : ''}`}
-              </s-option>
+              </Option>
             ))}
             {repository && !repos.some((r) => r.fullName === repository) && (
-              <s-option value={repository}>{repository}</s-option>
+              <Option value={repository}>{repository}</Option>
             )}
-          </s-select>
+          </Select>
           {repository.trim() !== savedRepository && savedRepository && (
-            <s-banner tone="warning" heading="Changing the repository">
-              <s-paragraph>
+            <Banner tone="warning" heading="Changing the repository">
+              <Paragraph>
                 {`Mappings of ${savedRepository} stay as they are but cannot sync until you switch back. Their themes stay mapped, so remove those mappings first if you want to map the themes to the new repository.`}
-              </s-paragraph>
-            </s-banner>
+              </Paragraph>
+            </Banner>
           )}
           {repoInfo.data && repository.trim() === savedRepository && (
-            <s-box padding="small" background="subdued" borderRadius="base">
-              <s-stack direction="inline" gap="small-200" alignItems="center" justifyContent="space-between">
-                <s-stack direction="inline" gap="small-200" alignItems="center">
-                  <s-icon type="git-repository" />
-                  <s-text type="strong">{repoInfo.data.fullName}</s-text>
-                  <s-badge tone="neutral">{repoInfo.data.private ? 'Private' : 'Public'}</s-badge>
-                  <s-badge tone={repoInfo.data.permissions.push ? 'info' : 'neutral'}>
+            <Box padding="small" background="subdued" borderRadius="base">
+              <Stack direction="inline" gap="small-200" alignItems="center" justifyContent="space-between">
+                <Stack direction="inline" gap="small-200" alignItems="center">
+                  <Icon type="git-repository" />
+                  <Text type="strong">{repoInfo.data.fullName}</Text>
+                  <Badge tone="neutral">{repoInfo.data.private ? 'Private' : 'Public'}</Badge>
+                  <Badge tone={repoInfo.data.permissions.push ? 'info' : 'neutral'}>
                     {repoInfo.data.permissions.push ? 'Read & write' : 'Read only'}
-                  </s-badge>
-                  <s-text color="subdued">{`Default branch ${repoInfo.data.defaultBranch}`}</s-text>
-                </s-stack>
-                <s-link href={repoInfo.data.htmlUrl} target="_blank">
+                  </Badge>
+                  <Text color="subdued">{`Default branch ${repoInfo.data.defaultBranch}`}</Text>
+                </Stack>
+                <Link href={repoInfo.data.htmlUrl} target="_blank">
                   View on GitHub
-                </s-link>
-              </s-stack>
-            </s-box>
+                </Link>
+              </Stack>
+            </Box>
           )}
-        </s-stack>
-      </s-section>
+        </Stack>
+      </Section>
 
-      <s-section heading="Ignore files">
+      <Section heading="Ignore files">
         <IgnorePatternsEditor
           patterns={ignorePatterns}
           onChange={setIgnorePatterns}
           canPreview={connected && !!settings?.defaultRepository}
         />
-      </s-section>
+      </Section>
     </AppLayout>
   );
 }

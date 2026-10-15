@@ -1,6 +1,21 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { SyncPlanOperation, SyncPreview } from '../lib/types';
 import { syncTypeLabel, type Tone } from '../lib/format';
+import {
+  Badge,
+  Banner,
+  Button,
+  Checkbox,
+  Grid,
+  IndexTable,
+  IndexTableCell,
+  IndexTableRow,
+  Modal,
+  Paragraph,
+  Stack,
+  Text,
+  TextField,
+} from './ui';
 
 interface Props {
   open: boolean;
@@ -42,23 +57,15 @@ function actionBadge(op: SyncPlanOperation): { label: string; tone: Tone } {
 const MODAL_ID = 'confirm-sync-modal';
 
 /**
- * <s-modal> showing the previewed plan. Nothing is written until the user
+ * Modal showing the previewed plan. Nothing is written until the user
  * confirms. For the live theme the user must tick a checkbox AND type the
  * theme's exact name; the server enforces the same rule.
  */
 export function ConfirmSyncModal({ open, preview, submitting, error, onClose, onConfirm }: Props) {
-  const modalRef = useRef<HTMLElementTagNameMap['s-modal']>(null);
   const [ack, setAck] = useState(false);
   const [typedName, setTypedName] = useState('');
   const [showSkipped, setShowSkipped] = useState(false);
   const [acceptEdits, setAcceptEdits] = useState(false);
-
-  useEffect(() => {
-    const modal = modalRef.current;
-    if (!modal) return;
-    if (open) modal.showOverlay?.();
-    else modal.hideOverlay?.();
-  }, [open, preview]);
 
   useEffect(() => {
     if (!open) {
@@ -83,193 +90,190 @@ export function ConfirmSyncModal({ open, preview, submitting, error, onClose, on
     !!preview && writes > 0 && liveConfirmed && !codeBlocked && (!editsWarning || acceptEdits) && !submitting;
 
   return (
-    <s-modal id={MODAL_ID} ref={modalRef} size="large" heading="Review before updating" onHide={onClose}>
+    <Modal id={MODAL_ID} open={open} size="large" heading="Review before updating" onHide={onClose}>
       {preview && (
-        <s-stack gap="base">
+        <Stack gap="base">
           {error && (
-            <s-banner tone="critical" heading="Sync could not start">
-              <s-paragraph>{error}</s-paragraph>
-            </s-banner>
+            <Banner tone="critical" heading="Sync could not start">
+              <Paragraph>{error}</Paragraph>
+            </Banner>
           )}
           {live && (
-            <s-banner tone="warning" heading="This is your live theme">
-              <s-paragraph>
+            <Banner tone="warning" heading="This is your live theme">
+              <Paragraph>
                 Customers will see these changes immediately. Consider syncing to an unpublished copy first.
-              </s-paragraph>
-            </s-banner>
+              </Paragraph>
+            </Banner>
           )}
-          <s-grid gridTemplateColumns="9rem 1fr" gap="small-200">
-            <s-text color="subdued">Repository</s-text>
-            <s-text>{`${preview.repository} · ${preview.branch ?? '—'}`}</s-text>
-            <s-text color="subdued">Theme</s-text>
-            <s-text>
-              <s-text type="strong">{preview.theme.name}</s-text>
+          <Grid gridTemplateColumns="9rem 1fr" gap="small-200">
+            <Text color="subdued">Repository</Text>
+            <Text>{`${preview.repository} · ${preview.branch ?? '—'}`}</Text>
+            <Text color="subdued">Theme</Text>
+            <Text>
+              <Text type="strong">{preview.theme.name}</Text>
               {` · ID ${preview.theme.numericId}${preview.theme.isLive ? ' · live' : ''}`}
-            </s-text>
-            <s-text color="subdued">Sync type</s-text>
-            <s-text>{syncTypeLabel(preview.strategy)}</s-text>
-            <s-text color="subdued">Current</s-text>
-            <s-text>
+            </Text>
+            <Text color="subdued">Sync type</Text>
+            <Text>{syncTypeLabel(preview.strategy)}</Text>
+            <Text color="subdued">Current</Text>
+            <Text>
               {preview.base ? (
                 <>
-                  <s-text type="strong">{preview.base.shortSha}</s-text> {firstLine(preview.base.message)}
+                  <Text type="strong">{preview.base.shortSha}</Text> {firstLine(preview.base.message)}
                 </>
               ) : (
                 'No last synced commit on this branch'
               )}
-            </s-text>
-            <s-text color="subdued">Updating to</s-text>
-            <s-text>
-              <s-text type="strong">{preview.commit.sha.slice(0, 7)}</s-text> {firstLine(preview.commit.message)}
-            </s-text>
-          </s-grid>
+            </Text>
+            <Text color="subdued">Updating to</Text>
+            <Text>
+              <Text type="strong">{preview.commit.sha.slice(0, 7)}</Text> {firstLine(preview.commit.message)}
+            </Text>
+          </Grid>
 
-          <s-stack gap="small-300">
-            <s-text type="strong">{`Updates included (${preview.commitsIncluded.length})`}</s-text>
+          <Stack gap="small-300">
+            <Text type="strong">{`Updates included (${preview.commitsIncluded.length})`}</Text>
             {preview.commitsIncluded.map((c) => (
-              <s-text key={c.sha}>
-                <s-text type="strong">{c.shortSha}</s-text> {firstLine(c.message)}
-              </s-text>
+              <Text key={c.sha}>
+                <Text type="strong">{c.shortSha}</Text> {firstLine(c.message)}
+              </Text>
             ))}
-          </s-stack>
+          </Stack>
 
           {codeBlocked ? (
-            <s-banner tone="critical" heading="Code errors found — ask your developer to fix them">
+            <Banner tone="critical" heading="Code errors found — ask your developer to fix them">
               {preview.checks.code.issues.map((issue) => (
-                <s-paragraph key={`${issue.path}:${issue.line}:${issue.message}`}>
+                <Paragraph key={`${issue.path}:${issue.line}:${issue.message}`}>
                   {`${issue.path}${issue.line ? ` line ${issue.line}` : ''}: ${issue.message}`}
-                </s-paragraph>
+                </Paragraph>
               ))}
-            </s-banner>
+            </Banner>
           ) : null}
           {editsWarning && (
-            <s-banner tone="warning" heading="Files were edited directly in Shopify">
+            <Banner tone="warning" heading="Files were edited directly in Shopify">
               {preview.checks.directEdits.files.map((f) => (
-                <s-paragraph key={f.path}>
+                <Paragraph key={f.path}>
                   {`${f.path}${f.updatedAt ? ` was edited on ${new Date(f.updatedAt).toLocaleString()}` : ' was changed in Shopify'}.`}
-                </s-paragraph>
+                </Paragraph>
               ))}
-              <s-checkbox
+              <Checkbox
                 label="Replace these files with the repository version"
                 checked={acceptEdits}
                 onChange={(event) => setAcceptEdits(event.currentTarget.checked)}
               />
-            </s-banner>
+            </Banner>
           )}
           {!codeBlocked && !editsWarning && (
-            <s-banner tone="success">
-              <s-paragraph>
+            <Banner tone="success">
+              <Paragraph>
                 {`Checks passed — no problems found (code checked in ${preview.checks.code.filesChecked} file(s)${
                   preview.checks.directEdits.status === 'skipped' ? '' : ', no direct edits in Shopify'
                 }).`}
-              </s-paragraph>
-            </s-banner>
+              </Paragraph>
+            </Banner>
           )}
 
-          <s-text type="strong">
+          <Text type="strong">
             {`${writes} file(s) affected: ${preview.summary.creates} to create · ${preview.summary.updates} to update · ${preview.summary.deletes} to delete · ${preview.summary.skipped} skipped · ${preview.summary.ignored} ignored`}
-          </s-text>
+          </Text>
           {preview.conflicts.length > 0 && (
-            <s-banner
+            <Banner
               tone="warning"
               heading={`${preview.conflicts.length} file(s) overlap with commits that are not selected`}
             >
               {preview.conflicts.slice(0, 20).map((c) => (
-                <s-paragraph key={c}>{c}</s-paragraph>
+                <Paragraph key={c}>{c}</Paragraph>
               ))}
-              {preview.conflicts.length > 20 && (
-                <s-paragraph>{`and ${preview.conflicts.length - 20} more`}</s-paragraph>
-              )}
-            </s-banner>
+              {preview.conflicts.length > 20 && <Paragraph>{`and ${preview.conflicts.length - 20} more`}</Paragraph>}
+            </Banner>
           )}
 
           {preview.warnings
             .filter((w) => !w.startsWith('This is the LIVE theme'))
             .map((warning) => (
-              <s-banner key={warning} tone="info">
-                <s-paragraph>{warning}</s-paragraph>
-              </s-banner>
+              <Banner key={warning} tone="info">
+                <Paragraph>{warning}</Paragraph>
+              </Banner>
             ))}
 
-          <s-stack direction="inline" gap="small-200">
-            <s-badge tone="success">{`${preview.summary.creates} create`}</s-badge>
-            <s-badge tone="caution">{`${preview.summary.updates} update`}</s-badge>
-            <s-badge tone="critical">{`${preview.summary.deletes} delete`}</s-badge>
-            <s-badge tone="neutral">{`${preview.summary.skipped} skipped`}</s-badge>
-          </s-stack>
+          <Stack direction="inline" gap="small-200">
+            <Badge tone="success">{`${preview.summary.creates} create`}</Badge>
+            <Badge tone="caution">{`${preview.summary.updates} update`}</Badge>
+            <Badge tone="critical">{`${preview.summary.deletes} delete`}</Badge>
+            <Badge tone="neutral">{`${preview.summary.skipped} skipped`}</Badge>
+          </Stack>
 
-          <s-paragraph color="subdued">
-            Repository <s-text type="strong">{preview.repository}</s-text> at commit{' '}
-            <s-text type="strong">{preview.commit.sha}</s-text> · push {STRATEGY_LABEL[preview.strategy]} · preview
-            valid until {new Date(preview.expiresAt).toLocaleTimeString()}
-          </s-paragraph>
+          <Paragraph color="subdued">
+            Repository <Text type="strong">{preview.repository}</Text> at commit{' '}
+            <Text type="strong">{preview.commit.sha}</Text> · push {STRATEGY_LABEL[preview.strategy]} · preview valid
+            until {new Date(preview.expiresAt).toLocaleTimeString()}
+          </Paragraph>
 
           {writes === 0 && (
-            <s-banner tone="info" heading="Nothing to apply">
-              <s-paragraph>
+            <Banner tone="info" heading="Nothing to apply">
+              <Paragraph>
                 No file in the pushed commits maps to a writable theme file with the current settings.
-              </s-paragraph>
-            </s-banner>
+              </Paragraph>
+            </Banner>
           )}
 
-          <s-stack gap="small-200">
-            <s-stack direction="inline" gap="small-200" alignItems="center" justifyContent="space-between">
-              <s-text type="strong">{`Files (${operations.length})`}</s-text>
-              <s-checkbox
+          <Stack gap="small-200">
+            <Stack direction="inline" gap="small-200" alignItems="center" justifyContent="space-between">
+              <Text type="strong">{`Files (${operations.length})`}</Text>
+              <Checkbox
                 label="Show skipped files"
                 checked={showSkipped}
                 onChange={(event) => setShowSkipped(event.currentTarget.checked)}
               />
-            </s-stack>
+            </Stack>
 
-            <s-table variant="auto">
-              <s-table-header-row>
-                <s-table-header listSlot="kicker">Action</s-table-header>
-                <s-table-header listSlot="primary">Theme file</s-table-header>
-                <s-table-header listSlot="secondary">Details</s-table-header>
-              </s-table-header-row>
-              <s-table-body>
-                {operations.map((op) => {
-                  const badge = actionBadge(op);
-                  return (
-                    <s-table-row key={op.path}>
-                      <s-table-cell>
-                        <s-badge tone={badge.tone}>{badge.label}</s-badge>
-                      </s-table-cell>
-                      <s-table-cell>{op.path}</s-table-cell>
-                      <s-table-cell>
-                        <s-text color="subdued">
-                          {op.skipReason ?? (op.previousPath ? `renamed from ${op.previousPath}` : op.changeType)}
-                          {fromCommits(op) ? ` · ${fromCommits(op)}` : ''}
-                        </s-text>
-                      </s-table-cell>
-                    </s-table-row>
-                  );
-                })}
-              </s-table-body>
-            </s-table>
-          </s-stack>
+            <IndexTable
+              variant="auto"
+              columns={[
+                { title: 'Action', listSlot: 'kicker' },
+                { title: 'Theme file', listSlot: 'primary' },
+                { title: 'Details', listSlot: 'secondary' },
+              ]}
+              rows={operations.map((op) => {
+                const badge = actionBadge(op);
+                return (
+                  <IndexTableRow key={op.path}>
+                    <IndexTableCell>
+                      <Badge tone={badge.tone}>{badge.label}</Badge>
+                    </IndexTableCell>
+                    <IndexTableCell>{op.path}</IndexTableCell>
+                    <IndexTableCell>
+                      <Text color="subdued">
+                        {op.skipReason ?? (op.previousPath ? `renamed from ${op.previousPath}` : op.changeType)}
+                        {fromCommits(op) ? ` · ${fromCommits(op)}` : ''}
+                      </Text>
+                    </IndexTableCell>
+                  </IndexTableRow>
+                );
+              })}
+            />
+          </Stack>
 
           {live && (
-            <s-stack gap="small-200">
-              <s-checkbox
+            <Stack gap="small-200">
+              <Checkbox
                 label="I understand this modifies the live storefront theme"
                 checked={ack}
                 onChange={(event) => setAck(event.currentTarget.checked)}
               />
-              <s-text-field
+              <TextField
                 label={`Type the theme name "${preview.theme.name}" to confirm`}
                 value={typedName}
                 autocomplete="off"
                 disabled={!ack}
                 onInput={(event) => setTypedName(event.currentTarget.value)}
               />
-            </s-stack>
+            </Stack>
           )}
-        </s-stack>
+        </Stack>
       )}
 
-      <s-button
+      <Button
         slot="primary-action"
         variant="primary"
         tone={live || (preview?.summary.deletes ?? 0) > 0 ? 'critical' : 'auto'}
@@ -283,10 +287,10 @@ export function ConfirmSyncModal({ open, preview, submitting, error, onClose, on
         }
       >
         {live ? 'Confirm & Sync live theme' : 'Confirm & Sync'}
-      </s-button>
-      <s-button slot="secondary-actions" disabled={submitting} onClick={onClose}>
+      </Button>
+      <Button slot="secondary-actions" disabled={submitting} onClick={onClose}>
         Cancel
-      </s-button>
-    </s-modal>
+      </Button>
+    </Modal>
   );
 }

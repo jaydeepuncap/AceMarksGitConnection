@@ -4,7 +4,7 @@ import { showToast } from '../lib/app-bridge';
 import { useMutation } from '../lib/hooks';
 import type { ShopifyTheme, SyncPreview, ThemeMapping } from '../lib/types';
 import { ErrorBanner } from './ErrorBanner';
-import { Button, Modal, Option, Paragraph, Select, Stack } from './ui';
+import { Button, Checkbox, List, Modal, Option, Paragraph, Select, Stack } from './ui';
 import { ConfirmModal } from './Common/ConfirmModal';
 
 const NONE = '__none__';
@@ -49,28 +49,28 @@ export function FullSyncControls({
     if (result) onPreview(result);
   };
   return (
-    <s-stack gap="base">
-      <s-paragraph>{`Makes ${mapping.themeName} match the newest commit on ${mapping.branch}.`}</s-paragraph>
-      <s-unordered-list>
-        <s-list-item>Use it for the first sync, or to start over. Afterwards, sync only new commits.</s-list-item>
-        <s-list-item>
-          Every theme file in the repository is compared with the theme; you review the changes first.
-        </s-list-item>
-        <s-list-item>Ignored files are never touched; files identical in the theme are not rewritten.</s-list-item>
-      </s-unordered-list>
-      <s-checkbox
+    <Stack gap="base">
+      <Paragraph>{`Makes ${mapping.themeName} match the newest commit on ${mapping.branch}.`}</Paragraph>
+      <List
+        items={[
+          'Use it for the first sync, or to start over. Afterwards, sync only new commits.',
+          'Every theme file in the repository is compared with the theme; you review the changes first.',
+          'Ignored files are never touched; files identical in the theme are not rewritten.',
+        ]}
+      />
+      <Checkbox
         label="Delete theme files that are not in the repository"
         details="Off by default. The review lists every file that would be deleted; protected and ignored files never are."
         checked={allowDeletes}
         onChange={(event) => setAllowDeletes(event.currentTarget.checked)}
       />
       <ErrorBanner error={preview.error} heading="Full sync could not be prepared" onDismiss={preview.clearError} />
-      <s-stack direction="inline">
-        <s-button variant="secondary" disabled={disabled} loading={preview.pending} onClick={run}>
+      <Stack direction="inline">
+        <Button variant="secondary" disabled={disabled} loading={preview.pending} onClick={run}>
           Review full sync
-        </s-button>
-      </s-stack>
-    </s-stack>
+        </Button>
+      </Stack>
+    </Stack>
   );
 }
 

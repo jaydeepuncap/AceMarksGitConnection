@@ -5,7 +5,20 @@ import { ErrorBanner } from '../components/ErrorBanner';
 import { LoadingState } from '../components/LoadingState';
 import { themeLabel } from '../components/MappingControls';
 import { BranchThemeTitle, Card, CardSection, KeyValue, StatusBadge } from '../components/Common';
-import { Button, Modal, Paragraph, Stack, Text } from '../components/ui';
+import {
+  Badge,
+  Banner,
+  Button,
+  Grid,
+  Icon,
+  Modal,
+  Option,
+  Paragraph,
+  Section,
+  Select,
+  Stack,
+  Text,
+} from '../components/ui';
 import { api } from '../lib/api-client';
 import { showToast } from '../lib/app-bridge';
 import { firstLine, formatDate, mappingStatus, RESULT_BADGE, syncTypeLabel } from '../lib/format';
@@ -61,7 +74,7 @@ function MappingCard({
       accessibilityLabel={`Open ${mapping.branch} → ${mapping.themeName}`}
     >
       <CardSection>
-        <s-stack direction="inline" gap="small-200" alignItems="center" justifyContent="space-between">
+        <Stack direction="inline" gap="small-200" alignItems="center" justifyContent="space-between">
           <BranchThemeTitle
             heading
             branch={mapping.branch}
@@ -70,42 +83,42 @@ function MappingCard({
             themeMissing={themesLoaded && !theme}
           />
           <StatusBadge status={status.key} label={status.label} />
-        </s-stack>
+        </Stack>
       </CardSection>
       <CardSection subdued>
-        <s-grid gridTemplateColumns="repeat(auto-fit, minmax(260px, 1fr))" gap="large">
+        <Grid gridTemplateColumns="repeat(auto-fit, minmax(260px, 1fr))" gap="large">
           <KeyValue label="Theme is on">
-            <s-text>
+            <Text>
               {lastSynced
                 ? `${lastSynced.shortSha} · ${firstLine(lastSynced.message)}`
                 : checking
                   ? '…'
                   : 'No commit synced yet'}
-            </s-text>
+            </Text>
           </KeyValue>
           <KeyValue label="Last sync">
             {run && result ? (
-              <s-stack direction="inline" gap="small-200" alignItems="center">
-                <s-badge tone={result.tone}>{result.label}</s-badge>
-                <s-text>{`${syncTypeLabel(run.strategy)} · ${formatDate(run.completedAt)}`}</s-text>
-              </s-stack>
+              <Stack direction="inline" gap="small-200" alignItems="center">
+                <Badge tone={result.tone}>{result.label}</Badge>
+                <Text>{`${syncTypeLabel(run.strategy)} · ${formatDate(run.completedAt)}`}</Text>
+              </Stack>
             ) : lastSynced ? (
               // The commit was recorded from the theme's sync file (e.g. a copied theme), not by a sync here.
-              <s-text>{`Not synced from this app yet · recorded from the theme file ${formatDate(lastSynced.syncedAt)}`}</s-text>
+              <Text>{`Not synced from this app yet · recorded from the theme file ${formatDate(lastSynced.syncedAt)}`}</Text>
             ) : (
-              <s-text>{checking ? '…' : 'No sync performed yet'}</s-text>
+              <Text>{checking ? '…' : 'No sync performed yet'}</Text>
             )}
           </KeyValue>
-        </s-grid>
+        </Grid>
       </CardSection>
       <CardSection>
-        <s-stack direction="inline" gap="small-200" alignItems="center" justifyContent="space-between">
-          <s-text color="subdued">{`Theme ID ${mapping.themeId.split('/').pop()} · mapped ${formatDate(mapping.createdAt)}`}</s-text>
-          <s-stack direction="inline" gap="small-100" alignItems="center">
-            <s-text type="strong">{next}</s-text>
-            <s-icon type="chevron-right" />
-          </s-stack>
-        </s-stack>
+        <Stack direction="inline" gap="small-200" alignItems="center" justifyContent="space-between">
+          <Text color="subdued">{`Theme ID ${mapping.themeId.split('/').pop()} · mapped ${formatDate(mapping.createdAt)}`}</Text>
+          <Stack direction="inline" gap="small-100" alignItems="center">
+            <Text type="strong">{next}</Text>
+            <Icon type="chevron-right" />
+          </Stack>
+        </Stack>
       </CardSection>
     </Card>
   );
@@ -145,14 +158,14 @@ export default function ThemeMapping() {
   if (!repository || !connected) {
     return (
       <AppLayout title="Theme mapping">
-        <s-section heading="Connect a repository first">
-          <s-paragraph>
+        <Section heading="Connect a repository first">
+          <Paragraph>
             Connect GitHub and choose a repository in Settings, then map its branches to themes here.
-          </s-paragraph>
-          <s-button slot="secondary-actions" variant="primary" onClick={go('/settings')}>
+          </Paragraph>
+          <Button slot="secondary-actions" variant="primary" onClick={go('/settings')}>
             Open settings
-          </s-button>
-        </s-section>
+          </Button>
+        </Section>
       </AppLayout>
     );
   }
@@ -235,36 +248,36 @@ export default function ThemeMapping() {
           />
           <ErrorBanner error={themes.error} heading="Themes could not be loaded" onRetry={themes.reload} />
           {settings.data && !settings.data.shop.canWriteThemes && (
-            <s-banner tone="warning" heading="Theme write access not granted">
-              <s-paragraph>
+            <Banner tone="warning" heading="Theme write access not granted">
+              <Paragraph>
                 The app can list themes but cannot change their files until the write_themes scope is granted.
-              </s-paragraph>
-            </s-banner>
+              </Paragraph>
+            </Banner>
           )}
           <ErrorBanner error={branches.error} heading="Branches could not be loaded" onRetry={branches.reload} />
           {addBlocked && !adding && (
-            <s-banner tone="info" heading={`${addBlocked.heading} — Add mapping is unavailable`}>
-              <s-paragraph>{addBlocked.text}</s-paragraph>
-            </s-banner>
+            <Banner tone="info" heading={`${addBlocked.heading} — Add mapping is unavailable`}>
+              <Paragraph>{addBlocked.text}</Paragraph>
+            </Banner>
           )}
         </>
       }
     >
       {repoItems.length === 0 && (
-        <s-section heading="Map your first branch">
-          <s-stack gap="base">
-            <s-paragraph>
+        <Section heading="Map your first branch">
+          <Stack gap="base">
+            <Paragraph>
               Connect a branch of {repository} to the Shopify theme it should update — for example{' '}
-              <s-text type="strong">main → Live theme</s-text> and <s-text type="strong">staging → Staging copy</s-text>
-              . Nothing in the theme changes until you sync.
-            </s-paragraph>
-            <s-stack direction="inline">
-              <s-button variant="primary" icon="plus" disabled={nothingFree} onClick={() => setAdding(true)}>
+              <Text type="strong">main → Live theme</Text> and <Text type="strong">staging → Staging copy</Text>.
+              Nothing in the theme changes until you sync.
+            </Paragraph>
+            <Stack direction="inline">
+              <Button variant="primary" icon="plus" disabled={nothingFree} onClick={() => setAdding(true)}>
                 Add mapping
-              </s-button>
-            </s-stack>
-          </s-stack>
-        </s-section>
+              </Button>
+            </Stack>
+          </Stack>
+        </Section>
       )}
 
       <Modal id="add-mapping" open={adding} heading="Add a mapping" onHide={closeAdd}>
@@ -274,16 +287,16 @@ export default function ThemeMapping() {
             branch only. Nothing in the theme changes until you sync.
           </Paragraph>
           {nothingFree ? (
-            <s-banner tone="info">
-              <s-paragraph>
+            <Banner tone="info">
+              <Paragraph>
                 {freeBranches.length === 0
                   ? 'Every branch is already mapped. Remove or change a mapping to free a branch.'
                   : 'Every theme that can be synced is already mapped. Remove or change a mapping to free a theme, or duplicate a theme in Shopify.'}
-              </s-paragraph>
-            </s-banner>
+              </Paragraph>
+            </Banner>
           ) : (
             <>
-              <s-select
+              <Select
                 label="Branch"
                 value={newBranch || NONE}
                 details={
@@ -293,35 +306,35 @@ export default function ThemeMapping() {
                 }
                 onChange={(event) => setNewBranch(event.currentTarget.value === NONE ? '' : event.currentTarget.value)}
               >
-                <s-option value={NONE}>Select a branch</s-option>
+                <Option value={NONE}>Select a branch</Option>
                 {branchList.map((b) => {
                   const m = mappingForBranch(b.name);
                   return (
-                    <s-option key={b.name} value={b.name} disabled={!!m}>
+                    <Option key={b.name} value={b.name} disabled={!!m}>
                       {`${b.name}${m ? ` — mapped to ${m.themeName}` : ''}`}
-                    </s-option>
+                    </Option>
                   );
                 })}
                 {newBranch && !branchList.some((b) => b.name === newBranch) && (
-                  <s-option value={newBranch}>{newBranch}</s-option>
+                  <Option value={newBranch}>{newBranch}</Option>
                 )}
-              </s-select>
-              <s-select
+              </Select>
+              <Select
                 label="Shopify theme"
                 value={newThemeId || NONE}
                 details={themes.loading ? 'Loading themes…' : `${freeThemes.length} of ${allThemes.length} themes free`}
                 onChange={(event) => setNewThemeId(event.currentTarget.value === NONE ? '' : event.currentTarget.value)}
               >
-                <s-option value={NONE}>Select a theme</s-option>
+                <Option value={NONE}>Select a theme</Option>
                 {allThemes.map((t) => {
                   const reason = themeBlocked(t);
                   return (
-                    <s-option key={t.id} value={t.id} disabled={!!reason}>
+                    <Option key={t.id} value={t.id} disabled={!!reason}>
                       {`${themeLabel(t)}${reason ? ` — ${reason}` : ''}`}
-                    </s-option>
+                    </Option>
                   );
                 })}
-              </s-select>
+              </Select>
             </>
           )}
           <ErrorBanner error={create.error} heading="Mapping not added" onDismiss={create.clearError} />
@@ -356,17 +369,17 @@ export default function ThemeMapping() {
       )}
 
       {otherRepoItems.length > 0 && (
-        <s-section heading="Mappings of other repositories">
-          <s-stack gap="small-200">
-            <s-paragraph color="subdued">
+        <Section heading="Mappings of other repositories">
+          <Stack gap="small-200">
+            <Paragraph color="subdued">
               These themes are mapped to another repository and cannot be used here until that mapping is removed
               (select that repository in Settings to manage them).
-            </s-paragraph>
+            </Paragraph>
             {otherRepoItems.map((m) => (
-              <s-text key={m.id}>{`${m.repository} · ${m.branch} → ${m.themeName}`}</s-text>
+              <Text key={m.id}>{`${m.repository} · ${m.branch} → ${m.themeName}`}</Text>
             ))}
-          </s-stack>
-        </s-section>
+          </Stack>
+        </Section>
       )}
     </AppLayout>
   );

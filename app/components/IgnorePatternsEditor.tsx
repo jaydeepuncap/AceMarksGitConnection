@@ -4,8 +4,15 @@ import { api } from '../lib/api-client';
 import { useMutation } from '../lib/hooks';
 import type { IgnorePreviewResponse } from '../lib/types';
 import { ErrorBanner } from './ErrorBanner';
+import { Button, Grid, Paragraph, Stack, Text, TextField } from './ui';
 
-const EXAMPLES = ['config/settings_data.json', 'assets/development.js', 'templates/*.json', 'sections/development-section.liquid', 'locales/'];
+const EXAMPLES = [
+  'config/settings_data.json',
+  'assets/development.js',
+  'templates/*.json',
+  'sections/development-section.liquid',
+  'locales/',
+];
 
 /**
  * Add / edit / remove ignore patterns. Ignored files are never uploaded,
@@ -53,29 +60,31 @@ export function IgnorePatternsEditor({
   const matchFor = (pattern: string) => result?.patterns.find((m) => m.pattern === pattern.trim());
 
   return (
-    <s-stack gap="base">
-      <s-paragraph color="subdued">
+    <Stack gap="base">
+      <Paragraph color="subdued">
         Files and folders listed here are never uploaded, changed or deleted in Shopify — by a full sync, a single
-        commit or several commits. Use theme paths, for example {EXAMPLES.map((e, i) => (
+        commit or several commits. Use theme paths, for example{' '}
+        {EXAMPLES.map((e, i) => (
           <span key={e}>
-            <s-text type="strong">{e}</s-text>
+            <Text type="strong">{e}</Text>
             {i < EXAMPLES.length - 1 ? ', ' : '.'}
           </span>
         ))}{' '}
-        <s-text type="strong">*</s-text> matches within a folder, <s-text type="strong">**</s-text> across folders, and
-        a trailing <s-text type="strong">/</s-text> means everything inside the folder.
-      </s-paragraph>
+        <Text type="strong">*</Text> matches within a folder, <Text type="strong">**</Text> across folders, and a
+        trailing <Text type="strong">/</Text> means everything inside the folder.
+      </Paragraph>
 
       {patterns.length === 0 ? (
-        <s-text color="subdued">No files are ignored: every theme file in the repository can be synced.</s-text>
+        <Text color="subdued">No files are ignored: every theme file in the repository can be synced.</Text>
       ) : (
-        <s-stack gap="small-200">
+        <Stack gap="small-200">
           {patterns.map((pattern, index) => {
-            const error = ignorePatternError(pattern) ?? (patterns.indexOf(pattern) !== index ? 'Already in the list' : null);
+            const error =
+              ignorePatternError(pattern) ?? (patterns.indexOf(pattern) !== index ? 'Already in the list' : null);
             const match = matchFor(pattern);
             return (
-              <s-grid key={index} gridTemplateColumns="minmax(0, 1fr) auto" gap="small-200" alignItems="start">
-                <s-text-field
+              <Grid key={index} gridTemplateColumns="minmax(0, 1fr) auto" gap="small-200" alignItems="start">
+                <TextField
                   label={`Ignore pattern ${index + 1}`}
                   labelAccessibilityVisibility="exclusive"
                   value={pattern}
@@ -84,22 +93,29 @@ export function IgnorePatternsEditor({
                     error
                       ? undefined
                       : `${describeIgnorePattern(pattern)}${
-                          match ? ` · ${match.matches} file(s) on ${result!.branch}${match.examples.length ? `: ${match.examples.join(', ')}${match.matches > match.examples.length ? ', …' : ''}` : ''}` : ''
+                          match
+                            ? ` · ${match.matches} file(s) on ${result!.branch}${match.examples.length ? `: ${match.examples.join(', ')}${match.matches > match.examples.length ? ', …' : ''}` : ''}`
+                            : ''
                         }`
                   }
                   onInput={(event) => update(index, event.currentTarget.value)}
                 />
-                <s-button variant="tertiary" tone="critical" accessibilityLabel={`Remove ${pattern}`} onClick={() => remove(index)}>
+                <Button
+                  variant="tertiary"
+                  tone="critical"
+                  accessibilityLabel={`Remove ${pattern}`}
+                  onClick={() => remove(index)}
+                >
                   Remove
-                </s-button>
-              </s-grid>
+                </Button>
+              </Grid>
             );
           })}
-        </s-stack>
+        </Stack>
       )}
 
-      <s-grid gridTemplateColumns="minmax(0, 1fr) auto" gap="small-200" alignItems="end">
-        <s-text-field
+      <Grid gridTemplateColumns="minmax(0, 1fr) auto" gap="small-200" alignItems="end">
+        <TextField
           label="Add a file, folder or pattern"
           placeholder="e.g. templates/*.json or locales/"
           value={draft}
@@ -107,23 +123,28 @@ export function IgnorePatternsEditor({
           details={draft.trim() && !ignorePatternError(draft) ? describeIgnorePattern(draft) : undefined}
           onInput={(event) => setDraft(event.currentTarget.value)}
         />
-        <s-button disabled={patterns.length >= MAX_IGNORE_PATTERNS} onClick={add}>
+        <Button disabled={patterns.length >= MAX_IGNORE_PATTERNS} onClick={add}>
           Add
-        </s-button>
-      </s-grid>
+        </Button>
+      </Grid>
 
-      <s-stack direction="inline" gap="small-200" alignItems="center">
-        <s-button variant="secondary" disabled={!canPreview || patterns.length === 0} loading={preview.pending} onClick={check}>
+      <Stack direction="inline" gap="small-200" alignItems="center">
+        <Button
+          variant="secondary"
+          disabled={!canPreview || patterns.length === 0}
+          loading={preview.pending}
+          onClick={check}
+        >
           Check matching files
-        </s-button>
+        </Button>
         {result && (
-          <s-text color="subdued">
+          <Text color="subdued">
             {`${result.ignoredFiles} of ${result.themeFiles} theme files on ${result.repository} · ${result.branch} are ignored`}
-          </s-text>
+          </Text>
         )}
-        {!canPreview && <s-text color="subdued">Select a repository to check which files match.</s-text>}
-      </s-stack>
+        {!canPreview && <Text color="subdued">Select a repository to check which files match.</Text>}
+      </Stack>
       <ErrorBanner error={preview.error} heading="Matching files could not be checked" onDismiss={preview.clearError} />
-    </s-stack>
+    </Stack>
   );
 }

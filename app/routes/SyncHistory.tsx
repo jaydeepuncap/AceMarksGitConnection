@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { AppLayout } from '../components/AppLayout';
 import { ConfirmSyncModal } from '../components/ConfirmSyncModal';
@@ -10,6 +10,26 @@ import { firstLine, formatDate, SYNC_STATUS_BADGE, syncTypeLabel, themeFileLabel
 import { useApiQuery, useMutation } from '../lib/hooks';
 import type { SyncOperation, SyncPreview, SyncStatus, SyncStrategy } from '../lib/types';
 import type { Tone } from '../lib/format';
+import {
+  Badge,
+  Banner,
+  Box,
+  Button,
+  Checkbox,
+  Grid,
+  IndexTable,
+  IndexTableCell,
+  IndexTableRow,
+  Modal,
+  Option,
+  Paragraph,
+  ProgressBar,
+  Section,
+  Select,
+  Stack,
+  Text,
+  TextField,
+} from '../components/ui';
 
 const PER_PAGE = 20;
 const POLL_MS = 2000;
@@ -47,29 +67,24 @@ function ConfirmActionModal({
   onClose: () => void;
   onConfirm: (name?: string) => void;
 }) {
-  const ref = useRef<HTMLElementTagNameMap['s-modal']>(null);
   const [name, setName] = useState('');
   useEffect(() => {
-    if (open) ref.current?.showOverlay?.();
-    else {
-      ref.current?.hideOverlay?.();
-      setName('');
-    }
+    if (!open) setName('');
   }, [open]);
   return (
-    <s-modal ref={ref} id="confirm-action-modal" heading={heading} onHide={onClose}>
-      <s-stack gap="base">
-        <s-paragraph>{message}</s-paragraph>
+    <Modal id="confirm-action-modal" open={open} heading={heading} onHide={onClose}>
+      <Stack gap="base">
+        <Paragraph>{message}</Paragraph>
         {requireName && (
-          <s-text-field
+          <TextField
             label={`This is your live theme. Type "${themeName}" to confirm`}
             value={name}
             autocomplete="off"
             onInput={(event) => setName(event.currentTarget.value)}
           />
         )}
-      </s-stack>
-      <s-button
+      </Stack>
+      <Button
         slot="primary-action"
         variant="primary"
         tone="critical"
@@ -78,11 +93,11 @@ function ConfirmActionModal({
         onClick={() => onConfirm(requireName ? name : undefined)}
       >
         {actionLabel}
-      </s-button>
-      <s-button slot="secondary-actions" onClick={onClose}>
+      </Button>
+      <Button slot="secondary-actions" onClick={onClose}>
         Cancel
-      </s-button>
-    </s-modal>
+      </Button>
+    </Modal>
   );
 }
 
@@ -207,15 +222,15 @@ function SyncDetail({ id, onBack, onOpen }: { id: string; onBack: () => void; on
             onDismiss={rerunPreview.clearError}
           />
           {data?.errorDetails && !incomplete && (
-            <s-banner tone="critical" heading={data.errorDetails.code}>
-              <s-paragraph>{data.errorDetails.message}</s-paragraph>
-            </s-banner>
+            <Banner tone="critical" heading={data.errorDetails.code}>
+              <Paragraph>{data.errorDetails.message}</Paragraph>
+            </Banner>
           )}
         </>
       }
     >
       {data && active && (
-        <s-banner
+        <Banner
           tone="info"
           heading={
             data.status === 'queued'
@@ -223,209 +238,207 @@ function SyncDetail({ id, onBack, onOpen }: { id: string; onBack: () => void; on
               : `Updating ${data.themeName} · ${done} of ${data.filesChanged} files`
           }
         >
-          <s-stack gap="small-200">
-            <s-progress accessibilityLabel="Update progress" max={Math.max(1, data.filesChanged)} value={done} />
-            <s-paragraph>
+          <Stack gap="small-200">
+            <ProgressBar progress={(done / Math.max(1, data.filesChanged)) * 100} tone="info" />
+            <Paragraph>
               {`${Math.round((done / Math.max(1, data.filesChanged)) * 100)}% · ${data.filesSucceeded} updated${data.filesFailed ? ` · ${data.filesFailed} failed` : ''}${data.backedUp ? ` · ${data.backedUp} backed up first` : ''}`}
-            </s-paragraph>
-            <s-text color="subdued">
+            </Paragraph>
+            <Text color="subdued">
               Each file is backed up right before it changes. You can leave this page; the update continues in the
               background.
-            </s-text>
-          </s-stack>
-        </s-banner>
+            </Text>
+          </Stack>
+        </Banner>
       )}
       {data?.status === 'succeeded' && (
-        <s-banner tone="success" heading="Update complete">
-          <s-paragraph>{`Files: ${data.filesSucceeded} of ${data.filesChanged} updated${data.backedUp ? ` · backup of ${data.backedUp} file(s) saved first` : ''}`}</s-paragraph>
-          <s-paragraph>{`${data.themeName} is now on ${data.commitSha.slice(0, 7)} ${firstLine(data.commitMessage)}`}</s-paragraph>
-          <s-paragraph color="subdued">
+        <Banner tone="success" heading="Update complete">
+          <Paragraph>{`Files: ${data.filesSucceeded} of ${data.filesChanged} updated${data.backedUp ? ` · backup of ${data.backedUp} file(s) saved first` : ''}`}</Paragraph>
+          <Paragraph>{`${data.themeName} is now on ${data.commitSha.slice(0, 7)} ${firstLine(data.commitMessage)}`}</Paragraph>
+          <Paragraph color="subdued">
             {data.themeRole === 'MAIN'
               ? 'Customers see the update now.'
               : 'Preview the theme in Shopify. When you are happy with it, publish it in Shopify as usual — Theme Sync never publishes a theme on its own.'}
-          </s-paragraph>
-        </s-banner>
+          </Paragraph>
+        </Banner>
       )}
       {data && incomplete && (
-        <s-section accessibilityLabel="Update result">
-          <s-stack gap="base">
+        <Section accessibilityLabel="Update result">
+          <Stack gap="base">
             {data.restoredAt ? (
-              <s-banner tone="info" heading="Backup restored">
-                <s-paragraph>
+              <Banner tone="info" heading="Backup restored">
+                <Paragraph>
                   {`${data.themeName} is back exactly as it was before this update (${data.restoredFiles} file(s), ${formatDate(data.restoredAt)}). Run the full update again when you are ready.`}
-                </s-paragraph>
-              </s-banner>
+                </Paragraph>
+              </Banner>
             ) : (
-              <s-banner
+              <Banner
                 tone="critical"
                 heading={`Update incomplete · ${data.filesSucceeded} of ${data.filesChanged} files updated`}
               >
-                <s-paragraph>
+                <Paragraph>
                   The theme is not marked as updated until every file succeeds.
                   {data.errorDetails && data.errorDetails.code !== 'FILES_FAILED'
                     ? ` ${data.errorDetails.message}`
                     : ''}
-                </s-paragraph>
-              </s-banner>
+                </Paragraph>
+              </Banner>
             )}
 
             {failed.length > 0 && (
-              <s-stack gap="small-200">
+              <Stack gap="small-200">
                 {failed.map((op) => (
-                  <s-grid
+                  <Grid
                     key={op.id}
                     gridTemplateColumns="minmax(0, 1fr) minmax(0, 1.4fr)"
                     gap="small-200"
                     alignItems="start"
                   >
-                    <s-stack gap="none">
-                      <s-text type="strong">
-                        <s-text tone="critical">×</s-text> {themeFileLabel(op.path)}
-                      </s-text>
-                      <s-text color="subdued">{op.path}</s-text>
-                    </s-stack>
-                    <s-stack gap="none">
-                      <s-text>{op.failure?.reason ?? 'Could not be updated'}</s-text>
-                      {op.failure?.detail && <s-text color="subdued">{op.failure.detail}</s-text>}
-                    </s-stack>
-                  </s-grid>
+                    <Stack gap="none">
+                      <Text type="strong">
+                        <Text tone="critical">×</Text> {themeFileLabel(op.path)}
+                      </Text>
+                      <Text color="subdued">{op.path}</Text>
+                    </Stack>
+                    <Stack gap="none">
+                      <Text>{op.failure?.reason ?? 'Could not be updated'}</Text>
+                      {op.failure?.detail && <Text color="subdued">{op.failure.detail}</Text>}
+                    </Stack>
+                  </Grid>
                 ))}
-              </s-stack>
+              </Stack>
             )}
 
-            <s-text>
+            <Text>
               {`${data.themeName} remains on `}
-              <s-text type="strong">{data.baseSha ? data.baseSha.slice(0, 7) : 'its previous version'}</s-text>
-              <s-text color="subdued">{data.baseSha ? ' (its last synced commit)' : ''}</s-text>
-            </s-text>
+              <Text type="strong">{data.baseSha ? data.baseSha.slice(0, 7) : 'its previous version'}</Text>
+              <Text color="subdued">{data.baseSha ? ' (its last synced commit)' : ''}</Text>
+            </Text>
 
-            <s-stack direction="inline" gap="small-200" justifyContent="end">
+            <Stack direction="inline" gap="small-200" justifyContent="end">
               {!data.restoredAt && (
-                <s-button
+                <Button
                   disabled={!data.canRestore}
                   loading={restore.pending}
                   onClick={() => setConfirmAction('restore')}
                 >
                   Restore Backup
-                </s-button>
+                </Button>
               )}
-              <s-button loading={rerunPreview.pending} onClick={doRerun}>
+              <Button loading={rerunPreview.pending} onClick={doRerun}>
                 Run Full Update Again
-              </s-button>
+              </Button>
               {!data.restoredAt && (
-                <s-button
+                <Button
                   variant="primary"
                   disabled={!data.canRetry || !retryHelps}
                   loading={retry.pending}
                   onClick={() => (live ? setConfirmAction('retry') : doRetry())}
                 >
                   Retry Failed Files
-                </s-button>
+                </Button>
               )}
-            </s-stack>
+            </Stack>
             {!retryHelps && !data.restoredAt && (
-              <s-text color="subdued">
+              <Text color="subdued">
                 Every failed file has a code error: ask your developer to fix it, then apply the new update.
-              </s-text>
+              </Text>
             )}
 
-            <s-table variant="auto">
-              <s-table-header-row>
-                <s-table-header listSlot="primary">Option</s-table-header>
-                <s-table-header listSlot="secondary">When to use it</s-table-header>
-              </s-table-header-row>
-              <s-table-body>
-                {INCOMPLETE_OPTIONS.map((o) => (
-                  <s-table-row key={o.option}>
-                    <s-table-cell>
-                      <s-text type="strong">{o.option}</s-text>
-                    </s-table-cell>
-                    <s-table-cell>{o.when}</s-table-cell>
-                  </s-table-row>
-                ))}
-              </s-table-body>
-            </s-table>
-            <s-banner tone="info">
-              <s-paragraph>Temporary issues are usually retried automatically before you see any message.</s-paragraph>
-            </s-banner>
-          </s-stack>
-        </s-section>
+            <IndexTable
+              variant="auto"
+              columns={[
+                { title: 'Option', listSlot: 'primary' },
+                { title: 'When to use it', listSlot: 'secondary' },
+              ]}
+              rows={INCOMPLETE_OPTIONS.map((o) => (
+                <IndexTableRow key={o.option}>
+                  <IndexTableCell>
+                    <Text type="strong">{o.option}</Text>
+                  </IndexTableCell>
+                  <IndexTableCell>{o.when}</IndexTableCell>
+                </IndexTableRow>
+              ))}
+            />
+            <Banner tone="info">
+              <Paragraph>Temporary issues are usually retried automatically before you see any message.</Paragraph>
+            </Banner>
+          </Stack>
+        </Section>
       )}
       {data && data.commitsIncluded.length > 0 && (
-        <s-section heading={`Updates included (${data.commitsIncluded.length})`}>
-          <s-stack gap="small-300">
+        <Section heading={`Updates included (${data.commitsIncluded.length})`}>
+          <Stack gap="small-300">
             {data.baseSha && (
-              <s-text color="subdued">{`From ${data.baseSha.slice(0, 7)} (last synced before this update)`}</s-text>
+              <Text color="subdued">{`From ${data.baseSha.slice(0, 7)} (last synced before this update)`}</Text>
             )}
             {data.commitsIncluded.map((c) => (
-              <s-text key={c.sha}>
-                <s-text type="strong">{c.shortSha}</s-text> {firstLine(c.message)}
-              </s-text>
+              <Text key={c.sha}>
+                <Text type="strong">{c.shortSha}</Text> {firstLine(c.message)}
+              </Text>
             ))}
-          </s-stack>
-        </s-section>
+          </Stack>
+        </Section>
       )}
       {data && (
-        <s-section heading="Summary">
-          <s-stack gap="small-200">
-            <s-stack direction="inline" gap="small-200" alignItems="center">
-              <s-badge tone={SYNC_STATUS_BADGE[data.status].tone}>{SYNC_STATUS_BADGE[data.status].label}</s-badge>
-              {data.themeRole === 'MAIN' && <s-badge tone="warning">Live theme</s-badge>}
-              <s-text color="subdued">Attempt {data.attempt}</s-text>
-            </s-stack>
-            <s-paragraph>
-              <s-text type="strong">{data.repository}</s-text> @ {data.commitSha}
+        <Section heading="Summary">
+          <Stack gap="small-200">
+            <Stack direction="inline" gap="small-200" alignItems="center">
+              <Badge tone={SYNC_STATUS_BADGE[data.status].tone}>{SYNC_STATUS_BADGE[data.status].label}</Badge>
+              {data.themeRole === 'MAIN' && <Badge tone="warning">Live theme</Badge>}
+              <Text color="subdued">Attempt {data.attempt}</Text>
+            </Stack>
+            <Paragraph>
+              <Text type="strong">{data.repository}</Text> @ {data.commitSha}
               {data.branch ? ` (${data.branch})` : ''}
-            </s-paragraph>
-            <s-text color="subdued">{firstLine(data.commitMessage)}</s-text>
-            <s-text>
+            </Paragraph>
+            <Text color="subdued">{firstLine(data.commitMessage)}</Text>
+            <Text>
               {`${syncTypeLabel(data.strategy)} · ${data.filesSucceeded} succeeded · ${data.filesFailed} failed · ${data.filesSkipped - data.filesIgnored} skipped · ${data.filesIgnored} ignored · ${data.filesChanged} planned`}
-            </s-text>
-            <s-text color="subdued">{`Job ID ${data.id}`}</s-text>
-            <s-text color="subdued">
+            </Text>
+            <Text color="subdued">{`Job ID ${data.id}`}</Text>
+            <Text color="subdued">
               Started {formatDate(data.startedAt ?? data.initiatedAt)} · Completed {formatDate(data.completedAt)}
-            </s-text>
-          </s-stack>
-        </s-section>
+            </Text>
+          </Stack>
+        </Section>
       )}
 
-      <s-section heading="Files">
-        <s-checkbox
+      <Section heading="Files">
+        <Checkbox
           slot="secondary-actions"
           label="Show skipped"
           checked={showSkipped}
           onChange={(event) => setShowSkipped(event.currentTarget.checked)}
         />
-        <s-table variant="auto">
-          <s-table-header-row>
-            <s-table-header listSlot="inline">Status</s-table-header>
-            <s-table-header listSlot="primary">Theme file</s-table-header>
-            <s-table-header listSlot="kicker">Action</s-table-header>
-            <s-table-header listSlot="secondary">Details</s-table-header>
-          </s-table-header-row>
-          <s-table-body>
-            {operations.map((op) => (
-              <s-table-row key={op.id}>
-                <s-table-cell>
-                  <s-badge tone={OP_BADGE[op.status].tone}>{OP_BADGE[op.status].label}</s-badge>
-                </s-table-cell>
-                <s-table-cell>{op.path}</s-table-cell>
-                <s-table-cell>{op.action === 'delete' ? 'Delete' : 'Write'}</s-table-cell>
-                <s-table-cell>
-                  <s-text color="subdued">
-                    {(op.failure ? `${op.failure.reason} · ${op.failure.detail}` : null) ??
-                      op.skipReason ??
-                      (op.previousPath ? `renamed from ${op.previousPath}` : op.changeType)}
-                    {op.sourceCommitSha ? ` · from ${op.sourceCommitSha.slice(0, 7)}` : ''}
-                    {op.attempts > 0 ? ` · ${op.attempts} attempt${op.attempts === 1 ? '' : 's'}` : ''}
-                    {op.status === 'failed' && op.lastAttemptAt ? ` · failed ${formatDate(op.lastAttemptAt)}` : ''}
-                  </s-text>
-                </s-table-cell>
-              </s-table-row>
-            ))}
-          </s-table-body>
-        </s-table>
-      </s-section>
+        <IndexTable
+          variant="auto"
+          columns={[
+            { title: 'Status', listSlot: 'inline' },
+            { title: 'Theme file', listSlot: 'primary' },
+            { title: 'Action', listSlot: 'kicker' },
+            { title: 'Details', listSlot: 'secondary' },
+          ]}
+          rows={operations.map((op) => (
+            <IndexTableRow key={op.id}>
+              <IndexTableCell>
+                <Badge tone={OP_BADGE[op.status].tone}>{OP_BADGE[op.status].label}</Badge>
+              </IndexTableCell>
+              <IndexTableCell>{op.path}</IndexTableCell>
+              <IndexTableCell>{op.action === 'delete' ? 'Delete' : 'Write'}</IndexTableCell>
+              <IndexTableCell>
+                <Text color="subdued">
+                  {(op.failure ? `${op.failure.reason} · ${op.failure.detail}` : null) ??
+                    op.skipReason ??
+                    (op.previousPath ? `renamed from ${op.previousPath}` : op.changeType)}
+                  {op.sourceCommitSha ? ` · from ${op.sourceCommitSha.slice(0, 7)}` : ''}
+                  {op.attempts > 0 ? ` · ${op.attempts} attempt${op.attempts === 1 ? '' : 's'}` : ''}
+                  {op.status === 'failed' && op.lastAttemptAt ? ` · failed ${formatDate(op.lastAttemptAt)}` : ''}
+                </Text>
+              </IndexTableCell>
+            </IndexTableRow>
+          ))}
+        />
+      </Section>
 
       {data && (
         <ConfirmActionModal
@@ -495,63 +508,63 @@ function SyncList({ onOpen }: { onOpen: (id: string) => void }) {
       secondaryActions={[{ content: 'Refresh', onAction: history.reload }]}
       banners={<ErrorBanner error={history.error} onRetry={history.reload} />}
     >
-      <s-section heading="Filters">
-        <s-grid gridTemplateColumns="repeat(auto-fit, minmax(170px, 1fr))" gap="base">
-          <s-select
+      <Section heading="Filters">
+        <Grid gridTemplateColumns="repeat(auto-fit, minmax(170px, 1fr))" gap="base">
+          <Select
             label="Theme"
             value={themeId || ALL}
             onChange={(event) => filter(setThemeId)(event.currentTarget.value === ALL ? '' : event.currentTarget.value)}
           >
-            <s-option value={ALL}>All themes</s-option>
+            <Option value={ALL}>All themes</Option>
             {(themes.data ?? []).map((t) => (
-              <s-option key={t.id} value={t.id}>
+              <Option key={t.id} value={t.id}>
                 {t.name}
-              </s-option>
+              </Option>
             ))}
-          </s-select>
-          <s-select
+          </Select>
+          <Select
             label="Branch"
             value={branch || ALL}
             onChange={(event) => filter(setBranch)(event.currentTarget.value === ALL ? '' : event.currentTarget.value)}
           >
-            <s-option value={ALL}>All branches</s-option>
+            <Option value={ALL}>All branches</Option>
             {(branches.data?.items ?? []).map((b) => (
-              <s-option key={b.name} value={b.name}>
+              <Option key={b.name} value={b.name}>
                 {b.name}
-              </s-option>
+              </Option>
             ))}
-          </s-select>
-          <s-select
+          </Select>
+          <Select
             label="Sync type"
             value={strategy || ALL}
             onChange={(event) =>
               filter(setStrategy)(event.currentTarget.value === ALL ? '' : (event.currentTarget.value as SyncStrategy))
             }
           >
-            <s-option value={ALL}>All types</s-option>
+            <Option value={ALL}>All types</Option>
             {SYNC_TYPES.map((t) => (
-              <s-option key={t} value={t}>
+              <Option key={t} value={t}>
                 {syncTypeLabel(t)}
-              </s-option>
+              </Option>
             ))}
-          </s-select>
-          <s-select
+          </Select>
+          <Select
             label="Status"
             value={status || ALL}
             onChange={(event) =>
               filter(setStatus)(event.currentTarget.value === ALL ? '' : (event.currentTarget.value as SyncStatus))
             }
           >
-            <s-option value={ALL}>All statuses</s-option>
+            <Option value={ALL}>All statuses</Option>
             {(Object.keys(SYNC_STATUS_BADGE) as SyncStatus[]).map((st) => (
-              <s-option key={st} value={st}>
+              <Option key={st} value={st}>
                 {SYNC_STATUS_BADGE[st].label}
-              </s-option>
+              </Option>
             ))}
-          </s-select>
-        </s-grid>
+          </Select>
+        </Grid>
         {filtered && (
-          <s-button
+          <Button
             slot="secondary-actions"
             variant="tertiary"
             onClick={() => {
@@ -563,12 +576,12 @@ function SyncList({ onOpen }: { onOpen: (id: string) => void }) {
             }}
           >
             Clear filters
-          </s-button>
+          </Button>
         )}
-      </s-section>
+      </Section>
 
-      <s-section padding="none" accessibilityLabel="Sync history">
-        <s-table
+      <Section padding="none" accessibilityLabel="Sync history">
+        <IndexTable
           variant="auto"
           loading={history.loading}
           paginate
@@ -576,67 +589,58 @@ function SyncList({ onOpen }: { onOpen: (id: string) => void }) {
           hasNextPage={!!history.data?.hasNextPage}
           onPreviousPage={() => setPage((p) => Math.max(1, p - 1))}
           onNextPage={() => setPage((p) => p + 1)}
-        >
-          <s-table-header-row>
-            <s-table-header listSlot="primary">Commits</s-table-header>
-            <s-table-header listSlot="secondary">Repository · branch → theme</s-table-header>
-            <s-table-header listSlot="labeled">Type</s-table-header>
-            <s-table-header listSlot="inline">Status</s-table-header>
-            <s-table-header listSlot="labeled">Started</s-table-header>
-            <s-table-header listSlot="labeled">Completed</s-table-header>
-            <s-table-header>Details</s-table-header>
-          </s-table-header-row>
-          <s-table-body>
-            {(history.data?.items ?? []).map((run) => {
-              const shas =
-                run.commitsIncluded.length > 1
-                  ? run.commitsIncluded.map((c) => c.shortSha)
-                  : [run.commitSha.slice(0, 7)];
-              return (
-                <s-table-row key={run.id}>
-                  <s-table-cell>
-                    <s-stack gap="none">
-                      <s-text type="strong">
-                        {shas.length > 3 ? `${shas[0]} … ${shas[shas.length - 1]} (${shas.length})` : shas.join(', ')}
-                      </s-text>
-                      <s-text color="subdued">{firstLine(run.commitMessage)}</s-text>
-                      {run.errorDetails && <s-text tone="critical">{run.errorDetails.message}</s-text>}
-                      <s-text color="subdued">{`Job ${run.id.slice(0, 8)}`}</s-text>
-                    </s-stack>
-                  </s-table-cell>
-                  <s-table-cell>
-                    {`${run.repository} · ${run.branch ?? '—'} → ${run.themeName}${run.themeRole === 'MAIN' ? ' (live)' : ''}`}
-                  </s-table-cell>
-                  <s-table-cell>{syncTypeLabel(run.strategy)}</s-table-cell>
-                  <s-table-cell>
-                    <s-badge tone={SYNC_STATUS_BADGE[run.status].tone}>{SYNC_STATUS_BADGE[run.status].label}</s-badge>
-                  </s-table-cell>
-                  <s-table-cell>{formatDate(run.startedAt ?? run.initiatedAt)}</s-table-cell>
-                  <s-table-cell>{formatDate(run.completedAt)}</s-table-cell>
-                  <s-table-cell>
-                    <s-button
-                      variant="tertiary"
-                      accessibilityLabel={`Open sync ${run.id}`}
-                      onClick={() => onOpen(run.id)}
-                    >
-                      {run.canRetry ? 'View / retry' : 'View'}
-                    </s-button>
-                  </s-table-cell>
-                </s-table-row>
-              );
-            })}
-          </s-table-body>
-        </s-table>
+          columns={[
+            { title: 'Commits', listSlot: 'primary' },
+            { title: 'Repository · branch → theme', listSlot: 'secondary' },
+            { title: 'Type', listSlot: 'labeled' },
+            { title: 'Status', listSlot: 'inline' },
+            { title: 'Started', listSlot: 'labeled' },
+            { title: 'Completed', listSlot: 'labeled' },
+            { title: 'Details' },
+          ]}
+          rows={(history.data?.items ?? []).map((run) => {
+            const shas =
+              run.commitsIncluded.length > 1 ? run.commitsIncluded.map((c) => c.shortSha) : [run.commitSha.slice(0, 7)];
+            return (
+              <IndexTableRow key={run.id}>
+                <IndexTableCell>
+                  <Stack gap="none">
+                    <Text type="strong">
+                      {shas.length > 3 ? `${shas[0]} … ${shas[shas.length - 1]} (${shas.length})` : shas.join(', ')}
+                    </Text>
+                    <Text color="subdued">{firstLine(run.commitMessage)}</Text>
+                    {run.errorDetails && <Text tone="critical">{run.errorDetails.message}</Text>}
+                    <Text color="subdued">{`Job ${run.id.slice(0, 8)}`}</Text>
+                  </Stack>
+                </IndexTableCell>
+                <IndexTableCell>
+                  {`${run.repository} · ${run.branch ?? '—'} → ${run.themeName}${run.themeRole === 'MAIN' ? ' (live)' : ''}`}
+                </IndexTableCell>
+                <IndexTableCell>{syncTypeLabel(run.strategy)}</IndexTableCell>
+                <IndexTableCell>
+                  <Badge tone={SYNC_STATUS_BADGE[run.status].tone}>{SYNC_STATUS_BADGE[run.status].label}</Badge>
+                </IndexTableCell>
+                <IndexTableCell>{formatDate(run.startedAt ?? run.initiatedAt)}</IndexTableCell>
+                <IndexTableCell>{formatDate(run.completedAt)}</IndexTableCell>
+                <IndexTableCell>
+                  <Button variant="tertiary" accessibilityLabel={`Open sync ${run.id}`} onClick={() => onOpen(run.id)}>
+                    {run.canRetry ? 'View / retry' : 'View'}
+                  </Button>
+                </IndexTableCell>
+              </IndexTableRow>
+            );
+          })}
+        />
         {!history.loading && history.data?.items.length === 0 && (
-          <s-box padding="base">
-            <s-paragraph color="subdued">
+          <Box padding="base">
+            <Paragraph color="subdued">
               {filtered
                 ? 'No synchronizations match these filters.'
                 : 'No synchronizations yet. Start one from Theme mapping or Commit sync.'}
-            </s-paragraph>
-          </s-box>
+            </Paragraph>
+          </Box>
         )}
-      </s-section>
+      </Section>
     </AppLayout>
   );
 }

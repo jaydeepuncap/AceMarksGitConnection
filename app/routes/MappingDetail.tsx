@@ -8,7 +8,7 @@ import { LoadingState } from '../components/LoadingState';
 import { BranchThemeTitle, Card, CardSection, KeyValue, StatusBadge } from '../components/Common';
 import { FullSyncControls, MappingActionDialogs, themeOptionsFor } from '../components/MappingControls';
 import { SyncRunsTable } from '../components/SyncRunsTable';
-import { Tabs } from '../components/ui';
+import { Badge, Banner, Button, Grid, Icon, Paragraph, Section, Stack, Tabs, Text } from '../components/ui';
 import { api } from '../lib/api-client';
 import { showToast } from '../lib/app-bridge';
 import { firstLine, formatDate, mappingStatus, RESULT_BADGE, syncTypeLabel } from '../lib/format';
@@ -79,14 +79,14 @@ export default function MappingDetail() {
         backAction={{ content: 'Theme mapping', onAction: () => navigate('/mappings') }}
       >
         <ErrorBanner error={mappings.error} onRetry={mappings.reload} />
-        <s-section heading="This mapping no longer exists">
-          <s-paragraph>
+        <Section heading="This mapping no longer exists">
+          <Paragraph>
             It may have been changed or removed. Its sync history is still available in Sync history.
-          </s-paragraph>
-          <s-button slot="secondary-actions" variant="primary" onClick={() => navigate('/mappings')}>
+          </Paragraph>
+          <Button slot="secondary-actions" variant="primary" onClick={() => navigate('/mappings')}>
             Back to theme mapping
-          </s-button>
-        </s-section>
+          </Button>
+        </Section>
       </AppLayout>
     );
   }
@@ -137,28 +137,28 @@ export default function MappingDetail() {
     switch (status.key) {
       case 'sync-failed':
         return (
-          <s-button variant="primary" onClick={() => navigate(`/sync-history?id=${lastRun!.id}`)}>
+          <Button variant="primary" onClick={() => navigate(`/sync-history?id=${lastRun!.id}`)}>
             Open the failed sync
-          </s-button>
+          </Button>
         );
       case 'not-synced':
         return (
-          <s-button variant="primary" onClick={() => setTab('full')}>
+          <Button variant="primary" onClick={() => setTab('full')}>
             Start with a full sync
-          </s-button>
+          </Button>
         );
       case 'updates-waiting':
         return (
-          <s-button variant="primary" loading={syncAll.pending} disabled={!theme} onClick={reviewAll}>
+          <Button variant="primary" loading={syncAll.pending} disabled={!theme} onClick={reviewAll}>
             {`Review ${waiting}${commits.data?.waitingMore ? '+' : ''} update${waiting === 1 ? '' : 's'}`}
-          </s-button>
+          </Button>
         );
       default:
         return (
-          <s-stack direction="inline" gap="small-200" alignItems="center">
-            <s-icon type="check-circle" tone="success" />
-            <s-text>Nothing to sync</s-text>
-          </s-stack>
+          <Stack direction="inline" gap="small-200" alignItems="center">
+            <Icon type="check-circle" tone="success" />
+            <Text>Nothing to sync</Text>
+          </Stack>
         );
     }
   })();
@@ -182,18 +182,18 @@ export default function MappingDetail() {
             onDismiss={syncAll.clearError}
           />
           {themes.data && !theme && (
-            <s-banner tone="critical" heading="The theme no longer exists">
-              <s-paragraph>
+            <Banner tone="critical" heading="The theme no longer exists">
+              <Paragraph>
                 {`${mapping.themeName} was deleted in Shopify. Use Change theme or Remove mapping at the top of the page.`}
-              </s-paragraph>
-            </s-banner>
+              </Paragraph>
+            </Banner>
           )}
         </>
       }
     >
       <Card>
         <CardSection>
-          <s-stack direction="inline" gap="small-200" alignItems="center" justifyContent="space-between">
+          <Stack direction="inline" gap="small-200" alignItems="center" justifyContent="space-between">
             <BranchThemeTitle
               heading
               branch={mapping.branch}
@@ -202,62 +202,60 @@ export default function MappingDetail() {
               themeMissing={!!themes.data && !theme}
             />
             <StatusBadge status={status?.key ?? 'checking'} label={status?.label} />
-          </s-stack>
+          </Stack>
         </CardSection>
         <CardSection>
-          <s-grid gridTemplateColumns="repeat(auto-fit, minmax(220px, 1fr))" gap="large">
+          <Grid gridTemplateColumns="repeat(auto-fit, minmax(220px, 1fr))" gap="large">
             <KeyValue label="Theme is on">
-              <s-text>
+              <Text>
                 {lastSynced
                   ? `${lastSynced.shortSha} · ${firstLine(lastSynced.message)}`
                   : checking
                     ? '…'
                     : 'No commit synced yet'}
-              </s-text>
+              </Text>
             </KeyValue>
             <KeyValue label={`New on ${mapping.branch}`}>
-              <s-text>
+              <Text>
                 {checking && !commits.data
                   ? '…'
                   : lastSynced
                     ? `${waiting}${commits.data?.waitingMore ? '+' : ''} commit${waiting === 1 ? '' : 's'} not in the theme yet`
                     : 'Run a full sync first'}
-              </s-text>
+              </Text>
             </KeyValue>
             <KeyValue label="Last sync">
               {lastRun && result ? (
-                <s-stack direction="inline" gap="small-200" alignItems="center">
-                  <s-badge tone={result.tone}>{result.label}</s-badge>
-                  <s-text>{`${syncTypeLabel(lastRun.strategy)} · ${formatDate(lastRun.completedAt)}`}</s-text>
-                </s-stack>
+                <Stack direction="inline" gap="small-200" alignItems="center">
+                  <Badge tone={result.tone}>{result.label}</Badge>
+                  <Text>{`${syncTypeLabel(lastRun.strategy)} · ${formatDate(lastRun.completedAt)}`}</Text>
+                </Stack>
               ) : lastSynced ? (
                 // The commit was recorded from the theme's sync file (e.g. a copied theme), not by a sync here.
-                <s-text>{`Not synced from this app yet · recorded from the theme file ${formatDate(lastSynced.syncedAt)}`}</s-text>
+                <Text>{`Not synced from this app yet · recorded from the theme file ${formatDate(lastSynced.syncedAt)}`}</Text>
               ) : (
-                <s-text>{checking ? '…' : 'No sync performed yet'}</s-text>
+                <Text>{checking ? '…' : 'No sync performed yet'}</Text>
               )}
             </KeyValue>
-          </s-grid>
+          </Grid>
         </CardSection>
         <CardSection>
-          <s-stack direction="inline" gap="base" alignItems="center" justifyContent="space-between">
-            <s-stack gap="small-100">
-              <s-text>{status?.description ?? 'Checking where the theme stands…'}</s-text>
+          <Stack direction="inline" gap="base" alignItems="center" justifyContent="space-between">
+            <Stack gap="small-100">
+              <Text>{status?.description ?? 'Checking where the theme stands…'}</Text>
               {theme?.isLive && (
-                <s-text tone="caution">
-                  This is your live theme: syncs change the storefront, and you confirm twice.
-                </s-text>
+                <Text tone="caution">This is your live theme: syncs change the storefront, and you confirm twice.</Text>
               )}
-            </s-stack>
+            </Stack>
             {nextStep}
-          </s-stack>
+          </Stack>
         </CardSection>
       </Card>
 
       <Tabs tabs={TABS} selected={tab} onSelect={(next: Tab) => setTab(next)} />
 
       {tab === 'commits' && (
-        <s-section heading={`Commits on ${mapping.branch}`}>
+        <Section heading={`Commits on ${mapping.branch}`}>
           <CommitSyncPanel
             mapping={mapping}
             theme={theme}
@@ -266,19 +264,19 @@ export default function MappingDetail() {
             setPage={(update) => setPage(update)}
             onPreview={setPreview}
           />
-        </s-section>
+        </Section>
       )}
 
       {tab === 'full' && (
-        <s-section heading="Full sync">
+        <Section heading="Full sync">
           <FullSyncControls mapping={mapping} disabled={!theme} onPreview={setPreview} />
-        </s-section>
+        </Section>
       )}
 
       {tab === 'history' && (
-        <s-section heading={`Syncs to ${mapping.themeName} from ${mapping.branch}`}>
+        <Section heading={`Syncs to ${mapping.themeName} from ${mapping.branch}`}>
           <SyncRunsTable themeId={mapping.themeId} branch={mapping.branch} refreshKey={refreshKey} />
-        </s-section>
+        </Section>
       )}
 
       <MappingActionDialogs
