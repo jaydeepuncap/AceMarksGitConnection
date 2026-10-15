@@ -7,6 +7,7 @@
 import { and, desc, eq, inArray, ne, sql } from 'drizzle-orm';
 import { drizzle, type DrizzleD1Database } from 'drizzle-orm/d1';
 import * as schema from '../../drizzle/schema';
+import { classifyFailure } from '../sync/failures';
 import {
   appSettings,
   githubConnections,
@@ -476,6 +477,8 @@ const RETRYABLE_STATUSES: SyncStatus[] = ['failed', 'partially_failed'];
 export function toSyncRunDto(row: SyncHistoryRow): SyncRun {
   const details = row.errorDetails as { code?: string; message?: string } | null;
   const options = (row.options ?? {}) as Record<string, unknown>;
+  const backedUp = typeof options.backedUp === 'number' ? options.backedUp : 0;
+  const restoredAt = typeof options.restoredAt === 'string' ? options.restoredAt : null;
   return {
     id: row.id,
     repository: row.repository,
@@ -496,10 +499,15 @@ export function toSyncRunDto(row: SyncHistoryRow): SyncRun {
     initiatedAt: iso(row.initiatedAt) ?? new Date(0).toISOString(),
     startedAt: iso(row.startedAt),
     completedAt: iso(row.completedAt),
-    canRetry: RETRYABLE_STATUSES.includes(row.status),
+    // After a restore the theme is back as before; a fresh update is the way forward.
+    canRetry: RETRYABLE_STATUSES.includes(row.status) && !restoredAt,
     baseSha: typeof options.baseSha === 'string' ? options.baseSha : null,
     commitsIncluded: Array.isArray(options.commitsIncluded) ? (options.commitsIncluded as IncludedCommit[]) : [],
-    backedUp: typeof options.backedUp === 'number' ? options.backedUp : 0,
+    backedUp,
+    allowDeletes: options.allowDeletes === true,
+    canRestore: RETRYABLE_STATUSES.includes(row.status) && backedUp > 0 && !restoredAt,
+    restoredAt,
+    restoredFiles: typeof options.restoredFiles === 'number' ? options.restoredFiles : 0,
   };
 }
 
@@ -515,6 +523,7 @@ export function toSyncOperationDto(row: SyncOperationRow): SyncOperation {
     skipReason: row.skipReason,
     attempts: row.attempts,
     error: row.error,
+    failure: row.status === 'failed' ? classifyFailure(row.error) : null,
   };
 }
 
@@ -642,5 +651,35 @@ export async function latestSucceededRun(
     )
     .orderBy(desc(syncHistory.completedAt))
     .limit(1);
+  return row;
+}
+
+/** Merges `patch` into a run's options (JSON). */
+export async function mergeRunOptions(db: Database, shopId: string, syncId: string, patch: Record<string, unknown>): Promise<void> {
+  await db
+    .update(syncHistory)
+    .set({ options: sql`json_patch(${syncHistory.options}, ${JSON.stringify(patch)})` })
+    .where(and(eq(syncHistory.id, syncId), eq(syncHistory.shopId, shopId)));
+}
+
+/**
+ * Claims an incomplete run for "Restore backup" so two requests cannot restore
+ * at once (a claim older than 5 minutes is considered abandoned).
+ */
+export async function claimRestore(db: Database, shopId: string, syncId: string): Promise<SyncHistoryRow | undefined> {
+  const now = Date.now();
+  const [row] = await db
+    .update(syncHistory)
+    .set({ options: sql`json_set(${syncHistory.options}, '$.restoring', ${now})` })
+    .where(
+      and(
+        eq(syncHistory.id, syncId),
+        eq(syncHistory.shopId, shopId),
+        inArray(syncHistory.status, ['failed', 'partially_failed']),
+        sql`json_extract(${syncHistory.options}, '$.restoredAt') is null`,
+        sql`coalesce(json_extract(${syncHistory.options}, '$.restoring'), 0) < ${now - 5 * 60_000}`,
+      ),
+    )
+    .returning();
   return row;
 }

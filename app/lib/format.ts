@@ -42,3 +42,27 @@ export const THEME_ROLE_BADGE: Record<ThemeRole, { label: string; tone: Tone }> 
   LOCKED: { label: 'Locked', tone: 'warning' },
   ARCHIVED: { label: 'Archived', tone: 'neutral' },
 };
+
+const FOLDER_KIND: Record<string, string> = {
+  sections: 'section',
+  snippets: 'snippet',
+  blocks: 'block',
+  templates: 'template',
+  layout: 'layout',
+  config: 'settings',
+  locales: 'translations',
+};
+
+/** "sections/cart.liquid" → "Cart section", "snippets/cart-item.liquid" → "Cart item snippet". */
+export function themeFileLabel(path: string): string {
+  const [folder = '', ...rest] = path.split('/');
+  const file = rest.at(-1) ?? path;
+  const kind = FOLDER_KIND[folder];
+  if (!kind) return file;
+  const words = [...rest.slice(0, -1), file.replace(/\.(liquid|json)$/, '')]
+    .join(' ')
+    .replace(/[-_.]+/g, ' ')
+    .trim();
+  const label = `${words} ${kind}`;
+  return label.charAt(0).toUpperCase() + label.slice(1);
+}

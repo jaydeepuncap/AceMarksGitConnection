@@ -244,6 +244,52 @@ describe('sync workflow', () => {
       expect(retried).toEqual(['sections/header.liquid', 'assets/theme-sync.json']);
     });
 
+    it('explains why files failed and restores the backup of an incomplete update', async () => {
+      const reject = new Set(['sections/header.liquid']);
+      await setup({ world: { rejectUpserts: reject } });
+      const { body: p } = await preview({});
+      await api('POST', '/api/sync', { syncId: p.data.syncId, confirm: true });
+      await drainQueue();
+      const theme = world.themeFiles.get(THEME_DEV.id)!;
+      expect(theme.has('snippets/new.liquid')).toBe(true); // created by this update
+
+      let detail = (await api<SyncRunDetail>('GET', `/api/sync/history/${p.data.syncId}`)).body.data;
+      expect(detail).toMatchObject({ status: 'partially_failed', canRestore: true, restoredAt: null, allowDeletes: false });
+      expect(detail.operations.find((o) => o.path === 'sections/header.liquid')?.failure).toMatchObject({
+        kind: 'code',
+        reason: 'Code error — needs a fix from your developer',
+      });
+      expect(detail.operations.find((o) => o.path === 'assets/logo.png')?.failure).toBeNull();
+
+      // A restore that cannot write every file says so and can be tried again.
+      const partial = await api('POST', `/api/sync/history/${p.data.syncId}/restore`, {});
+      expect(partial.status).toBe(502);
+      expect((await api<SyncRunDetail>('GET', `/api/sync/history/${p.data.syncId}`)).body.data).toMatchObject({ canRestore: true, restoredAt: null });
+
+      reject.clear();
+      const restored = await api<SyncRun>('POST', `/api/sync/history/${p.data.syncId}/restore`, {});
+      expect(restored.status).toBe(200);
+      expect(restored.body.data).toMatchObject({ canRestore: false, canRetry: false, restoredFiles: 3 });
+      // Back exactly as before: the changed file has its old content, the files this update added are gone.
+      expect(theme.get('sections/header.liquid')).toBe('old');
+      expect(theme.has('snippets/new.liquid')).toBe(false);
+      expect(theme.has('assets/logo.png')).toBe(false);
+      expect(theme.has('snippets/old.liquid')).toBe(true);
+
+      detail = (await api<SyncRunDetail>('GET', `/api/sync/history/${p.data.syncId}`)).body.data;
+      expect(detail.restoredAt).not.toBeNull();
+      expect((await api('POST', `/api/sync/history/${p.data.syncId}/restore`, {})).status).toBe(409);
+      expect((await api('POST', `/api/sync/history/${p.data.syncId}/retry`, {})).status).toBe(409);
+    });
+
+    it('does not restore a completed update', async () => {
+      await setup();
+      const { body: p } = await preview({});
+      await api('POST', '/api/sync', { syncId: p.data.syncId, confirm: true });
+      await drainQueue();
+      expect((await api('POST', `/api/sync/history/${p.data.syncId}/restore`, {})).status).toBe(409);
+    });
+
     it('applies explicit deletions and treats already-missing files as deleted', async () => {
       await setup();
       world.themeFiles.get(THEME_DEV.id)!.delete('snippets/gone.liquid');

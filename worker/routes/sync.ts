@@ -7,6 +7,7 @@
  *   GET  /api/sync/history            ?page&perPage&status&includePreviews
  *   GET  /api/sync/history/:id        run + per-file operations
  *   POST /api/sync/history/:id/retry  re-runs failed/pending operations (idempotent writes)
+ *   POST /api/sync/history/:id/restore puts the theme back as it was before an incomplete update
  */
 import { Hono, type Context } from 'hono';
 import type { Paginated, SyncChecks, SyncPreview, SyncRun, SyncRunDetail } from '../../shared/api-types';
@@ -14,12 +15,14 @@ import type { SyncHistoryRow } from '../../drizzle/schema';
 import type { AppEnv } from '../env';
 import { adminClient, githubClient, resolveRepository } from '../lib/clients';
 import {
+  claimRestore,
   findActiveSyncForTheme,
   getDb,
   getSettings,
   getSyncRun,
   listSyncOperations,
   listSyncRuns,
+  mergeRunOptions,
   resetFailedOperations,
   toSyncOperationDto,
   toSyncRunDto,
@@ -39,6 +42,7 @@ import {
 import { rateLimit } from '../middleware/error-handler';
 import { dispatchSync, STALE_RUN_MS } from '../sync/dispatch';
 import { buildSyncPreview } from '../sync/planner';
+import { restoreBackup } from '../sync/restore';
 
 const syncLimiter = rateLimit({
   binding: 'SYNC_RATE_LIMITER',
@@ -195,6 +199,9 @@ export const syncRoutes = new Hono<AppEnv>()
     if (run.status !== 'failed' && run.status !== 'partially_failed') {
       throw new ApiError(409, 'CONFLICT', `A ${run.status} sync cannot be retried`);
     }
+    if (!toSyncRunDto(run).canRetry) {
+      throw new ApiError(409, 'CONFLICT', 'The backup of this update was restored; run the full update again instead');
+    }
 
     const { isLive } = await assertWriteAllowed(c, run, body);
     const reset = await resetFailedOperations(db, shop.id, id);
@@ -209,4 +216,47 @@ export const syncRoutes = new Hono<AppEnv>()
     await dispatchSync(c.env, c.executionCtx, { syncId: id, shopId: shop.id }, c.get('logger'));
     c.get('logger').info('sync.retried', { syncId: id, resetOperations: reset, attempt: queued.attempt });
     return ok<SyncRun>(c, toSyncRunDto(queued), `Retrying ${reset} failed file(s)`, 202);
+  })
+  .post('/history/:id/restore', syncLimiter, async (c) => {
+    const id = parseOrThrow(uuidSchema, c.req.param('id'));
+    const body = parseOrThrow(retrySyncSchema, await readJsonBody(c.req.raw));
+    const { shop, userId } = c.get('auth');
+    const db = getDb(c.env.DB);
+    const run = await getSyncRun(db, shop.id, id);
+    if (!run) throw new ApiError(404, 'NOT_FOUND', 'Sync not found');
+    if (!toSyncRunDto(run).canRestore) {
+      throw new ApiError(409, 'CONFLICT', 'Only an incomplete update with a backup can be restored');
+    }
+    await assertWriteAllowed(c, run, body);
+    const claimed = await claimRestore(db, shop.id, id);
+    if (!claimed) throw new ApiError(409, 'CONFLICT', 'This backup is already being restored; refresh in a moment');
+
+    let result;
+    try {
+      result = await restoreBackup({ db, admin: await adminClient(c), kv: c.env.KV, logger: c.get('logger') }, claimed);
+    } catch (err) {
+      await mergeRunOptions(db, shop.id, id, { restoring: null });
+      throw err;
+    }
+    const complete = result.failed.length === 0;
+    await mergeRunOptions(db, shop.id, id, {
+      restoring: null,
+      ...(complete
+        ? { restoredAt: new Date().toISOString(), restoredFiles: result.restored + result.removed, restoredBy: userId }
+        : { restoreFailed: result.failed.slice(0, 50) }),
+    });
+    const updated = (await getSyncRun(db, shop.id, id))!;
+    if (!complete) {
+      throw new ApiError(
+        502,
+        'SHOPIFY_ERROR',
+        `${result.failed.length} file(s) could not be restored (${result.failed[0]!.path}: ${result.failed[0]!.message}). Try again.`,
+        { details: { failed: result.failed.slice(0, 50) } },
+      );
+    }
+    return ok<SyncRun>(
+      c,
+      toSyncRunDto(updated),
+      `Backup restored: ${result.restored} file(s) put back, ${result.removed} new file(s) removed`,
+    );
   });

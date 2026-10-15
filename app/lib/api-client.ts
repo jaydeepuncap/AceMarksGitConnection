@@ -182,6 +182,8 @@ export const api = {
     get: (id: string) => apiRequest<SyncRunDetail>('GET', `/api/sync/history/${encodeURIComponent(id)}`),
     retry: (id: string, body: RetrySyncRequest = {}) =>
       apiRequest<SyncRun>('POST', `/api/sync/history/${encodeURIComponent(id)}/retry`, { body }),
+    restore: (id: string, body: RetrySyncRequest = {}) =>
+      apiRequest<SyncRun>('POST', `/api/sync/history/${encodeURIComponent(id)}/restore`, { body }),
   },
 };
 

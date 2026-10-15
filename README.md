@@ -180,7 +180,13 @@ npm run db:migrate:remote    # production D1 (--env production)
 5. **Confirm** — the theme's current version of each affected file is backed up (KV, 30 days) right before it changes; progress is shown file by file.
 6. **Result** — "Update complete · Files X of Y updated · <theme> is now on <commit>". Only when every file succeeded is the commit stored as the theme's **last synced commit for that branch** (`theme_branch_sync` table) and written to `assets/theme-sync.json` in the theme (last step).
    A theme without a record — a **duplicate** of a synced theme, or one synced before records were kept — is identified from the latest successful sync of that theme or from its own `assets/theme-sync.json` (`lastSyncedUpdate`, `branch`, `repository`, `syncedOn`), which Shopify copies along when a theme is duplicated. Themes and Commits then show its last update and New / Last synced / Added statuses.
-7. **Test, then publish** in Shopify — Theme Sync never publishes a theme.
+7. **If an update does not fully complete** — the result says "Update incomplete · X of Y files updated", lists each failed file with a plain reason (*Temporary Shopify issue — can be retried*, *Code error — needs a fix from your developer*, *The repository changed — run the full update again*) and shows which commit the theme remains on. Options:
+   - **Retry Failed Files** — only the failed files are tried again (disabled when every failure is a code error).
+   - **Run Full Update Again** — a fresh preview of the same update with new checks.
+   - **Restore Backup** — `POST /api/sync/history/:id/restore` puts back every file the update changed (from the KV backup) and removes the files it added.
+   - **Ask your developer** — for code errors.
+   Temporary issues are retried automatically (up to 3 attempts) before a file is reported as failed.
+8. **Test, then publish** in Shopify — Theme Sync never publishes a theme.
 
 The sync history of the selected theme and branch is shown under the commit list.
 

@@ -102,3 +102,14 @@ describe('pages', () => {
     expect(screen.getByText('View / retry')).toBeInTheDocument();
   });
 });
+
+describe('themeFileLabel', () => {
+  it('turns theme paths into readable names', async () => {
+    const { themeFileLabel } = await import('../../app/lib/format');
+    expect(themeFileLabel('sections/cart.liquid')).toBe('Cart section');
+    expect(themeFileLabel('snippets/cart-item.liquid')).toBe('Cart item snippet');
+    expect(themeFileLabel('blocks/cart-item.liquid')).toBe('Cart item block');
+    expect(themeFileLabel('templates/customers/account.json')).toBe('Customers account template');
+    expect(themeFileLabel('assets/cart.css')).toBe('cart.css');
+  });
+});

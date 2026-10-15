@@ -408,6 +408,27 @@ export interface SyncRun {
   commitsIncluded: IncludedCommit[];
   /** Files whose previous version was saved before they changed. */
   backedUp: number;
+  /** Deletions were enabled for this sync (used by "Run full update again"). */
+  allowDeletes: boolean;
+  /** An incomplete update with a backup can put the theme back as it was before it. */
+  canRestore: boolean;
+  /** When the backup was restored (the theme is back as it was before this update). */
+  restoredAt: string | null;
+  restoredFiles: number;
+}
+
+/**
+ * Why a file failed, in plain words:
+ *   temporary — Shopify or GitHub was busy; retrying usually works
+ *   code      — the file has a code error; the developer must fix it first
+ *   changed   — the repository no longer matches the plan; run the full update again
+ *   other     — anything else (see `detail`)
+ */
+export type FailureKind = 'temporary' | 'code' | 'changed' | 'other';
+export interface FailureInfo {
+  kind: FailureKind;
+  reason: string;
+  detail: string;
 }
 
 export interface SyncOperation {
@@ -421,6 +442,8 @@ export interface SyncOperation {
   skipReason: string | null;
   attempts: number;
   error: string | null;
+  /** Set for failed files. */
+  failure: FailureInfo | null;
 }
 
 export interface SyncRunDetail extends SyncRun {
