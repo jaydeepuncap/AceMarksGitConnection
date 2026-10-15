@@ -88,8 +88,14 @@ function ConfirmActionModal({
 
 /** Client guide, section 7: what each option on an incomplete update is for. */
 const INCOMPLETE_OPTIONS: { option: string; when: string }[] = [
-  { option: 'Retry Failed Files', when: 'A temporary issue, such as Shopify being busy. Only the failed files are tried again.' },
-  { option: 'Run Full Update Again', when: 'The theme was changed in the meantime, or you want a complete fresh check.' },
+  {
+    option: 'Retry Failed Files',
+    when: 'A temporary issue, such as Shopify being busy. Only the failed files are tried again.',
+  },
+  {
+    option: 'Run Full Update Again',
+    when: 'The theme was changed in the meantime, or you want a complete fresh check.',
+  },
   { option: 'Restore Backup', when: 'You want the theme back exactly as it was before this update.' },
   { option: 'Ask your developer', when: 'The file has a code error. Once it is fixed, you apply the new update.' },
 ];
@@ -110,7 +116,10 @@ function SyncDetail({ id, onBack, onOpen }: { id: string; onBack: () => void; on
   useEffect(() => {
     if (!active) return;
     const timer = setInterval(() => {
-      api.sync.get(id).then(run.setData).catch(() => undefined);
+      api.sync
+        .get(id)
+        .then(run.setData)
+        .catch(() => undefined);
     }, POLL_MS);
     return () => clearInterval(timer);
   }, [active, id, run.setData]);
@@ -119,7 +128,8 @@ function SyncDetail({ id, onBack, onOpen }: { id: string; onBack: () => void; on
   const data = run.data;
 
   const live = data?.themeRole === 'MAIN';
-  const liveBody = (confirmThemeName?: string) => (confirmThemeName ? { confirmLiveTheme: true, confirmThemeName } : {});
+  const liveBody = (confirmThemeName?: string) =>
+    confirmThemeName ? { confirmLiveTheme: true, confirmThemeName } : {};
 
   const doRetry = async (confirmThemeName?: string) => {
     const result = await retry.run(id, liveBody(confirmThemeName));
@@ -154,7 +164,11 @@ function SyncDetail({ id, onBack, onOpen }: { id: string; onBack: () => void; on
     if (result) setPreview(result);
   };
 
-  const confirmRerun = async (confirmation: { confirmLiveTheme?: boolean; confirmThemeName?: string; acceptDirectEdits?: boolean }) => {
+  const confirmRerun = async (confirmation: {
+    confirmLiveTheme?: boolean;
+    confirmThemeName?: string;
+    acceptDirectEdits?: boolean;
+  }) => {
     if (!preview) return;
     const started = await rerunConfirm.run({ syncId: preview.syncId, confirm: true, ...confirmation });
     if (started) {
@@ -182,8 +196,16 @@ function SyncDetail({ id, onBack, onOpen }: { id: string; onBack: () => void; on
         <>
           <ErrorBanner error={run.error} onRetry={run.reload} />
           <ErrorBanner error={retry.error} heading="Retry failed" onDismiss={retry.clearError} />
-          <ErrorBanner error={restore.error} heading="Backup could not be fully restored" onDismiss={restore.clearError} />
-          <ErrorBanner error={rerunPreview.error} heading="The full update could not be prepared" onDismiss={rerunPreview.clearError} />
+          <ErrorBanner
+            error={restore.error}
+            heading="Backup could not be fully restored"
+            onDismiss={restore.clearError}
+          />
+          <ErrorBanner
+            error={rerunPreview.error}
+            heading="The full update could not be prepared"
+            onDismiss={rerunPreview.clearError}
+          />
           {data?.errorDetails && !incomplete && (
             <s-banner tone="critical" heading={data.errorDetails.code}>
               <s-paragraph>{data.errorDetails.message}</s-paragraph>
@@ -193,7 +215,14 @@ function SyncDetail({ id, onBack, onOpen }: { id: string; onBack: () => void; on
       }
     >
       {data && active && (
-        <s-banner tone="info" heading={data.status === 'queued' ? `Starting the update of ${data.themeName}…` : `Updating ${data.themeName} · ${done} of ${data.filesChanged} files`}>
+        <s-banner
+          tone="info"
+          heading={
+            data.status === 'queued'
+              ? `Starting the update of ${data.themeName}…`
+              : `Updating ${data.themeName} · ${done} of ${data.filesChanged} files`
+          }
+        >
           <s-stack gap="small-200">
             <s-progress accessibilityLabel="Update progress" max={Math.max(1, data.filesChanged)} value={done} />
             <s-paragraph>
@@ -227,10 +256,15 @@ function SyncDetail({ id, onBack, onOpen }: { id: string; onBack: () => void; on
                 </s-paragraph>
               </s-banner>
             ) : (
-              <s-banner tone="critical" heading={`Update incomplete · ${data.filesSucceeded} of ${data.filesChanged} files updated`}>
+              <s-banner
+                tone="critical"
+                heading={`Update incomplete · ${data.filesSucceeded} of ${data.filesChanged} files updated`}
+              >
                 <s-paragraph>
                   The theme is not marked as updated until every file succeeds.
-                  {data.errorDetails && data.errorDetails.code !== 'FILES_FAILED' ? ` ${data.errorDetails.message}` : ''}
+                  {data.errorDetails && data.errorDetails.code !== 'FILES_FAILED'
+                    ? ` ${data.errorDetails.message}`
+                    : ''}
                 </s-paragraph>
               </s-banner>
             )}
@@ -238,7 +272,12 @@ function SyncDetail({ id, onBack, onOpen }: { id: string; onBack: () => void; on
             {failed.length > 0 && (
               <s-stack gap="small-200">
                 {failed.map((op) => (
-                  <s-grid key={op.id} gridTemplateColumns="minmax(0, 1fr) minmax(0, 1.4fr)" gap="small-200" alignItems="start">
+                  <s-grid
+                    key={op.id}
+                    gridTemplateColumns="minmax(0, 1fr) minmax(0, 1.4fr)"
+                    gap="small-200"
+                    alignItems="start"
+                  >
                     <s-stack gap="none">
                       <s-text type="strong">
                         <s-text tone="critical">×</s-text> {themeFileLabel(op.path)}
@@ -262,7 +301,11 @@ function SyncDetail({ id, onBack, onOpen }: { id: string; onBack: () => void; on
 
             <s-stack direction="inline" gap="small-200" justifyContent="end">
               {!data.restoredAt && (
-                <s-button disabled={!data.canRestore} loading={restore.pending} onClick={() => setConfirmAction('restore')}>
+                <s-button
+                  disabled={!data.canRestore}
+                  loading={restore.pending}
+                  onClick={() => setConfirmAction('restore')}
+                >
                   Restore Backup
                 </s-button>
               )}
@@ -311,7 +354,9 @@ function SyncDetail({ id, onBack, onOpen }: { id: string; onBack: () => void; on
       {data && data.commitsIncluded.length > 0 && (
         <s-section heading={`Updates included (${data.commitsIncluded.length})`}>
           <s-stack gap="small-300">
-            {data.baseSha && <s-text color="subdued">{`From ${data.baseSha.slice(0, 7)} (last synced before this update)`}</s-text>}
+            {data.baseSha && (
+              <s-text color="subdued">{`From ${data.baseSha.slice(0, 7)} (last synced before this update)`}</s-text>
+            )}
             {data.commitsIncluded.map((c) => (
               <s-text key={c.sha}>
                 <s-text type="strong">{c.shortSha}</s-text> {firstLine(c.message)}
@@ -368,7 +413,9 @@ function SyncDetail({ id, onBack, onOpen }: { id: string; onBack: () => void; on
                 <s-table-cell>{op.action === 'delete' ? 'Delete' : 'Write'}</s-table-cell>
                 <s-table-cell>
                   <s-text color="subdued">
-                    {(op.failure ? `${op.failure.reason} · ${op.failure.detail}` : null) ?? op.skipReason ?? (op.previousPath ? `renamed from ${op.previousPath}` : op.changeType)}
+                    {(op.failure ? `${op.failure.reason} · ${op.failure.detail}` : null) ??
+                      op.skipReason ??
+                      (op.previousPath ? `renamed from ${op.previousPath}` : op.changeType)}
                     {op.sourceCommitSha ? ` · from ${op.sourceCommitSha.slice(0, 7)}` : ''}
                     {op.attempts > 0 ? ` · ${op.attempts} attempt${op.attempts === 1 ? '' : 's'}` : ''}
                     {op.status === 'failed' && op.lastAttemptAt ? ` · failed ${formatDate(op.lastAttemptAt)}` : ''}
@@ -438,10 +485,12 @@ function SyncList({ onOpen }: { onOpen: (id: string) => void }) {
       }),
     [page, status, themeId, branch, strategy, from, to],
   );
-  const filter = <T,>(set: (v: T) => void) => (value: T) => {
-    set(value);
-    setPage(1);
-  };
+  const filter =
+    <T,>(set: (v: T) => void) =>
+    (value: T) => {
+      set(value);
+      setPage(1);
+    };
   const filtered = !!(status || themeId || branch || strategy || from || to);
 
   return (
@@ -548,12 +597,17 @@ function SyncList({ onOpen }: { onOpen: (id: string) => void }) {
           </s-table-header-row>
           <s-table-body>
             {(history.data?.items ?? []).map((run) => {
-              const shas = run.commitsIncluded.length > 1 ? run.commitsIncluded.map((c) => c.shortSha) : [run.commitSha.slice(0, 7)];
+              const shas =
+                run.commitsIncluded.length > 1
+                  ? run.commitsIncluded.map((c) => c.shortSha)
+                  : [run.commitSha.slice(0, 7)];
               return (
                 <s-table-row key={run.id}>
                   <s-table-cell>
                     <s-stack gap="none">
-                      <s-text type="strong">{shas.length > 3 ? `${shas[0]} … ${shas[shas.length - 1]} (${shas.length})` : shas.join(', ')}</s-text>
+                      <s-text type="strong">
+                        {shas.length > 3 ? `${shas[0]} … ${shas[shas.length - 1]} (${shas.length})` : shas.join(', ')}
+                      </s-text>
                       <s-text color="subdued">{firstLine(run.commitMessage)}</s-text>
                       {run.errorDetails && <s-text tone="critical">{run.errorDetails.message}</s-text>}
                       <s-text color="subdued">{`Job ${run.id.slice(0, 8)}`}</s-text>
@@ -572,7 +626,11 @@ function SyncList({ onOpen }: { onOpen: (id: string) => void }) {
                   <s-table-cell>{formatDate(run.startedAt ?? run.initiatedAt)}</s-table-cell>
                   <s-table-cell>{formatDate(run.completedAt)}</s-table-cell>
                   <s-table-cell>
-                    <s-button variant="tertiary" accessibilityLabel={`Open sync ${run.id}`} onClick={() => onOpen(run.id)}>
+                    <s-button
+                      variant="tertiary"
+                      accessibilityLabel={`Open sync ${run.id}`}
+                      onClick={() => onOpen(run.id)}
+                    >
                       {run.canRetry ? 'View / retry' : 'View'}
                     </s-button>
                   </s-table-cell>
@@ -584,7 +642,9 @@ function SyncList({ onOpen }: { onOpen: (id: string) => void }) {
         {!history.loading && history.data?.items.length === 0 && (
           <s-box padding="base">
             <s-paragraph color="subdued">
-              {filtered ? 'No synchronizations match these filters.' : 'No synchronizations yet. Start one from Theme mapping or Commit sync.'}
+              {filtered
+                ? 'No synchronizations match these filters.'
+                : 'No synchronizations yet. Start one from Theme mapping or Commit sync.'}
             </s-paragraph>
           </s-box>
         )}
