@@ -18,6 +18,22 @@ const HINTS: Partial<Record<string, string>> = {
     'The app database has not been initialised. An administrator must run `npm run db:migrate:remote`.',
 };
 
+/**
+ * Codes that are not errors but something to know (info) or to act on
+ * (warning): shown in a calmer banner without a request ID.
+ */
+const NOTICES: Partial<Record<string, { tone: 'info' | 'warning'; heading: string; hint?: string }>> = {
+  ALREADY_SYNCED: {
+    tone: 'info',
+    heading: 'Already up to date',
+    hint: 'Select a newer commit, or choose Push: "Only the selected commit" to push this commit\'s files again.',
+  },
+  PREVIEW_EXPIRED: { tone: 'warning', heading: 'Preview expired' },
+  RATE_LIMITED: { tone: 'warning', heading: 'Please wait a moment' },
+  GITHUB_RATE_LIMITED: { tone: 'warning', heading: 'GitHub is busy' },
+  DIRECT_EDITS_FOUND: { tone: 'warning', heading: 'Files were edited directly in Shopify' },
+};
+
 interface Props {
   error: ApiClientError | Error | null;
   heading?: string;
@@ -25,7 +41,7 @@ interface Props {
   onDismiss?: () => void;
 }
 
-/** Critical <s-banner> for API errors with a code-specific hint and optional actions. */
+/** <s-banner> for API errors (critical) and notices (info / warning) with a code-specific hint and optional actions. */
 export function ErrorBanner({ error, heading = 'Something went wrong', onRetry, onDismiss }: Props) {
   const go = useNavigateHandler();
   if (!error) return null;
@@ -33,12 +49,18 @@ export function ErrorBanner({ error, heading = 'Something went wrong', onRetry, 
   const requestId = 'requestId' in error ? (error as ApiClientError).requestId : undefined;
   const hint = code ? HINTS[code] : undefined;
   const needsSettings = code === 'GITHUB_NOT_CONNECTED' || code === 'GITHUB_AUTH_FAILED';
+  const notice = code ? NOTICES[code] : undefined;
 
   return (
-    <s-banner tone="critical" heading={heading} dismissible={!!onDismiss} onDismiss={onDismiss}>
+    <s-banner
+      tone={notice?.tone ?? 'critical'}
+      heading={notice?.heading ?? heading}
+      dismissible={!!onDismiss}
+      onDismiss={onDismiss}
+    >
       <s-paragraph>{error.message}</s-paragraph>
-      {hint && <s-paragraph>{hint}</s-paragraph>}
-      {requestId && (
+      {(notice?.hint ?? hint) && <s-paragraph>{notice?.hint ?? hint}</s-paragraph>}
+      {requestId && !notice && (
         <s-paragraph color="subdued">
           <s-text color="subdued">Request ID: {requestId}</s-text>
         </s-paragraph>

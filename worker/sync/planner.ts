@@ -392,7 +392,11 @@ export async function buildSyncPreview(
       })
     : undefined;
   if (input.strategy === 'since_last_sync' && last?.commitSha === input.commitSha) {
-    throw new ApiError(409, 'CONFLICT', `${theme.name} is already on ${input.commitSha.slice(0, 7)} from ${input.branch}`);
+    throw new ApiError(
+      409,
+      'ALREADY_SYNCED',
+      `${theme.name} is already on ${input.commitSha.slice(0, 7)} from ${input.branch}, so there is nothing new to push.`,
+    );
   }
 
   // Updates between the last synced commit and the selected one that are not in the theme yet.

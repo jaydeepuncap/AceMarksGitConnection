@@ -316,6 +316,16 @@ describe('updating a theme, step by step', () => {
     expect(marker.branches.main).toMatchObject({ lastSyncedUpdate: C3 });
   });
 
+  it('tells, without an error, that the theme is already on the selected commit', async () => {
+    await setup();
+    await sync(C1, { strategy: 'commit_changes' });
+    const res = await api('POST', '/api/sync/preview', { commitSha: C1, themeId: THEME_DEV.id, branch: 'main', strategy: 'since_last_sync' });
+    expect(res.status).toBe(409);
+    expect(res.body.error.code).toBe('ALREADY_SYNCED');
+    // "Only the selected commit" can still push it again.
+    expect((await api('POST', '/api/sync/preview', { commitSha: C1, themeId: THEME_DEV.id, branch: 'main', strategy: 'commit_changes' })).status).toBe(201);
+  });
+
   it('ignores a marker file from another repository', async () => {
     await setup();
     w.theme.set('assets/theme-sync.json', {

@@ -223,6 +223,11 @@ export default function Commits() {
       ? listed.slice(selectedIndex + 1).filter((c) => c.syncStatus === 'new').length
       : 0;
   const selectedTheme = writableThemes.find((t) => t.id === themeId);
+  const selectedStatus = selectedIndex >= 0 ? listed[selectedIndex]!.syncStatus : null;
+  // Pushing "from the last sync" to the commit the theme is already on has nothing to do.
+  const alreadyOn = strategy === 'since_last_sync' && !!selectedSha && selectedSha === lastSynced?.sha;
+  // An older, already added commit: "from the last sync" would undo the later updates.
+  const goesBack = strategy === 'since_last_sync' && selectedStatus === 'added';
 
   const runPreview = async () => {
     if (!selectedSha || !themeId) return;
@@ -367,10 +372,24 @@ export default function Commits() {
               <s-paragraph>Syncing will change the storefront customers see. You will be asked to confirm twice.</s-paragraph>
             </s-banner>
           )}
+          {alreadyOn && selectedTheme && lastSynced && (
+            <s-banner tone="info" heading="Already up to date">
+              <s-paragraph>
+                {`${selectedTheme.name} is already on ${lastSynced.shortSha} from ${lastSynced.branch}, so there is nothing new to push. Select a newer commit, or choose Push: "Only the selected commit" to push this commit's files again.`}
+              </s-paragraph>
+            </s-banner>
+          )}
+          {goesBack && selectedTheme && lastSynced && selectedSha && (
+            <s-banner tone="warning" heading="This commit is already in the theme">
+              <s-paragraph>
+                {`${selectedSha.slice(0, 7)} is older than ${selectedTheme.name}'s last synced commit ${lastSynced.shortSha}. Pushing from the last sync to it undoes the updates made after it — the preview shows exactly which files change.`}
+              </s-paragraph>
+            </s-banner>
+          )}
           <s-stack direction="inline" gap="small-200" alignItems="center">
             <s-button
               variant="primary"
-              disabled={!selectedSha || !themeId}
+              disabled={!selectedSha || !themeId || alreadyOn}
               loading={previewMutation.pending}
               onClick={runPreview}
             >
@@ -430,7 +449,10 @@ export default function Commits() {
                   <s-button
                     variant={selectedSha === commit.sha ? 'primary' : 'secondary'}
                     accessibilityLabel={`Select commit ${commit.shortSha}`}
-                    onClick={() => setSelectedSha(commit.sha)}
+                    onClick={() => {
+                      previewMutation.clearError();
+                      setSelectedSha(commit.sha);
+                    }}
                   >
                     {selectedSha === commit.sha ? 'Selected' : 'Select'}
                   </s-button>

@@ -43,6 +43,15 @@ describe('loading and error states', () => {
     expect(screen.getByText('Open settings')).toBeInTheDocument();
   });
 
+  it('shows "already up to date" as an info notice, not an error', () => {
+    const err = new ApiClientError(409, 'ALREADY_SYNCED', 'Dawn is already on 5e41c63 from main', undefined, undefined, 'req-9');
+    const { container } = wrap(<ErrorBanner error={err} heading="Preview failed" />);
+    const banner = container.querySelector('s-banner')!;
+    expect(banner.getAttribute('tone')).toBe('info');
+    expect(banner.getAttribute('heading')).toBe('Already up to date');
+    expect(screen.queryByText(/req-9/)).not.toBeInTheDocument();
+  });
+
   it('renders nothing without an error', () => {
     const { container } = wrap(<ErrorBanner error={null} />);
     expect(container).toBeEmptyDOMElement();
