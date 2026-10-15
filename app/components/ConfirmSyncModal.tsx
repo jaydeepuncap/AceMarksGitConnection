@@ -8,29 +8,18 @@ interface Props {
   submitting: boolean;
   error?: string | null;
   onClose: () => void;
-  onConfirm: (confirmation: { confirmLiveTheme?: boolean; confirmThemeName?: string; acceptDirectEdits?: boolean }) => void;
+  onConfirm: (confirmation: {
+    confirmLiveTheme?: boolean;
+    confirmThemeName?: string;
+    acceptDirectEdits?: boolean;
+  }) => void;
 }
 
 const firstLine = (message: string | null | undefined) => (message ?? '').split('\n')[0] ?? '';
 
 /** "from 50924bd, f6ca831" — the included commits that changed the file. */
-const fromCommits = (op: SyncPlanOperation) => (op.commits && op.commits.length > 0 ? `from ${op.commits.join(', ')}` : '');
-
-function FileGroup({ title, tone, mark, ops }: { title: string; tone: Tone; mark: string; ops: SyncPlanOperation[] }) {
-  if (ops.length === 0) return null;
-  return (
-    <s-stack gap="small-300">
-      <s-text type="strong" tone={tone}>{`${title} (${ops.length})`}</s-text>
-      {ops.slice(0, 50).map((op) => (
-        <s-text key={op.path}>
-          <s-text tone={tone}>{mark}</s-text> {op.path}
-          {fromCommits(op) && <s-text color="subdued">{` · ${fromCommits(op)}`}</s-text>}
-        </s-text>
-      ))}
-      {ops.length > 50 && <s-text color="subdued">{`and ${ops.length - 50} more (see All files below)`}</s-text>}
-    </s-stack>
-  );
-}
+const fromCommits = (op: SyncPlanOperation) =>
+  op.commits && op.commits.length > 0 ? `from ${op.commits.join(', ')}` : '';
 
 const STRATEGY_LABEL: Record<SyncPreview['strategy'], string> = {
   since_last_sync: 'from the last sync to the selected commit',
@@ -39,7 +28,12 @@ const STRATEGY_LABEL: Record<SyncPreview['strategy'], string> = {
   selected_commits: 'the selected commits',
 };
 
+/** Skipped because of an ignore pattern in Settings (shared prefix with the planner's skip reason). */
+const isIgnoredOp = (op: SyncPlanOperation) =>
+  op.action === 'skip' && !!op.skipReason?.startsWith('Matches ignore pattern');
+
 function actionBadge(op: SyncPlanOperation): { label: string; tone: Tone } {
+  if (isIgnoredOp(op)) return { label: 'Ignored', tone: 'neutral' };
   if (op.action === 'skip') return { label: 'Skip', tone: 'neutral' };
   if (op.action === 'delete') return { label: 'Delete', tone: 'critical' };
   return op.existsInTheme ? { label: 'Update', tone: 'caution' } : { label: 'Create', tone: 'success' };
@@ -58,7 +52,6 @@ export function ConfirmSyncModal({ open, preview, submitting, error, onClose, on
   const [typedName, setTypedName] = useState('');
   const [showSkipped, setShowSkipped] = useState(false);
   const [acceptEdits, setAcceptEdits] = useState(false);
-  const [showAll, setShowAll] = useState(false);
 
   useEffect(() => {
     const modal = modalRef.current;
@@ -72,12 +65,12 @@ export function ConfirmSyncModal({ open, preview, submitting, error, onClose, on
       setAck(false);
       setTypedName('');
       setAcceptEdits(false);
-      setShowAll(false);
     }
   }, [open]);
 
+  // Every file that changes, plus ignored files (never changed); other skipped files on request.
   const operations = useMemo(
-    () => (preview?.operations ?? []).filter((op) => showSkipped || op.action !== 'skip'),
+    () => (preview?.operations ?? []).filter((op) => showSkipped || op.action !== 'skip' || isIgnoredOp(op)),
     [preview, showSkipped],
   );
 
@@ -86,21 +79,11 @@ export function ConfirmSyncModal({ open, preview, submitting, error, onClose, on
   const liveConfirmed = !live || (ack && typedName === preview?.theme.name);
   const codeBlocked = preview?.checks.code.status === 'failed';
   const editsWarning = preview?.checks.directEdits.status === 'warning';
-  const canConfirm = !!preview && writes > 0 && liveConfirmed && !codeBlocked && (!editsWarning || acceptEdits) && !submitting;
-  const ops = preview?.operations ?? [];
-  const newFiles = ops.filter((op) => op.action === 'upsert' && !op.existsInTheme);
-  const updatedFiles = ops.filter((op) => op.action === 'upsert' && op.existsInTheme);
-  const removedFiles = ops.filter((op) => op.action === 'delete');
-  const ignoredFiles = ops.filter((op) => op.action === 'skip' && op.skipReason?.startsWith('Matches ignore pattern'));
+  const canConfirm =
+    !!preview && writes > 0 && liveConfirmed && !codeBlocked && (!editsWarning || acceptEdits) && !submitting;
 
   return (
-    <s-modal
-      id={MODAL_ID}
-      ref={modalRef}
-      size="large"
-      heading="Review before updating"
-      onHide={onClose}
-    >
+    <s-modal id={MODAL_ID} ref={modalRef} size="large" heading="Review before updating" onHide={onClose}>
       {preview && (
         <s-stack gap="base">
           {error && (
@@ -187,17 +170,18 @@ export function ConfirmSyncModal({ open, preview, submitting, error, onClose, on
             {`${writes} file(s) affected: ${preview.summary.creates} to create · ${preview.summary.updates} to update · ${preview.summary.deletes} to delete · ${preview.summary.skipped} skipped · ${preview.summary.ignored} ignored`}
           </s-text>
           {preview.conflicts.length > 0 && (
-            <s-banner tone="warning" heading={`${preview.conflicts.length} file(s) overlap with commits that are not selected`}>
+            <s-banner
+              tone="warning"
+              heading={`${preview.conflicts.length} file(s) overlap with commits that are not selected`}
+            >
               {preview.conflicts.slice(0, 20).map((c) => (
                 <s-paragraph key={c}>{c}</s-paragraph>
               ))}
-              {preview.conflicts.length > 20 && <s-paragraph>{`and ${preview.conflicts.length - 20} more`}</s-paragraph>}
+              {preview.conflicts.length > 20 && (
+                <s-paragraph>{`and ${preview.conflicts.length - 20} more`}</s-paragraph>
+              )}
             </s-banner>
           )}
-          <FileGroup title="New files" tone="success" mark="+" ops={newFiles} />
-          <FileGroup title="Updated files" tone="caution" mark="~" ops={updatedFiles} />
-          <FileGroup title="Removed files" tone="critical" mark="−" ops={removedFiles} />
-          <FileGroup title="Ignored (never changed)" tone="neutral" mark="·" ops={ignoredFiles} />
 
           {preview.warnings
             .filter((w) => !w.startsWith('This is the LIVE theme'))
@@ -216,58 +200,55 @@ export function ConfirmSyncModal({ open, preview, submitting, error, onClose, on
 
           <s-paragraph color="subdued">
             Repository <s-text type="strong">{preview.repository}</s-text> at commit{' '}
-            <s-text type="strong">{preview.commit.sha}</s-text> · push {STRATEGY_LABEL[preview.strategy]} · preview valid
-            until{' '}
-            {new Date(preview.expiresAt).toLocaleTimeString()}
+            <s-text type="strong">{preview.commit.sha}</s-text> · push {STRATEGY_LABEL[preview.strategy]} · preview
+            valid until {new Date(preview.expiresAt).toLocaleTimeString()}
           </s-paragraph>
 
           {writes === 0 && (
             <s-banner tone="info" heading="Nothing to apply">
-              <s-paragraph>No file in the pushed commits maps to a writable theme file with the current settings.</s-paragraph>
+              <s-paragraph>
+                No file in the pushed commits maps to a writable theme file with the current settings.
+              </s-paragraph>
             </s-banner>
           )}
 
-          <s-stack direction="inline">
-            <s-button variant="tertiary" onClick={() => setShowAll((v) => !v)}>
-              {showAll ? 'Hide the file list' : `Review every file (${ops.length})`}
-            </s-button>
-          </s-stack>
-          {showAll && (
-            <s-stack gap="small-200">
+          <s-stack gap="small-200">
+            <s-stack direction="inline" gap="small-200" alignItems="center" justifyContent="space-between">
+              <s-text type="strong">{`Files (${operations.length})`}</s-text>
               <s-checkbox
                 label="Show skipped files"
                 checked={showSkipped}
                 onChange={(event) => setShowSkipped(event.currentTarget.checked)}
               />
-
-              <s-table variant="auto">
-                <s-table-header-row>
-                  <s-table-header listSlot="kicker">Action</s-table-header>
-                  <s-table-header listSlot="primary">Theme file</s-table-header>
-                  <s-table-header listSlot="secondary">Details</s-table-header>
-                </s-table-header-row>
-                <s-table-body>
-                  {operations.map((op) => {
-                    const badge = actionBadge(op);
-                    return (
-                      <s-table-row key={op.path}>
-                        <s-table-cell>
-                          <s-badge tone={badge.tone}>{badge.label}</s-badge>
-                        </s-table-cell>
-                        <s-table-cell>{op.path}</s-table-cell>
-                        <s-table-cell>
-                          <s-text color="subdued">
-                            {op.skipReason ?? (op.previousPath ? `renamed from ${op.previousPath}` : op.changeType)}
-                            {fromCommits(op) ? ` · ${fromCommits(op)}` : ''}
-                          </s-text>
-                        </s-table-cell>
-                      </s-table-row>
-                    );
-                  })}
-                </s-table-body>
-              </s-table>
             </s-stack>
-          )}
+
+            <s-table variant="auto">
+              <s-table-header-row>
+                <s-table-header listSlot="kicker">Action</s-table-header>
+                <s-table-header listSlot="primary">Theme file</s-table-header>
+                <s-table-header listSlot="secondary">Details</s-table-header>
+              </s-table-header-row>
+              <s-table-body>
+                {operations.map((op) => {
+                  const badge = actionBadge(op);
+                  return (
+                    <s-table-row key={op.path}>
+                      <s-table-cell>
+                        <s-badge tone={badge.tone}>{badge.label}</s-badge>
+                      </s-table-cell>
+                      <s-table-cell>{op.path}</s-table-cell>
+                      <s-table-cell>
+                        <s-text color="subdued">
+                          {op.skipReason ?? (op.previousPath ? `renamed from ${op.previousPath}` : op.changeType)}
+                          {fromCommits(op) ? ` · ${fromCommits(op)}` : ''}
+                        </s-text>
+                      </s-table-cell>
+                    </s-table-row>
+                  );
+                })}
+              </s-table-body>
+            </s-table>
+          </s-stack>
 
           {live && (
             <s-stack gap="small-200">
