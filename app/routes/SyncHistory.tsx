@@ -447,6 +447,7 @@ function SyncList({ onOpen }: { onOpen: (id: string) => void }) {
   return (
     <AppLayout
       title="Sync history"
+      inlineSize="large"
       secondaryActions={[{ content: 'Refresh', onAction: history.reload }]}
       banners={<ErrorBanner error={history.error} onRetry={history.reload} />}
     >

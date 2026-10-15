@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { api } from '../lib/api-client';
 import { showToast } from '../lib/app-bridge';
 import { useMutation } from '../lib/hooks';
 import type { ShopifyTheme, SyncPreview, ThemeMapping } from '../lib/types';
 import { ErrorBanner } from './ErrorBanner';
+import { ConfirmModal } from './ui';
 
 const NONE = '__none__';
 
@@ -18,43 +19,6 @@ export function themeOptionsFor(mapping: ThemeMapping | null, themes: ShopifyThe
       const disabledReason = !t.writable ? 'cannot be synced' : other ? `mapped to ${other.branch}` : null;
       return { theme: t, disabledReason };
     });
-}
-
-export function ConfirmModal({
-  id,
-  open,
-  heading,
-  message,
-  actionLabel,
-  pending,
-  onClose,
-  onConfirm,
-}: {
-  id: string;
-  open: boolean;
-  heading: string;
-  message: string;
-  actionLabel: string;
-  pending: boolean;
-  onClose: () => void;
-  onConfirm: () => void;
-}) {
-  const ref = useRef<HTMLElementTagNameMap['s-modal']>(null);
-  useEffect(() => {
-    if (open) ref.current?.showOverlay?.();
-    else ref.current?.hideOverlay?.();
-  }, [open]);
-  return (
-    <s-modal ref={ref} id={id} heading={heading} onHide={onClose}>
-      <s-paragraph>{message}</s-paragraph>
-      <s-button slot="primary-action" variant="primary" tone="critical" loading={pending} onClick={onConfirm}>
-        {actionLabel}
-      </s-button>
-      <s-button slot="secondary-actions" onClick={onClose}>
-        Cancel
-      </s-button>
-    </s-modal>
-  );
 }
 
 /** Full sync of a mapping: the branch's newest commit, read directly from GitHub. */
@@ -144,7 +108,11 @@ export function ManageMappingControls({
 
   return (
     <s-stack gap="small-200">
-      <ErrorBanner error={update.error ?? remove.error} heading="Mapping not changed" onDismiss={() => (update.clearError(), remove.clearError())} />
+      <ErrorBanner
+        error={update.error ?? remove.error}
+        heading="Mapping not changed"
+        onDismiss={() => (update.clearError(), remove.clearError())}
+      />
       {changing ? (
         <s-grid gridTemplateColumns="minmax(0, 1fr) auto auto" gap="small-200" alignItems="end">
           <s-select
@@ -177,7 +145,11 @@ export function ManageMappingControls({
       <ConfirmModal
         id={`mapping-confirm-${mapping.id}`}
         open={confirm !== null}
-        heading={confirm === 'remove' ? `Remove ${mapping.branch} → ${mapping.themeName}?` : `Sync ${mapping.branch} to another theme?`}
+        heading={
+          confirm === 'remove'
+            ? `Remove ${mapping.branch} → ${mapping.themeName}?`
+            : `Sync ${mapping.branch} to another theme?`
+        }
         message={
           confirm === 'remove'
             ? `${mapping.branch} will no longer sync to ${mapping.themeName}. Nothing in the theme changes. Its sync history and last synced commit are kept, so mapping it again later continues where it left off.`

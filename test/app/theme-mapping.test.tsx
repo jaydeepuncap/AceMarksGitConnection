@@ -109,7 +109,12 @@ describe('Theme mapping page', () => {
     // Each card says where its theme stands (the mocked commits list has 1 commit waiting).
     expect(await screen.findAllByText('1 update waiting', {}, { timeout: 5000 })).toHaveLength(2);
     expect(screen.getAllByText('Sync updates')).toHaveLength(2);
-    expect(screen.getAllByText('No sync performed yet')).toHaveLength(2);
+    // The commit was recorded from the theme file, not by a sync in this app — the card says so.
+    expect(screen.getAllByText(/Not synced from this app yet · recorded from the theme file/)).toHaveLength(2);
+    // The whole card is the clickable surface (no nested buttons).
+    const cards = container.querySelectorAll('s-clickable[accessibilityLabel^="Open "], s-clickable[accessibilitylabel^="Open "]');
+    expect(cards).toHaveLength(2);
+    expect(cards[0]!.querySelector('s-button')).toBeNull();
 
     // The add form opens from the page action and only offers free branches and themes.
     fireEvent.click(screen.getByText('Add mapping'));

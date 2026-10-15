@@ -17,6 +17,8 @@ interface Props {
   backAction?: { content: string; onAction: () => void };
   /** Banners rendered above the content (errors, warnings). */
   banners?: ReactNode;
+  /** Page width: "large" for list and detail pages with wide cards and tables. */
+  inlineSize?: 'small' | 'base' | 'large';
   children: ReactNode;
 }
 
@@ -25,9 +27,18 @@ interface Props {
  * renders the page heading and the primary/secondary action slots in the
  * Admin title bar. App navigation is the <NavMenu> declared in App.tsx.
  */
-export function AppLayout({ title, subtitle, primaryAction, secondaryActions, backAction, banners, children }: Props) {
+export function AppLayout({
+  title,
+  subtitle,
+  primaryAction,
+  secondaryActions,
+  backAction,
+  banners,
+  inlineSize = 'base',
+  children,
+}: Props) {
   return (
-    <s-page heading={title} inlineSize="base">
+    <s-page heading={title} inlineSize={inlineSize}>
       {backAction && (
         <s-link
           slot="breadcrumb-actions"
