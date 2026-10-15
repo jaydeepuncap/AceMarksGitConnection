@@ -4,6 +4,7 @@ import { showToast } from '../lib/app-bridge';
 import { useMutation } from '../lib/hooks';
 import type { ShopifyTheme, SyncPreview, ThemeMapping } from '../lib/types';
 import { ErrorBanner } from './ErrorBanner';
+import { Box, Button, Modal, Option, Paragraph, Select, Stack } from './ui';
 import { ConfirmModal } from './Common/ConfirmModal';
 
 const NONE = '__none__';
@@ -73,31 +74,42 @@ export function FullSyncControls({
   );
 }
 
-/** Change the theme of a mapping, or remove it (both confirmed). */
-export function ManageMappingControls({
+/**
+ * Dialogs for the mapping page's top actions: "Change theme" (pick a free
+ * theme, then confirm) and "Remove mapping" (confirm). Nothing in any theme
+ * changes; the sync history is kept.
+ */
+export function MappingActionDialogs({
   mapping,
   themeOptions,
+  action,
+  onClose,
   onChanged,
   onRemoved,
 }: {
   mapping: ThemeMapping;
   themeOptions: { theme: ShopifyTheme; disabledReason: string | null }[];
+  action: 'change' | 'remove' | null;
+  onClose: () => void;
   onChanged: (mapping: ThemeMapping) => void;
   onRemoved: () => void;
 }) {
-  const [changing, setChanging] = useState(false);
-  const [confirm, setConfirm] = useState<'remove' | 'change' | null>(null);
   const [newThemeId, setNewThemeId] = useState('');
   const update = useMutation((themeId: string) => api.mappings.update(mapping.id, { themeId, confirm: true }));
   const remove = useMutation(() => api.mappings.remove(mapping.id));
   const newTheme = themeOptions.find((o) => o.theme.id === newThemeId)?.theme;
+  const free = themeOptions.filter((o) => !o.disabledReason).length;
 
+  const close = () => {
+    setNewThemeId('');
+    update.clearError();
+    remove.clearError();
+    onClose();
+  };
   const doChange = async () => {
     const changed = await update.run(newThemeId);
     if (changed) {
       showToast(`${changed.branch} now syncs to ${changed.themeName}`);
-      setConfirm(null);
-      setChanging(false);
       setNewThemeId('');
       onChanged(changed);
     }
@@ -106,65 +118,68 @@ export function ManageMappingControls({
     const removed = await remove.run();
     if (removed) {
       showToast(`${removed.branch} is no longer mapped`);
-      setConfirm(null);
       onRemoved();
     }
   };
 
   return (
-    <s-stack gap="small-200">
-      <ErrorBanner
-        error={update.error ?? remove.error}
-        heading="Mapping not changed"
-        onDismiss={() => (update.clearError(), remove.clearError())}
-      />
-      {changing ? (
-        <s-grid gridTemplateColumns="minmax(0, 1fr) auto auto" gap="small-200" alignItems="end">
-          <s-select
-            label={`New theme for ${mapping.branch}`}
-            value={newThemeId || NONE}
-            onChange={(event) => setNewThemeId(event.currentTarget.value === NONE ? '' : event.currentTarget.value)}
-          >
-            <s-option value={NONE}>Select a theme</s-option>
-            {themeOptions.map(({ theme: t, disabledReason }) => (
-              <s-option key={t.id} value={t.id} disabled={!!disabledReason}>
-                {`${themeLabel(t)}${disabledReason ? ` — ${disabledReason}` : ''}`}
-              </s-option>
-            ))}
-          </s-select>
-          <s-button variant="primary" disabled={!newThemeId} onClick={() => setConfirm('change')}>
-            Change theme
-          </s-button>
-          <s-button variant="tertiary" onClick={() => (setChanging(false), setNewThemeId(''))}>
+    <>
+      <Modal
+        id={`change-theme-${mapping.id}`}
+        open={action === 'change'}
+        heading={`Sync ${mapping.branch} to another theme`}
+        size="small"
+        onHide={close}
+      >
+        <Box padding="base">
+          <Stack gap="base">
+            <Paragraph>
+              {`${mapping.branch} will sync to the new theme instead of ${mapping.themeName}. Nothing in either theme changes now, and ${mapping.themeName} keeps its sync history.`}
+            </Paragraph>
+            <Select
+              label="New theme"
+              value={newThemeId || NONE}
+              details={
+                free === 0 ? 'Every other theme is already mapped or cannot be synced.' : `${free} theme(s) available`
+              }
+              onChange={(event: Event) => {
+                const value = (event.currentTarget as HTMLSelectElement).value;
+                setNewThemeId(value === NONE ? '' : value);
+              }}
+            >
+              <Option value={NONE}>Select a theme</Option>
+              {themeOptions.map(({ theme: t, disabledReason }) => (
+                <Option key={t.id} value={t.id} disabled={!!disabledReason}>
+                  {`${themeLabel(t)}${disabledReason ? ` — ${disabledReason}` : ''}`}
+                </Option>
+              ))}
+            </Select>
+            <ErrorBanner error={update.error} heading="Theme not changed" onDismiss={update.clearError} />
+          </Stack>
+        </Box>
+        <Stack direction="inline" gap="small" justifyContent="end" padding="base">
+          <Button onClick={close} disabled={update.pending}>
             Cancel
-          </s-button>
-        </s-grid>
-      ) : (
-        <s-stack direction="inline" gap="small-200">
-          <s-button onClick={() => setChanging(true)}>Change theme</s-button>
-          <s-button variant="tertiary" tone="critical" onClick={() => setConfirm('remove')}>
-            Remove mapping
-          </s-button>
-        </s-stack>
-      )}
+          </Button>
+          <Button variant="primary" disabled={!newThemeId} loading={update.pending} onClick={doChange}>
+            {newTheme ? `Sync to ${newTheme.name}` : 'Change theme'}
+          </Button>
+        </Stack>
+      </Modal>
       <ConfirmModal
-        open={confirm !== null}
-        heading={
-          confirm === 'remove'
-            ? `Remove ${mapping.branch} → ${mapping.themeName}?`
-            : `Sync ${mapping.branch} to another theme?`
-        }
+        open={action === 'remove'}
+        heading={`Remove ${mapping.branch} → ${mapping.themeName}?`}
         message={
-          confirm === 'remove'
-            ? `${mapping.branch} will no longer sync to ${mapping.themeName}. Nothing in the theme changes. Its sync history and last synced commit are kept, so mapping it again later continues where it left off.`
-            : `${mapping.branch} will sync to ${newTheme?.name ?? 'the selected theme'} instead of ${mapping.themeName}. Nothing in either theme changes now; ${mapping.themeName} keeps its sync history.`
+          remove.error
+            ? `${remove.error.message}`
+            : `${mapping.branch} will no longer sync to ${mapping.themeName}. Nothing in the theme changes. Its sync history and last synced commit are kept, so mapping it again later continues where it left off.`
         }
-        confirmLabel={confirm === 'remove' ? 'Remove mapping' : 'Change theme'}
+        confirmLabel="Remove mapping"
         destructive
-        loading={remove.pending || update.pending}
-        onClose={() => setConfirm(null)}
-        onConfirm={confirm === 'remove' ? doRemove : doChange}
+        loading={remove.pending}
+        onClose={close}
+        onConfirm={doRemove}
       />
-    </s-stack>
+    </>
   );
 }

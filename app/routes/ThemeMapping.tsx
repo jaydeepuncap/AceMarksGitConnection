@@ -5,7 +5,7 @@ import { ErrorBanner } from '../components/ErrorBanner';
 import { LoadingState } from '../components/LoadingState';
 import { themeLabel } from '../components/MappingControls';
 import { BranchThemeTitle, Card, CardSection, KeyValue, StatusBadge } from '../components/Common';
-import { Stack, Text } from '../components/ui';
+import { Button, Stack, Text, Tooltip } from '../components/ui';
 import { api } from '../lib/api-client';
 import { showToast } from '../lib/app-bridge';
 import { firstLine, formatDate, mappingStatus, RESULT_BADGE, syncTypeLabel } from '../lib/format';
@@ -173,6 +173,12 @@ export default function ThemeMapping() {
   const freeThemes = allThemes.filter((t) => !themeBlocked(t));
   const showForm = adding || repoItems.length === 0;
   const nothingFree = !branches.loading && !themes.loading && (freeBranches.length === 0 || freeThemes.length === 0);
+  /** Why no mapping can be added right now (tooltip of the disabled "Add mapping"). */
+  const addBlockedReason = !nothingFree
+    ? null
+    : freeBranches.length === 0
+      ? `Every branch of ${repository} is already mapped to a theme. Change or remove a mapping to free a branch.`
+      : 'Every theme that can be synced is already mapped to a branch. Change or remove a mapping to free a theme, or duplicate a theme in Shopify.';
 
   const refresh = () => {
     mappings.reload();
@@ -199,7 +205,9 @@ export default function ThemeMapping() {
       title="Theme mapping"
       subtitle={`${repository} · each branch syncs to its own theme`}
       inlineSize="large"
-      primaryAction={showForm ? undefined : { content: 'Add mapping', onAction: () => setAdding(true) }}
+      primaryAction={
+        showForm ? undefined : { content: 'Add mapping', onAction: () => setAdding(true), disabled: nothingFree }
+      }
       secondaryActions={[
         {
           content: 'Refresh',
@@ -306,7 +314,35 @@ export default function ThemeMapping() {
       {repoItems.length > 0 && (
         // Cards sit directly on the page (not inside a section) so their titles render as larger headings.
         <Stack gap="base" accessibilityLabel={`Mappings (${repoItems.length})`}>
-          <Text type="strong">{`Mappings (${repoItems.length})`}</Text>
+          <Stack direction="inline" gap="small-200" alignItems="center" justifyContent="space-between">
+            <Text type="strong">{`Mappings (${repoItems.length})`}</Text>
+            {!showForm && (
+              <Stack direction="inline" gap="small-200" alignItems="center">
+                {addBlockedReason && (
+                  <>
+                    <Tooltip id="add-mapping-blocked">
+                      <Text>{addBlockedReason}</Text>
+                    </Tooltip>
+                    <Button
+                      variant="tertiary"
+                      icon="info"
+                      interestFor="add-mapping-blocked"
+                      accessibilityLabel="Why can't I add a mapping?"
+                    />
+                  </>
+                )}
+                <Button
+                  icon="plus"
+                  disabled={nothingFree}
+                  interestFor={addBlockedReason ? 'add-mapping-blocked' : undefined}
+                  onClick={() => setAdding(true)}
+                >
+                  Add mapping
+                </Button>
+              </Stack>
+            )}
+          </Stack>
+          {addBlockedReason && !showForm && <Text color="subdued">{addBlockedReason}</Text>}
           {repoItems.map((m) => (
             <MappingCard
               key={`${m.id}:${refreshKey}`}

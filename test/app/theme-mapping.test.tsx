@@ -117,13 +117,39 @@ describe('Theme mapping page', () => {
     expect(cards[0]!.querySelector('s-button')).toBeNull();
 
     // The add form opens from the page action and only offers free branches and themes.
-    fireEvent.click(screen.getByText('Add mapping'));
+    fireEvent.click(screen.getAllByText('Add mapping')[0]!);
     const option = (text: string) => [...container.querySelectorAll('s-option')].find((o) => o.textContent === text);
     await waitFor(() => expect(option('main — mapped to abc')).toBeDefined(), { timeout: 5000 });
     expect(option('main — mapped to abc')!.hasAttribute('disabled')).toBe(true);
     expect(option('dev')!.hasAttribute('disabled')).toBe(false);
     expect(option('xyz — mapped to staging')!.hasAttribute('disabled')).toBe(true);
     expect(option('spare')!.hasAttribute('disabled')).toBe(false);
+  });
+});
+
+describe('Theme mapping page when everything is mapped', () => {
+  it('disables "Add mapping" and explains why', async () => {
+    const { api } = await import('../../app/lib/api-client');
+    (api.github.branches as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      items: [
+        { name: 'main', commitSha: 'a'.repeat(40), protected: false },
+        { name: 'staging', commitSha: 'b'.repeat(40), protected: false },
+      ],
+      page: 1,
+      perPage: 100,
+      hasNextPage: false,
+    });
+    const { container } = render(
+      <MemoryRouter initialEntries={['/mappings']}>
+        <ThemeMapping />
+      </MemoryRouter>,
+    );
+    const reason = /Every branch of acme\/theme is already mapped to a theme/;
+    expect((await screen.findAllByText(reason, {}, { timeout: 5000 })).length).toBeGreaterThan(0);
+    const add = [...container.querySelectorAll('s-button')].filter((b) => b.textContent === 'Add mapping');
+    expect(add.length).toBeGreaterThan(0);
+    for (const button of add) expect(button.hasAttribute('disabled')).toBe(true);
+    expect(container.querySelector('s-tooltip#add-mapping-blocked')).not.toBeNull();
   });
 });
 
@@ -151,6 +177,9 @@ describe('Mapping page', () => {
     expect(await screen.findByText('No syncs applied to this theme from this branch yet.', {}, wait)).toBeInTheDocument();
     fireEvent.click(screen.getByText('Full sync'));
     expect(await screen.findByText('Review full sync', {}, wait)).toBeInTheDocument();
+    // Change theme and Remove mapping are page actions at the top.
+    expect(screen.getAllByText('Change theme').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Remove mapping').length).toBeGreaterThan(0);
   });
 });
 

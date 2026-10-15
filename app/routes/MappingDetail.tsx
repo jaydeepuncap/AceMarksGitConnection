@@ -6,7 +6,7 @@ import { ConfirmSyncModal } from '../components/ConfirmSyncModal';
 import { ErrorBanner } from '../components/ErrorBanner';
 import { LoadingState } from '../components/LoadingState';
 import { BranchThemeTitle, Card, CardSection, KeyValue, StatusBadge } from '../components/Common';
-import { FullSyncControls, ManageMappingControls, themeOptionsFor } from '../components/MappingControls';
+import { FullSyncControls, MappingActionDialogs, themeOptionsFor } from '../components/MappingControls';
 import { SyncRunsTable } from '../components/SyncRunsTable';
 import { Tabs } from '../components/ui';
 import { api } from '../lib/api-client';
@@ -15,12 +15,11 @@ import { firstLine, formatDate, mappingStatus, RESULT_BADGE, syncTypeLabel } fro
 import { useApiQuery, useMutation } from '../lib/hooks';
 import type { SyncPreview } from '../lib/types';
 
-type Tab = 'commits' | 'full' | 'history' | 'mapping';
+type Tab = 'commits' | 'full' | 'history';
 const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: 'commits', label: 'Commits', icon: 'git-commit' },
   { id: 'full', label: 'Full sync', icon: 'refresh' },
   { id: 'history', label: 'History', icon: 'clock' },
-  { id: 'mapping', label: 'Mapping', icon: 'settings' },
 ];
 
 /**
@@ -36,6 +35,7 @@ export default function MappingDetail() {
   const mapping = mappings.data?.items.find((m) => m.id === id) ?? null;
 
   const [tab, setTab] = useState<Tab>('commits');
+  const [dialog, setDialog] = useState<'change' | 'remove' | null>(null);
   const [page, setPage] = useState(1);
   const [refreshKey, setRefreshKey] = useState(0);
   const [preview, setPreview] = useState<SyncPreview | null>(null);
@@ -169,7 +169,11 @@ export default function MappingDetail() {
       inlineSize="large"
       subtitle={mapping.repository}
       backAction={{ content: 'Theme mapping', onAction: () => navigate('/mappings') }}
-      secondaryActions={[{ content: 'Refresh', onAction: refresh }]}
+      secondaryActions={[
+        { content: 'Change theme', onAction: () => setDialog('change') },
+        { content: 'Remove mapping', onAction: () => setDialog('remove'), tone: 'critical' },
+        { content: 'Refresh', onAction: refresh },
+      ]}
       banners={
         <>
           <ErrorBanner error={themes.error} heading="Themes could not be loaded" onRetry={themes.reload} />
@@ -181,7 +185,7 @@ export default function MappingDetail() {
           {themes.data && !theme && (
             <s-banner tone="critical" heading="The theme no longer exists">
               <s-paragraph>
-                {`${mapping.themeName} was deleted in Shopify. Change the theme of this mapping or remove it (Mapping tab).`}
+                {`${mapping.themeName} was deleted in Shopify. Use Change theme or Remove mapping at the top of the page.`}
               </s-paragraph>
             </s-banner>
           )}
@@ -284,21 +288,14 @@ export default function MappingDetail() {
         </s-section>
       )}
 
-      {tab === 'mapping' && (
-        <s-section heading="Mapping">
-          <s-stack gap="base">
-            <s-paragraph color="subdued">
-              {`${mapping.branch} syncs only to ${mapping.themeName}, mapped ${formatDate(mapping.createdAt)} (theme ID ${mapping.themeId.split('/').pop()}). Changing or removing the mapping does not change any theme files, and the sync history is kept.`}
-            </s-paragraph>
-            <ManageMappingControls
-              mapping={mapping}
-              themeOptions={themeOptionsFor(mapping, themes.data ?? [], mappings.data?.items ?? [])}
-              onChanged={(changed) => navigate(`/mappings/${changed.id}`, { replace: true })}
-              onRemoved={() => navigate('/mappings')}
-            />
-          </s-stack>
-        </s-section>
-      )}
+      <MappingActionDialogs
+        mapping={mapping}
+        themeOptions={themeOptionsFor(mapping, themes.data ?? [], mappings.data?.items ?? [])}
+        action={dialog}
+        onClose={() => setDialog(null)}
+        onChanged={(changed) => (setDialog(null), navigate(`/mappings/${changed.id}`, { replace: true }))}
+        onRemoved={() => navigate('/mappings')}
+      />
 
       <ConfirmSyncModal
         open={preview !== null}

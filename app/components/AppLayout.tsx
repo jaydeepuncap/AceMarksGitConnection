@@ -70,6 +70,7 @@ export function AppLayout({
           onClick={action.onAction}
           loading={action.loading}
           disabled={action.disabled}
+          tone={action.tone}
         >
           {action.content}
         </s-button>
