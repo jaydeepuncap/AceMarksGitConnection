@@ -251,7 +251,7 @@ describe('Mapping page', () => {
     // Summary card: where the theme stands and the one next step.
     expect(await screen.findByText('eeeeeee · Fix header', {}, wait)).toBeInTheDocument();
     expect(await screen.findByText('Review 1 update', {}, wait)).toBeInTheDocument();
-    expect(screen.getByText('1 commit')).toBeInTheDocument();
+    expect(screen.getByText('1 commit not in the theme yet')).toBeInTheDocument();
     // Commits tab (default).
     expect(await screen.findByText('Add banner', {}, wait)).toBeInTheDocument();
     expect(screen.getAllByText('New').length).toBeGreaterThan(0);

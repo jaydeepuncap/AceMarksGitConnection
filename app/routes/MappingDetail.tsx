@@ -204,44 +204,38 @@ export default function MappingDetail() {
             <StatusBadge status={status?.key ?? 'checking'} label={status?.label} />
           </s-stack>
         </CardSection>
-        <CardSection subdued>
+        <CardSection>
           <s-grid gridTemplateColumns="repeat(auto-fit, minmax(220px, 1fr))" gap="large">
             <KeyValue label="Theme is on">
-              <s-text type="strong">
+              <s-text>
                 {lastSynced
                   ? `${lastSynced.shortSha} · ${firstLine(lastSynced.message)}`
                   : checking
                     ? '…'
-                    : 'No commit yet'}
+                    : 'No commit synced yet'}
               </s-text>
-              {lastSynced && <s-text color="subdued">{formatDate(lastSynced.syncedAt)}</s-text>}
             </KeyValue>
             <KeyValue label={`New on ${mapping.branch}`}>
-              <s-text type="strong">
+              <s-text>
                 {checking && !commits.data
                   ? '…'
                   : lastSynced
-                    ? `${waiting}${commits.data?.waitingMore ? '+' : ''} commit${waiting === 1 ? '' : 's'}`
-                    : '—'}
+                    ? `${waiting}${commits.data?.waitingMore ? '+' : ''} commit${waiting === 1 ? '' : 's'} not in the theme yet`
+                    : 'Run a full sync first'}
               </s-text>
-              <s-text color="subdued">{lastSynced ? 'not in the theme yet' : 'after the first sync'}</s-text>
             </KeyValue>
             <KeyValue label="Last sync">
               {lastRun && result ? (
                 <s-stack direction="inline" gap="small-200" alignItems="center">
                   <s-badge tone={result.tone}>{result.label}</s-badge>
-                  <s-text>{syncTypeLabel(lastRun.strategy)}</s-text>
+                  <s-text>{`${syncTypeLabel(lastRun.strategy)} · ${formatDate(lastRun.completedAt)}`}</s-text>
                 </s-stack>
+              ) : lastSynced ? (
+                // The commit was recorded from the theme's sync file (e.g. a copied theme), not by a sync here.
+                <s-text>{`Not synced from this app yet · recorded from the theme file ${formatDate(lastSynced.syncedAt)}`}</s-text>
               ) : (
-                <s-text type="strong">{checking ? '…' : 'None from this app'}</s-text>
+                <s-text>{checking ? '…' : 'No sync performed yet'}</s-text>
               )}
-              <s-text color="subdued">
-                {lastRun
-                  ? formatDate(lastRun.completedAt)
-                  : lastSynced
-                    ? 'commit recorded from the theme file'
-                    : 'run a full sync first'}
-              </s-text>
             </KeyValue>
           </s-grid>
         </CardSection>
