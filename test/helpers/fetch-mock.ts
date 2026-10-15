@@ -64,3 +64,37 @@ export function graphqlHandler(routes: Record<string, (variables: Record<string,
     return json({ data: route(variables) });
   };
 }
+
+/**
+ * GitHub repository metadata, branches and the access check for acme/theme
+ * (used when a mapping is created and before a sync writes). Register after
+ * the test's own GitHub handlers so theirs win.
+ */
+export function githubRepoHandler(branches: string[] = ['main', 'UI-changes', 'feature']): Handler {
+  return (req) => {
+    const url = new URL(req.url);
+    if (url.hostname !== 'api.github.com') return undefined;
+    if (url.pathname === '/repos/acme/theme') {
+      return json({
+        id: 1,
+        full_name: 'acme/theme',
+        name: 'theme',
+        owner: { login: 'acme' },
+        private: true,
+        default_branch: 'main',
+        html_url: 'https://github.com/acme/theme',
+        updated_at: null,
+        permissions: { pull: true, push: false, admin: false },
+      });
+    }
+    const branch = /^\/repos\/acme\/theme\/branches\/(.+)$/.exec(url.pathname);
+    if (branch) {
+      const name = decodeURIComponent(branch[1]!);
+      return branches.includes(name)
+        ? json({ name, commit: { sha: 'b'.repeat(40) }, protected: false })
+        : json({ message: 'Branch not found' }, { status: 404 });
+    }
+    if (url.pathname === '/repos/acme/theme/commits') return json([]);
+    return undefined;
+  };
+}

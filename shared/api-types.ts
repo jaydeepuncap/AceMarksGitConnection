@@ -31,6 +31,8 @@ export type ApiErrorCode =
   | 'CODE_ERRORS'
   | 'DIRECT_EDITS_FOUND'
   | 'ALREADY_SYNCED'
+  | 'MAPPING_REQUIRED'
+  | 'MAPPING_CONFLICT'
   | 'UPSTREAM_TIMEOUT'
   | 'SERVER_MISCONFIGURED'
   | 'DATABASE_NOT_MIGRATED'
@@ -320,7 +322,10 @@ export interface SyncPreviewSummary {
   creates: number;
   updates: number;
   deletes: number;
+  /** Skipped for another reason than an ignore pattern (too large, protected, deletions off, …). */
   skipped: number;
+  /** Excluded by the ignore patterns in Settings (never written or deleted). */
+  ignored: number;
   total: number;
 }
 
@@ -397,6 +402,8 @@ export interface SyncRun {
   filesSucceeded: number;
   filesFailed: number;
   filesSkipped: number;
+  /** Of the skipped files, those excluded by ignore patterns. */
+  filesIgnored: number;
   errorDetails: { code: string; message: string } | null;
   attempt: number;
   initiatedAt: string;
@@ -476,4 +483,32 @@ export interface IgnorePreviewResponse {
   /** Files excluded by at least one pattern. */
   ignoredFiles: number;
   patterns: IgnorePatternMatch[];
+}
+
+/** A repository branch connected to a Shopify theme (one theme per branch, one branch per theme). */
+export interface ThemeMapping {
+  id: string;
+  repository: string;
+  branch: string;
+  themeId: string;
+  themeName: string;
+  createdAt: string;
+}
+
+export interface ThemeMappingsResponse {
+  items: ThemeMapping[];
+}
+
+export interface CreateThemeMappingRequest {
+  /** `owner/name`; defaults to Settings → repository. */
+  repository?: string;
+  branch: string;
+  themeId: string;
+}
+
+/** Changing a mapping replaces it (the old one stays in the audit trail). */
+export interface UpdateThemeMappingRequest {
+  branch?: string;
+  themeId?: string;
+  confirm: true;
 }

@@ -12,6 +12,10 @@ import type {
   ApiErrorBody,
   ApiErrorCode,
   IgnorePreviewResponse,
+  CreateThemeMappingRequest,
+  ThemeMapping,
+  ThemeMappingsResponse,
+  UpdateThemeMappingRequest,
   ApiResponse,
   AppSettings,
   CommitDetail,
@@ -165,6 +169,13 @@ export const api = {
     branches: (query: { repository?: string; page?: number; perPage?: number } = {}) =>
       apiRequest<Paginated<GithubBranch>>('GET', '/api/github/branches', { query }),
   },
+  mappings: {
+    list: () => apiRequest<ThemeMappingsResponse>('GET', '/api/mappings'),
+    create: (body: CreateThemeMappingRequest) => apiRequest<ThemeMapping>('POST', '/api/mappings', { body }),
+    update: (id: string, body: UpdateThemeMappingRequest) =>
+      apiRequest<ThemeMapping>('PUT', `/api/mappings/${encodeURIComponent(id)}`, { body }),
+    remove: (id: string) => apiRequest<ThemeMapping>('DELETE', `/api/mappings/${encodeURIComponent(id)}`, { body: { confirm: true } }),
+  },
   themes: {
     list: (refresh = false) => apiRequest<ShopifyTheme[]>('GET', '/api/themes', { query: { refresh: refresh ? 1 : undefined } }),
     lastSynced: () => apiRequest<Record<string, LastSynced>>('GET', '/api/themes/last-synced'),
@@ -185,6 +196,7 @@ export const api = {
     get: (id: string) => apiRequest<SyncRunDetail>('GET', `/api/sync/history/${encodeURIComponent(id)}`),
     retry: (id: string, body: RetrySyncRequest = {}) =>
       apiRequest<SyncRun>('POST', `/api/sync/history/${encodeURIComponent(id)}/retry`, { body }),
+    last: (query: { themeId: string; branch?: string }) => apiRequest<SyncRun | null>('GET', '/api/sync/last', { query }),
     restore: (id: string, body: RetrySyncRequest = {}) =>
       apiRequest<SyncRun>('POST', `/api/sync/history/${encodeURIComponent(id)}/restore`, { body }),
   },

@@ -17,7 +17,9 @@ import { createAdminClientForShop, createGithubClientForShop } from '../lib/clie
 import { gitBlobSha, bytesToBase64 } from '../lib/crypto';
 import {
   addBackedUp,
+  addIgnored,
   countOperations,
+  getSettings,
   listLastSyncedForTheme,
   saveLastSynced,
   findShopById,
@@ -39,13 +41,15 @@ import {
   waitForJob,
   type ShopifyGraphqlClient,
   getThemeFileBodies,
+  getThemeFilesMetadata,
   type ThemeFileBody,
 } from '../lib/shopify-graphql';
 import { THEME_SYNC_MARKER_PATH } from '../../shared/theme-paths';
 import { checkThemeFile } from './code-check';
 import { buildThemeSyncMarker, fetchThemeSyncMarker, type ThemeSyncMarker } from './theme-state';
 import { splitRepository } from '../lib/validators';
-import { MAX_FILE_BYTES } from './planner';
+import { IGNORED_REASON, MAX_FILE_BYTES, md5Matches } from './planner';
+import { isIgnored } from '../../shared/theme-paths';
 import type { SyncHistoryRow, SyncOperationRow } from '../../drizzle/schema';
 
 const MAX_OPERATION_ATTEMPTS = 3;
@@ -161,12 +165,13 @@ async function processUpserts(
   ops: SyncOperationRow[],
 ): Promise<void> {
   const { db, shopId, github, admin, logger } = ctx;
-  const ready: { op: SyncOperationRow; body: ThemeFileBody; bytes: number }[] = [];
+  const ready: { op: SyncOperationRow; body: ThemeFileBody; bytes: number; bytesRaw: Uint8Array }[] = [];
 
   for (const op of ops) {
     try {
-      const bytes = await fetchVerifiedContent(github, run.repository, run.commitSha, op);
-      ready.push({ op, body: encodeBody(bytes), bytes: bytes.byteLength });
+      // Multi-commit syncs take each file from the commit that last changed it.
+      const bytes = await fetchVerifiedContent(github, run.repository, op.sourceCommitSha ?? run.commitSha, op);
+      ready.push({ op, body: encodeBody(bytes), bytes: bytes.byteLength, bytesRaw: bytes });
     } catch (err) {
       // Rate limits abort the chunk so the dispatcher can back off; nothing was written.
       if (err instanceof ApiError && err.code === 'GITHUB_RATE_LIMITED') throw err;
@@ -191,9 +196,28 @@ async function processUpserts(
   }
   if (current.length > 0) batches.push(current);
 
-  for (const batch of batches) {
-    const batchOps = batch.map((b) => b.op);
+  for (const fullBatch of batches) {
+    let batch = fullBatch;
+    let batchOps = batch.map((b) => b.op);
     try {
+      // Files whose content is already identical in the theme (checked against
+      // the theme as it is now) are not written again.
+      const current = await getThemeFilesMetadata(admin, run.themeId, batchOps.map((o) => o.path));
+      const identical = batch.filter((b) => {
+        const checksum = current.get(b.op.path)?.checksumMd5;
+        return !!checksum && md5Matches(b.bytesRaw, checksum);
+      });
+      if (identical.length > 0) {
+        await updateOperations(db, shopId, identical.map((b) => b.op.id), {
+          status: 'skipped',
+          skipReason: 'Already identical in the theme',
+          error: null,
+          incrementAttempts: true,
+        });
+        batch = batch.filter((b) => !identical.includes(b));
+        batchOps = batch.map((b) => b.op);
+        if (batch.length === 0) continue;
+      }
       // Step 5: the theme's current version of these files is saved first.
       await backupFiles(ctx, run, batchOps.map((o) => o.path));
       const result = await upsertThemeFiles(
@@ -425,10 +449,22 @@ export async function processSyncChunk(
   }
 
   const ctx = { db, shopId, github, admin, logger, kv: env.KV, fetchImpl: options.fetchImpl };
+  const ignorePatterns = (await getSettings(db, shopId)).syncPreferences.ignorePatterns;
   try {
     while (Date.now() < options.deadline) {
-      const pending = await listPendingOperations(db, shopId, syncId, THEME_WRITE_BATCH_LIMIT);
-      if (pending.length === 0) break;
+      const listed = await listPendingOperations(db, shopId, syncId, THEME_WRITE_BATCH_LIMIT);
+      if (listed.length === 0) break;
+      // Ignored files are never modified, even when the pattern was added after the preview.
+      const nowIgnored = listed.filter((op) => isIgnored(op.path, ignorePatterns));
+      for (const op of nowIgnored) {
+        await updateOperations(db, shopId, [op.id], {
+          status: 'skipped',
+          skipReason: `${IGNORED_REASON} "${isIgnored(op.path, ignorePatterns)}" (added after the preview)`,
+          error: null,
+        });
+      }
+      await addIgnored(db, shopId, syncId, nowIgnored.length);
+      const pending = listed.filter((op) => !nowIgnored.includes(op));
       const deletes = pending.filter((op) => op.action === 'delete');
       const upserts = pending.filter((op) => op.action === 'upsert');
       if (upserts.length > 0) await processUpserts(ctx, run, upserts);

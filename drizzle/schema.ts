@@ -245,6 +245,11 @@ export const syncOperations = sqliteTable(
     skipReason: text('skip_reason'),
     attempts: integer('attempts').notNull().default(0),
     error: text('error'),
+    /**
+     * Commit the content comes from when it differs from the run's commit
+     * (multi-commit syncs: the newest selected commit that changed the file).
+     */
+    sourceCommitSha: text('source_commit_sha'),
     updatedAt: updatedAt(),
   },
   (t) => [
@@ -275,6 +280,40 @@ export const themeBranchSync = sqliteTable(
     updatedAt: updatedAt(),
   },
   (t) => [uniqueIndex('theme_branch_sync_unique').on(t.shopId, t.themeId, t.branch)],
+);
+
+// ---------------------------------------------------------------------------
+// theme_mappings — which repository branch a Shopify theme is connected to.
+// One active mapping per branch and per theme (partial unique indexes on rows
+// that are not removed); removed mappings stay as an audit trail.
+// ---------------------------------------------------------------------------
+export const themeMappings = sqliteTable(
+  'theme_mappings',
+  {
+    id: id(),
+    shopId: text('shop_id')
+      .notNull()
+      .references(() => shops.id, { onDelete: 'cascade' }),
+    /** `owner/name` as GitHub reports it. */
+    repository: text('repository').notNull(),
+    branch: text('branch').notNull(),
+    themeId: text('theme_id').notNull(),
+    themeName: text('theme_name').notNull(),
+    createdBy: text('created_by'),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+    removedAt: integer('removed_at', { mode: 'timestamp_ms' }),
+    removedBy: text('removed_by'),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex('theme_mappings_active_branch_unique')
+      .on(t.shopId, t.repository, t.branch)
+      .where(sql`removed_at is null`),
+    uniqueIndex('theme_mappings_active_theme_unique').on(t.shopId, t.themeId).where(sql`removed_at is null`),
+    index('theme_mappings_shop_idx').on(t.shopId),
+  ],
 );
 
 // ---------------------------------------------------------------------------
@@ -316,3 +355,4 @@ export type AppSettingsRow = typeof appSettings.$inferSelect;
 export type SyncHistoryRow = typeof syncHistory.$inferSelect;
 export type SyncOperationRow = typeof syncOperations.$inferSelect;
 export type ThemeBranchSyncRow = typeof themeBranchSync.$inferSelect;
+export type ThemeMappingRow = typeof themeMappings.$inferSelect;

@@ -30,6 +30,7 @@ import { requireShopifySession } from './middleware/shopify-session-token';
 import { commitsRoutes } from './routes/commits';
 import { githubRoutes } from './routes/github';
 import { healthRoutes } from './routes/health';
+import { mappingsRoutes } from './routes/mappings';
 import { appBaseUrl, decodeAdminHost, oauthRoutes } from './routes/oauth';
 import { settingsRoutes } from './routes/settings';
 import { syncRoutes } from './routes/sync';
@@ -69,6 +70,7 @@ app.route('/api/settings', settingsRoutes);
 app.route('/api/github', githubRoutes);
 app.route('/api/themes', themesRoutes);
 app.route('/api/commits', commitsRoutes);
+app.route('/api/mappings', mappingsRoutes);
 app.route('/api/sync', syncRoutes);
 app.all('/api/*', notFoundHandler);
 

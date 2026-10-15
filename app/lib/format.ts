@@ -66,3 +66,26 @@ export function themeFileLabel(path: string): string {
   const label = `${words} ${kind}`;
   return label.charAt(0).toUpperCase() + label.slice(1);
 }
+
+/** The sync type a strategy stands for, in the words of the UI. */
+export function syncTypeLabel(strategy: string): string {
+  switch (strategy) {
+    case 'full_snapshot':
+      return 'Full sync';
+    case 'commit_changes':
+      return 'Single commit';
+    case 'selected_commits':
+      return 'Multiple commits';
+    case 'since_last_sync':
+      return 'Multiple commits (since last sync)';
+    default:
+      return strategy;
+  }
+}
+
+/** Overall result of a finished sync, never "successful" unless every file succeeded. */
+export const RESULT_BADGE: Partial<Record<SyncStatus, { label: string; tone: Tone }>> = {
+  succeeded: { label: 'Successful', tone: 'success' },
+  partially_failed: { label: 'Partially successful', tone: 'warning' },
+  failed: { label: 'Failed', tone: 'critical' },
+};

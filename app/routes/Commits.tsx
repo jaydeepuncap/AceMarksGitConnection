@@ -14,7 +14,6 @@ const COMMITS_PER_PAGE = 20;
 const FILES_PER_PAGE = 100;
 /** Select values for "no choice" — an empty option value is not reliable in <s-select>. */
 const DEFAULT_BRANCH = '__default__';
-const NO_THEME = '__none__';
 
 const SYNC_STATUS: Record<CommitSyncStatus, { label: string; tone: Tone }> = {
   new: { label: 'New', tone: 'info' },
@@ -180,12 +179,12 @@ export default function Commits() {
   const [params] = useSearchParams();
   const settings = useApiQuery(() => api.settings.get(), []);
   const themes = useApiQuery(() => api.themes.list(), []);
+  const mappings = useApiQuery(() => api.mappings.list(), []);
 
   const defaults = settings.data?.settings;
-  const [branch, setBranch] = useState('');
+  const [branch, setBranch] = useState(params.get('branch') ?? '');
   const [page, setPage] = useState(1);
   const [selectedSha, setSelectedSha] = useState<string | null>(null);
-  const [themeId, setThemeId] = useState(params.get('themeId') ?? '');
   const [strategy, setStrategy] = useState<SyncStrategy>('since_last_sync');
   const [allowDeletes, setAllowDeletes] = useState(false);
   const [preview, setPreview] = useState<SyncPreview | null>(null);
@@ -194,12 +193,21 @@ export default function Commits() {
   useEffect(() => {
     if (!defaults) return;
     setBranch((b) => b || defaults.defaultBranch || '');
-    setThemeId((t) => t || defaults.defaultThemeId || '');
     setStrategy(defaults.syncPreferences.strategy);
     setAllowDeletes(defaults.syncPreferences.allowDeletes);
   }, [defaults]);
 
   const repository = defaults?.defaultRepository ?? '';
+  // Opened from a theme (?themeId=): use the branch that theme is mapped to.
+  const linkedTheme = params.get('themeId');
+  useEffect(() => {
+    const m = linkedTheme ? mappings.data?.items.find((x) => x.themeId === linkedTheme) : undefined;
+    if (m) setBranch(m.branch);
+  }, [linkedTheme, mappings.data]);
+  // The theme is the one mapped to the branch (Theme mapping page); never chosen freely here.
+  const mapping =
+    mappings.data?.items.find((m) => m.repository.toLowerCase() === repository.toLowerCase() && m.branch === branch) ?? null;
+  const themeId = mapping?.themeId ?? '';
   const branches = useApiQuery(() => api.github.branches({ repository, perPage: 100 }), [repository], !!repository);
   const commits = useApiQuery(
     () =>
@@ -301,22 +309,26 @@ export default function Commits() {
                 </s-option>
               ))}
             </s-select>
-            <s-select
-              label="Target theme"
-              value={themeId || NO_THEME}
-              onChange={(event) => {
-                const value = event.currentTarget.value;
-                setThemeId(value === NO_THEME ? '' : value);
-                setSelectedSha(null);
-              }}
-            >
-              <s-option value={NO_THEME}>Select a theme</s-option>
-              {writableThemes.map((t) => (
-                <s-option key={t.id} value={t.id}>
-                  {`${t.name}${t.isLive ? ' (LIVE)' : ''}`}
-                </s-option>
-              ))}
-            </s-select>
+            <s-stack gap="small-200">
+              <s-text type="strong">Mapped theme</s-text>
+              {mapping ? (
+                <s-text>
+                  {`${mapping.themeName}${selectedTheme?.isLive ? ' (LIVE)' : ''}`}{' '}
+                  <s-button variant="tertiary" onClick={() => navigate(`/mappings?branch=${encodeURIComponent(branch)}`)}>
+                    Change
+                  </s-button>
+                </s-text>
+              ) : (
+                <s-text color="subdued">
+                  {mappings.loading ? 'Loading…' : 'No theme mapped to this branch. '}
+                  {!mappings.loading && (
+                    <s-button variant="tertiary" onClick={() => navigate(`/mappings?branch=${encodeURIComponent(branch)}`)}>
+                      Map a theme
+                    </s-button>
+                  )}
+                </s-text>
+              )}
+            </s-stack>
             <s-select
               label="Push"
               details="Default from Settings → Sync preferences"

@@ -6,6 +6,7 @@
  *                                     executes exactly the previewed plan in the background (202)
  *   GET  /api/sync/history            ?page&perPage&status&includePreviews
  *   GET  /api/sync/history/:id        run + per-file operations
+ *   GET  /api/sync/last               ?themeId&branch  the latest sync with a recorded result (or null)
  *   POST /api/sync/history/:id/retry  re-runs failed/pending operations (idempotent writes)
  *   POST /api/sync/history/:id/restore puts the theme back as it was before an incomplete update
  */
@@ -17,6 +18,9 @@ import { adminClient, githubClient, resolveRepository } from '../lib/clients';
 import {
   claimRestore,
   findActiveSyncForTheme,
+  getActiveMappingForTheme,
+  latestCompletedRun,
+  type Database,
   getDb,
   getSettings,
   getSyncRun,
@@ -33,9 +37,11 @@ import { getTheme } from '../lib/shopify-graphql';
 import {
   confirmSyncSchema,
   historyQuerySchema,
+  lastSyncQuerySchema,
   parseOrThrow,
   readJsonBody,
   retrySyncSchema,
+  splitRepository,
   syncPreviewSchema,
   uuidSchema,
 } from '../lib/validators';
@@ -56,11 +62,44 @@ const syncLimiter = rateLimit({
  * published since the preview). Modifying the live theme requires
  * confirmLiveTheme=true AND the exact theme name typed by the user.
  */
+/**
+ * A theme only receives syncs from the repository branch it is mapped to
+ * (Theme mapping page). Checked when previewing and again before writing.
+ */
+async function assertMapped(db: Database, shopId: string, themeId: string, repository: string, branch: string | null) {
+  const mapping = await getActiveMappingForTheme(db, shopId, themeId);
+  if (!mapping) {
+    throw new ApiError(
+      409,
+      'MAPPING_REQUIRED',
+      `This theme is not mapped to a branch yet. Map ${branch ?? 'a branch'} to it on the Theme mapping page first.`,
+    );
+  }
+  if (mapping.repository.toLowerCase() !== repository.toLowerCase() || mapping.branch !== branch) {
+    throw new ApiError(
+      409,
+      'MAPPING_CONFLICT',
+      `${mapping.themeName} is mapped to ${mapping.repository} · ${mapping.branch}, not ${repository} · ${branch ?? '(no branch)'}.`,
+      { details: { mappingId: mapping.id, branch: mapping.branch } },
+    );
+  }
+  return mapping;
+}
+
 async function assertWriteAllowed(
   c: Context<AppEnv>,
   run: SyncHistoryRow,
   confirmation: { confirmLiveTheme?: boolean; confirmThemeName?: string },
+  opts: { revalidateSource?: boolean } = {},
 ): Promise<{ isLive: boolean }> {
+  if (opts.revalidateSource) {
+    // The mapping, repository access and branch are checked again right before writing.
+    await assertMapped(getDb(c.env.DB), run.shopId, run.themeId, run.repository, run.branch);
+    const { client } = await githubClient(c);
+    const { owner, repo } = splitRepository(run.repository);
+    await client.verifyRepositoryAccess(owner, repo);
+    if (run.branch) await client.getBranch(owner, repo, run.branch);
+  }
   const theme = await getTheme(await adminClient(c), run.themeId);
   if (!theme) throw new ApiError(404, 'NOT_FOUND', 'The target theme no longer exists in this store');
   if (!theme.writable) throw new ApiError(409, 'THEME_NOT_WRITABLE', `A ${theme.role} theme cannot be modified`);
@@ -91,9 +130,14 @@ export const syncRoutes = new Hono<AppEnv>()
     const settings = await getSettings(db, shop.id);
     const { client: github, connection } = await githubClient(c);
     const target = await resolveRepository(c, connection, body.repository);
-    // The branch is needed to know the theme's last synced commit on it.
+    // The branch the theme is mapped to, unless the request names one (which must match).
+    const mapped = await getActiveMappingForTheme(db, shop.id, body.themeId);
     const branch =
-      body.branch ?? target.defaultBranch ?? (await github.getRepository(target.owner, target.repo)).defaultBranch;
+      body.branch ??
+      mapped?.branch ??
+      target.defaultBranch ??
+      (await github.getRepository(target.owner, target.repo)).defaultBranch;
+    await assertMapped(db, shop.id, body.themeId, target.fullName, branch);
 
     const preview = await buildSyncPreview(
       { db, github, admin: await adminClient(c), kv: c.env.KV, logger: c.get('logger') },
@@ -146,7 +190,7 @@ export const syncRoutes = new Hono<AppEnv>()
       );
     }
 
-    const { isLive } = await assertWriteAllowed(c, run, body);
+    const { isLive } = await assertWriteAllowed(c, run, body, { revalidateSource: true });
 
     // Atomic previewed → queued: a double-submit cannot start two runs.
     const queued = await transitionSyncRun(db, shop.id, run.id, ['previewed'], 'queued', {
@@ -168,6 +212,12 @@ export const syncRoutes = new Hono<AppEnv>()
       perPage: query.perPage,
       hasNextPage,
     });
+  })
+  .get('/last', async (c) => {
+    // Only a sync that produced a recorded result counts (never a queued or running job).
+    const query = parseOrThrow(lastSyncQuerySchema, c.req.query());
+    const run = await latestCompletedRun(getDb(c.env.DB), c.get('auth').shop.id, query.themeId, query.branch ?? null);
+    return ok<SyncRun | null>(c, run ? toSyncRunDto(run) : null);
   })
   .get('/history/:id', async (c) => {
     const id = parseOrThrow(uuidSchema, c.req.param('id'));
@@ -210,7 +260,7 @@ export const syncRoutes = new Hono<AppEnv>()
       throw new ApiError(409, 'CONFLICT', 'The backup of this update was restored; run the full update again instead');
     }
 
-    const { isLive } = await assertWriteAllowed(c, run, body);
+    const { isLive } = await assertWriteAllowed(c, run, body, { revalidateSource: true });
     const reset = await resetFailedOperations(db, shop.id, id);
     const queued = await transitionSyncRun(db, shop.id, id, ['failed', 'partially_failed'], 'queued', {
       attempt: run.attempt + 1,

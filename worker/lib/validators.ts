@@ -237,3 +237,29 @@ export async function readJsonBody(request: Request, maxBytes = 256 * 1024): Pro
     throw badRequest('Request body is not valid JSON');
   }
 }
+
+export const createMappingSchema = z
+  .object({
+    repository: repositorySchema.optional(),
+    branch: branchSchema,
+    themeId: themeIdSchema,
+  })
+  .strict();
+
+export const updateMappingSchema = z
+  .object({
+    branch: branchSchema.optional(),
+    themeId: themeIdSchema.optional(),
+    confirm: z.literal(true),
+  })
+  .strict()
+  .refine((v) => v.branch !== undefined || v.themeId !== undefined, 'Give a new branch or theme');
+
+export const removeMappingSchema = z.object({ confirm: z.literal(true) }).strict();
+
+export const lastSyncQuerySchema = z
+  .object({
+    themeId: themeIdSchema,
+    branch: branchSchema.optional(),
+  })
+  .strict();

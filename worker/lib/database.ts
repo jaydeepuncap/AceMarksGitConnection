@@ -4,7 +4,7 @@
  * clause, so a request authenticated for shop A can never read or modify rows
  * that belong to shop B, even with a guessed record ID.
  */
-import { and, desc, eq, inArray, ne, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
 import { drizzle, type DrizzleD1Database } from 'drizzle-orm/d1';
 import * as schema from '../../drizzle/schema';
 import { classifyFailure } from '../sync/failures';
@@ -16,8 +16,10 @@ import {
   syncHistory,
   syncOperations,
   themeBranchSync,
+  themeMappings,
   type AppSettingsRow,
   type ThemeBranchSyncRow,
+  type ThemeMappingRow,
   type GithubConnection,
   type Shop,
   type SyncHistoryRow,
@@ -35,6 +37,7 @@ import {
   type SyncOperation,
   type SyncPreferences,
   type SyncRun,
+  type ThemeMapping,
 } from '../../shared/api-types';
 
 export type Database = DrizzleD1Database<typeof schema>;
@@ -404,7 +407,7 @@ export async function updateOperations(
   db: Database,
   shopId: string,
   ids: string[],
-  values: Partial<Pick<SyncOperationRow, 'status' | 'error'>> & { incrementAttempts?: boolean },
+  values: Partial<Pick<SyncOperationRow, 'status' | 'error' | 'skipReason'>> & { incrementAttempts?: boolean },
 ): Promise<void> {
   if (ids.length === 0) return;
   const { incrementAttempts, ...rest } = values;
@@ -494,6 +497,7 @@ export function toSyncRunDto(row: SyncHistoryRow): SyncRun {
     filesSucceeded: row.filesSucceeded,
     filesFailed: row.filesFailed,
     filesSkipped: row.filesSkipped,
+    filesIgnored: typeof options.ignored === 'number' ? options.ignored : 0,
     errorDetails: details?.message ? { code: details.code ?? 'ERROR', message: details.message } : null,
     attempt: row.attempt,
     initiatedAt: iso(row.initiatedAt) ?? new Date(0).toISOString(),
@@ -527,16 +531,23 @@ export function toSyncOperationDto(row: SyncOperationRow): SyncOperation {
   };
 }
 
-/** Adds `n` to options.backedUp (files saved before they changed). */
-export async function addBackedUp(db: Database, shopId: string, syncId: string, n: number): Promise<void> {
+/** Adds `n` to a numeric counter in the run's options (backedUp, ignored). */
+async function addToRunCounter(db: Database, shopId: string, syncId: string, key: 'backedUp' | 'ignored', n: number): Promise<void> {
   if (n <= 0) return;
+  const path = `$.${key}`;
   await db
     .update(syncHistory)
     .set({
-      options: sql`json_set(${syncHistory.options}, '$.backedUp', coalesce(json_extract(${syncHistory.options}, '$.backedUp'), 0) + ${n})`,
+      options: sql`json_set(${syncHistory.options}, ${path}, coalesce(json_extract(${syncHistory.options}, ${path}), 0) + ${n})`,
     })
     .where(and(eq(syncHistory.id, syncId), eq(syncHistory.shopId, shopId)));
 }
+
+/** Adds `n` to options.backedUp (files saved before they changed). */
+export const addBackedUp = (db: Database, shopId: string, syncId: string, n: number) => addToRunCounter(db, shopId, syncId, 'backedUp', n);
+
+/** Adds `n` to options.ignored (files excluded by ignore patterns). */
+export const addIgnored = (db: Database, shopId: string, syncId: string, n: number) => addToRunCounter(db, shopId, syncId, 'ignored', n);
 
 /**
  * Commits of `shas` fully synced to the theme from `branch`
@@ -691,4 +702,123 @@ export async function listLastSyncedForTheme(db: Database, shopId: string, theme
     .from(themeBranchSync)
     .where(and(eq(themeBranchSync.shopId, shopId), eq(themeBranchSync.themeId, themeId)))
     .orderBy(desc(themeBranchSync.syncedAt));
+}
+
+// ---------------------------------------------------------------------------
+// Theme mappings (repository branch ↔ Shopify theme)
+// ---------------------------------------------------------------------------
+export function toThemeMappingDto(row: ThemeMappingRow): ThemeMapping {
+  return {
+    id: row.id,
+    repository: row.repository,
+    branch: row.branch,
+    themeId: row.themeId,
+    themeName: row.themeName,
+    createdAt: row.createdAt.toISOString(),
+  };
+}
+
+const activeMapping = (shopId: string) => and(eq(themeMappings.shopId, shopId), isNull(themeMappings.removedAt));
+
+export async function listActiveMappings(db: Database, shopId: string): Promise<ThemeMappingRow[]> {
+  return db.select().from(themeMappings).where(activeMapping(shopId)).orderBy(themeMappings.repository, themeMappings.branch);
+}
+
+export async function getMappingById(db: Database, shopId: string, id: string): Promise<ThemeMappingRow | undefined> {
+  return db.query.themeMappings.findFirst({ where: and(eq(themeMappings.shopId, shopId), eq(themeMappings.id, id)) });
+}
+
+export async function getActiveMappingForTheme(db: Database, shopId: string, themeId: string): Promise<ThemeMappingRow | undefined> {
+  return db.query.themeMappings.findFirst({ where: and(activeMapping(shopId), eq(themeMappings.themeId, themeId)) });
+}
+
+export async function getActiveMappingForBranch(
+  db: Database,
+  shopId: string,
+  repository: string,
+  branch: string,
+): Promise<ThemeMappingRow | undefined> {
+  return db.query.themeMappings.findFirst({
+    where: and(
+      activeMapping(shopId),
+      sql`lower(${themeMappings.repository}) = ${repository.toLowerCase()}`,
+      eq(themeMappings.branch, branch),
+    ),
+  });
+}
+
+/** SQLite/D1 unique-index violation (possibly wrapped by Drizzle). */
+export function isUniqueViolation(err: unknown): boolean {
+  for (let e: unknown = err; e; e = (e as { cause?: unknown }).cause) {
+    if (e instanceof Error && /UNIQUE constraint failed/i.test(e.message)) return true;
+    if (typeof e !== 'object') break;
+  }
+  return false;
+}
+
+type MappingValues = { repository: string; branch: string; themeId: string; themeName: string; createdBy: string | null };
+
+/** Inserts a mapping; the partial unique indexes reject a second active mapping for the branch or theme. */
+export async function createMapping(db: Database, shopId: string, values: MappingValues): Promise<ThemeMappingRow> {
+  const [row] = await db.insert(themeMappings).values({ shopId, ...values }).returning();
+  return row!;
+}
+
+/** Atomically retires `previousId` and inserts its replacement (one transaction). */
+export async function replaceMapping(
+  db: Database,
+  shopId: string,
+  previousId: string,
+  values: MappingValues,
+): Promise<ThemeMappingRow> {
+  const now = new Date();
+  const [, inserted] = await db.batch([
+    db
+      .update(themeMappings)
+      .set({ removedAt: now, removedBy: values.createdBy, updatedAt: now })
+      .where(and(activeMapping(shopId), eq(themeMappings.id, previousId)))
+      .returning({ id: themeMappings.id }),
+    db.insert(themeMappings).values({ shopId, ...values }).returning(),
+  ]);
+  return inserted[0]!;
+}
+
+/** Retires an active mapping (kept for the audit trail). */
+export async function removeMapping(
+  db: Database,
+  shopId: string,
+  id: string,
+  removedBy: string | null,
+): Promise<ThemeMappingRow | undefined> {
+  const now = new Date();
+  const [row] = await db
+    .update(themeMappings)
+    .set({ removedAt: now, removedBy, updatedAt: now })
+    .where(and(activeMapping(shopId), eq(themeMappings.id, id)))
+    .returning();
+  return row;
+}
+
+/** The most recent sync of a theme that produced a result (succeeded, partially failed or failed). */
+export async function latestCompletedRun(
+  db: Database,
+  shopId: string,
+  themeId: string,
+  branch: string | null,
+): Promise<SyncHistoryRow | undefined> {
+  const [row] = await db
+    .select()
+    .from(syncHistory)
+    .where(
+      and(
+        eq(syncHistory.shopId, shopId),
+        eq(syncHistory.themeId, themeId),
+        inArray(syncHistory.status, ['succeeded', 'partially_failed', 'failed']),
+        sql`${syncHistory.completedAt} is not null`,
+        ...(branch ? [eq(syncHistory.branch, branch)] : []),
+      ),
+    )
+    .orderBy(desc(syncHistory.completedAt))
+    .limit(1);
+  return row;
 }

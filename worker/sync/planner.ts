@@ -91,6 +91,10 @@ function skip(path: string, sourcePath: string | null, changeType: string, reaso
   };
 }
 
+/** Skip reason prefix for files excluded by the merchant's ignore patterns. */
+export const IGNORED_REASON = 'Matches ignore pattern';
+export const isIgnoredOp = (op: { skipReason: string | null }) => !!op.skipReason?.startsWith(IGNORED_REASON);
+
 /** Maps a repository path to a validated theme path, or returns a skip reason. */
 export function mapPath(
   repoPath: string,
@@ -102,7 +106,7 @@ export function mapPath(
   const check = validateThemePath(themePath);
   if (!check.ok) return { ok: false, reason: check.reason, themePath };
   const ignoredBy = isIgnored(themePath, prefs.ignorePatterns);
-  if (ignoredBy) return { ok: false, reason: `Matches ignore pattern "${ignoredBy}"`, themePath };
+  if (ignoredBy) return { ok: false, reason: `${IGNORED_REASON} "${ignoredBy}"`, themePath };
   return { ok: true, themePath };
 }
 
@@ -222,7 +226,7 @@ async function themeTree(
   repo: string,
   treeSha: string,
   prefs: SyncPreferences,
-): Promise<Map<string, TreeFile> & { outside?: number }> {
+): Promise<ThemeTree> {
   const tree = await github.getTree(owner, repo, treeSha);
   if (tree.truncated) {
     throw new ApiError(
@@ -231,20 +235,27 @@ async function themeTree(
       'The repository tree is too large for GitHub to list in one request. Set a theme root folder in Settings so only the theme directory is synced.',
     );
   }
-  const files: Map<string, TreeFile> & { outside?: number } = new Map<string, TreeFile>();
+  const files = new Map<string, TreeFile>() as ThemeTree;
+  files.ignored = new Map<string, TreeFile & { reason: string }>();
   let outside = 0;
   for (const entry of tree.entries) {
     // Regular files only (skip symlinks 120000 and submodules 160000).
     if (entry.type !== 'blob' || !(entry.mode === '100644' || entry.mode === '100755')) continue;
     const mapped = mapPath(entry.path, prefs);
-    if (mapped.ok) files.set(mapped.themePath, { repoPath: entry.path, sha: entry.sha, size: entry.size ?? null });
+    const file = { repoPath: entry.path, sha: entry.sha, size: entry.size ?? null };
+    if (mapped.ok) files.set(mapped.themePath, file);
+    else if (mapped.themePath && mapped.reason.startsWith(IGNORED_REASON)) files.ignored.set(mapped.themePath, { ...file, reason: mapped.reason });
     else outside++;
   }
   files.outside = outside;
   return files;
 }
 
-const md5Matches = (bytes: Uint8Array, checksum: string) => {
+/** Theme files of a commit tree, plus the files excluded by ignore patterns and the count of non-theme files. */
+type ThemeTree = Map<string, TreeFile> & { outside: number; ignored: Map<string, TreeFile & { reason: string }> };
+
+/** Whether `bytes` match a Shopify theme file checksum (hex or base64 MD5). */
+export const md5Matches = (bytes: Uint8Array, checksum: string) => {
   const digest = md5(bytes);
   const hex = [...digest].map((b) => b.toString(16).padStart(2, '0')).join('');
   return checksum.toLowerCase() === hex || checksum === bytesToBase64(digest);
@@ -413,7 +424,7 @@ export async function buildSyncPreview(
       );
     }
   }
-  let baseFiles: Map<string, TreeFile> | null = null;
+  let baseFiles: ThemeTree | null = null;
   let baseMessage: string | null = last?.commitMessage ?? null;
   if (last) {
     try {
@@ -426,6 +437,7 @@ export async function buildSyncPreview(
   }
 
   let ops: PlannedOp[];
+  let themeListing: Awaited<ReturnType<typeof listAllThemeFiles>> | null = null;
   let commitsIncluded: IncludedCommit[] = [
     { sha: input.commitSha, shortSha: input.commitSha.slice(0, 7), message: commitData.commit.commit.message },
   ];
@@ -485,6 +497,14 @@ export async function buildSyncPreview(
         ops.push({ path, sourcePath: file.repoPath, previousPath: null, action: 'delete', changeType: 'removed', existsInTheme: null, size: null, blobSha: null, skipReason: null });
       }
     }
+    // Ignored files that changed are listed (never written or deleted).
+    const baseIgnored = baseFiles.ignored;
+    for (const [path, file] of targetFiles.ignored) {
+      if (baseIgnored.get(path)?.sha !== file.sha) ops.push(skip(path, file.repoPath, baseIgnored.has(path) ? 'modified' : 'added', file.reason));
+    }
+    for (const [path, file] of baseIgnored) {
+      if (!targetFiles.ignored.has(path) && !targetFiles.has(path)) ops.push(skip(path, file.repoPath, 'removed', file.reason));
+    }
     if (deletesDisabled > 0) {
       warnings.push(`${deletesDisabled} file(s) removed since the last sync stay in the theme because deletions are disabled.`);
     }
@@ -524,8 +544,38 @@ export async function buildSyncPreview(
         skipReason: null,
       });
     }
+    for (const [path, file] of targetFiles.ignored) ops.push(skip(path, file.repoPath, 'snapshot', file.reason));
     if (targetFiles.outside) warnings.push(`${targetFiles.outside} repository file(s) are not theme files and were ignored.`);
-    warnings.push('Full snapshot never deletes theme files that are missing from the repository.');
+
+    // Theme files that are not in the repository: deleted only when explicitly chosen.
+    themeListing = await listAllThemeFiles(admin, theme.id);
+    const missing = themeListing
+      .map((f) => f.filename)
+      .filter(
+        (path) =>
+          !targetFiles.has(path) &&
+          path !== THEME_SYNC_MARKER_PATH &&
+          !isIgnored(path, input.preferences.ignorePatterns) &&
+          validateThemePath(path).ok,
+      )
+      .sort();
+    for (const path of missing) {
+      if (PROTECTED_THEME_FILES.includes(path)) {
+        ops.push(skip(path, null, 'missing_in_git', 'Protected file is never deleted'));
+      } else if (input.allowDeletes) {
+        ops.push({ path, sourcePath: null, previousPath: null, action: 'delete', changeType: 'missing_in_git', existsInTheme: true, size: null, blobSha: null, skipReason: null });
+      } else {
+        ops.push(skip(path, null, 'missing_in_git', 'Not in the repository; kept because deleting was not selected'));
+      }
+    }
+    const deletable = missing.filter((p) => !PROTECTED_THEME_FILES.includes(p)).length;
+    if (deletable > 0) {
+      warnings.push(
+        input.allowDeletes
+          ? `${deletable} theme file(s) are not in the repository and will be DELETED from the theme (review them below).`
+          : `${deletable} theme file(s) are not in the repository and stay unchanged. Choose "Delete theme files that are not in the repository" to remove them.`,
+      );
+    }
   }
 
   // Which of the included commits changed each file, so the preview shows where every file comes from.
@@ -554,7 +604,7 @@ export async function buildSyncPreview(
   const writes = ops.filter((op) => op.action !== 'skip');
   const existing =
     strategy === 'full_snapshot' || writes.length > 250
-      ? new Map((await listAllThemeFiles(admin, theme.id)).map((f) => [f.filename, f]))
+      ? new Map((themeListing ?? (await listAllThemeFiles(admin, theme.id))).map((f) => [f.filename, f]))
       : await getThemeFilesMetadata(
           admin,
           theme.id,
@@ -592,7 +642,8 @@ export async function buildSyncPreview(
     creates: ops.filter((op) => op.action === 'upsert' && !op.existsInTheme).length,
     updates: ops.filter((op) => op.action === 'upsert' && op.existsInTheme).length,
     deletes: ops.filter((op) => op.action === 'delete').length,
-    skipped: ops.filter((op) => op.action === 'skip').length,
+    skipped: ops.filter((op) => op.action === 'skip' && !isIgnoredOp(op)).length,
+    ignored: ops.filter(isIgnoredOp).length,
     total: ops.length,
   };
 
@@ -631,6 +682,7 @@ export async function buildSyncPreview(
       options: {
         allowDeletes: input.allowDeletes,
         themeRoot: input.preferences.themeRoot,
+        ignored: summary.ignored,
         baseSha: base?.sha ?? null,
         commitsIncluded: commitsIncluded.slice(0, 100),
         checks,

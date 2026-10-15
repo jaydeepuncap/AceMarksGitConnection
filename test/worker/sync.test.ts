@@ -6,7 +6,7 @@ import { createLogger } from '../../worker/lib/logger';
 import { handleSyncMessage } from '../../worker/sync/dispatch';
 import { planCommitChanges } from '../../worker/sync/planner';
 import { createTestEnv, sessionToken, type TestContext } from '../helpers/env';
-import { seedShop, SHA_B, THEME_DEV, THEME_LIVE } from '../helpers/fixtures';
+import { seedMapping, seedShop, SHA_B, THEME_DEV, THEME_LIVE } from '../helpers/fixtures';
 import { installWorld, PNG, REPO, type WorldOptions } from '../helpers/sync-world';
 
 const SHOP = 'alpha.myshopify.com';
@@ -80,11 +80,13 @@ describe('planCommitChanges', () => {
 describe('sync workflow', () => {
   let t: TestContext;
   let world: ReturnType<typeof installWorld>;
+  let shopId: string;
 
   async function setup(options: { world?: WorldOptions; withQueue?: boolean } = {}) {
     t = createTestEnv({ withQueue: options.withQueue });
     world = installWorld(options.world);
-    await seedShop(t.env, SHOP);
+    shopId = (await seedShop(t.env, SHOP)).id;
+    await seedMapping(t.env, shopId, THEME_DEV, 'main');
   }
   afterEach(() => vi.unstubAllGlobals());
 
@@ -120,7 +122,8 @@ describe('sync workflow', () => {
     it('builds a plan without modifying the theme', async () => {
       const { status, body } = await preview({});
       expect(status).toBe(201);
-      expect(body.data.summary).toEqual({ creates: 2, updates: 1, deletes: 0, skipped: 5, total: 8 });
+      // config/settings_data.json matches the default ignore pattern: counted as ignored, not skipped.
+      expect(body.data.summary).toEqual({ creates: 2, updates: 1, deletes: 0, skipped: 4, ignored: 1, total: 8 });
       expect(body.data.requiresLiveConfirmation).toBe(false);
       const header = body.data.operations.find((o) => o.path === 'sections/header.liquid');
       expect(header).toMatchObject({ action: 'upsert', existsInTheme: true });
@@ -134,16 +137,35 @@ describe('sync workflow', () => {
 
     it('rejects abbreviated SHAs and unknown themes', async () => {
       expect((await preview({ commitSha: 'bbbbbbb' })).status).toBe(400);
+      // A theme that is not mapped to the branch cannot be synced at all…
+      const unmapped = await preview({ themeId: 'gid://shopify/OnlineStoreTheme/999' });
+      expect(unmapped.status).toBe(409);
+      expect(unmapped.body.error.code).toBe('MAPPING_REQUIRED');
+      // …and a mapped theme that was deleted in Shopify is reported as not found.
+      await seedMapping(t.env, shopId, { id: 'gid://shopify/OnlineStoreTheme/999', name: 'Deleted' }, 'feature');
       const res = await preview({ themeId: 'gid://shopify/OnlineStoreTheme/999' });
       expect(res.status).toBe(404);
     });
 
-    it('full_snapshot uses the commit tree and never deletes', async () => {
-      const { body } = await preview({ strategy: 'full_snapshot', allowDeletes: true });
+    it('full sync uses the commit tree and deletes theme files missing in Git only when chosen', async () => {
+      const { body } = await preview({ strategy: 'full_snapshot' });
       const paths = body.data.operations.filter((o) => o.action === 'upsert').map((o) => o.path).sort();
       expect(paths).toEqual(['assets/logo.png', 'layout/theme.liquid', 'sections/header.liquid', 'snippets/new.liquid']);
-      expect(body.data.summary.deletes).toBe(0);
+      expect(body.data.summary).toMatchObject({ deletes: 0, ignored: 1 });
+      expect(body.data.operations.find((o) => o.path === 'snippets/old.liquid')).toMatchObject({
+        action: 'skip',
+        skipReason: 'Not in the repository; kept because deleting was not selected',
+      });
       expect(body.data.warnings.join(' ')).toMatch(/not theme files/);
+      expect(body.data.warnings.join(' ')).toMatch(/2 theme file\(s\) are not in the repository and stay unchanged/);
+
+      const withDeletes = (await preview({ strategy: 'full_snapshot', allowDeletes: true })).body.data;
+      expect(withDeletes.operations.filter((o) => o.action === 'delete').map((o) => o.path).sort()).toEqual([
+        'snippets/gone.liquid',
+        'snippets/old.liquid',
+      ]);
+      // layout/theme.liquid exists in Git; protected and ignored files are never deleted.
+      expect(withDeletes.warnings.join(' ')).toMatch(/2 theme file\(s\) are not in the repository and will be DELETED/);
     });
   });
 
@@ -180,6 +202,7 @@ describe('sync workflow', () => {
 
     it('requires typed confirmation for the live theme', async () => {
       await setup();
+      await seedMapping(t.env, shopId, THEME_LIVE, 'feature');
       const { body: p } = await preview({ themeId: THEME_LIVE.id });
       expect(p.data.requiresLiveConfirmation).toBe(true);
       const missing = await api('POST', '/api/sync', { syncId: p.data.syncId, confirm: true });
@@ -300,6 +323,38 @@ describe('sync workflow', () => {
       await api('POST', '/api/sync', { syncId: p.data.syncId, confirm: true });
       await drainQueue();
       expect((await api('POST', `/api/sync/history/${p.data.syncId}/restore`, {})).status).toBe(409);
+    });
+
+    it('does not rewrite files that are already identical in the theme', async () => {
+      await setup();
+      const { body: p } = await preview({});
+      // Someone already put the commit's version in the theme after the preview.
+      world.themeFiles.get(THEME_DEV.id)!.set('sections/header.liquid', '<header>B</header>');
+      await api('POST', '/api/sync', { syncId: p.data.syncId, confirm: true });
+      await drainQueue();
+      const detail = (await api<SyncRunDetail>('GET', `/api/sync/history/${p.data.syncId}`)).body.data;
+      expect(detail.status).toBe('succeeded');
+      expect(detail.operations.find((o) => o.path === 'sections/header.liquid')).toMatchObject({
+        status: 'skipped',
+        skipReason: 'Already identical in the theme',
+      });
+      const written = world.upserts.flatMap((u) => u.files.map((f) => f.filename));
+      expect(written).not.toContain('sections/header.liquid');
+    });
+
+    it('never modifies a file that matches an ignore pattern added after the preview', async () => {
+      await setup();
+      const { body: p } = await preview({});
+      await api('PUT', '/api/settings', { syncPreferences: { ignorePatterns: ['config/settings_data.json', 'sections/'] } });
+      await api('POST', '/api/sync', { syncId: p.data.syncId, confirm: true });
+      await drainQueue();
+      expect(world.themeFiles.get(THEME_DEV.id)!.get('sections/header.liquid')).toBe('old');
+      const detail = (await api<SyncRunDetail>('GET', `/api/sync/history/${p.data.syncId}`)).body.data;
+      expect(detail.operations.find((o) => o.path === 'sections/header.liquid')).toMatchObject({
+        status: 'skipped',
+        skipReason: 'Matches ignore pattern "sections/" (added after the preview)',
+      });
+      expect(detail.filesIgnored).toBe(2); // settings_data.json (preview) + header.liquid (at write time)
     });
 
     it('applies explicit deletions and treats already-missing files as deleted', async () => {

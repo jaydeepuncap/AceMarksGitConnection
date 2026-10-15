@@ -6,13 +6,13 @@
  */
 import { createHash } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { CommitsResponse, LastSynced, Paginated, SyncPreview, SyncRun, SyncRunDetail } from '../../shared/api-types';
+import type { CommitsResponse, LastSynced, Paginated, SyncPreview, SyncRun, SyncRunDetail, ThemeMappingsResponse } from '../../shared/api-types';
 import { app } from '../../worker/index';
 import { createLogger } from '../../worker/lib/logger';
 import { handleSyncMessage } from '../../worker/sync/dispatch';
 import { createTestEnv, sessionToken, type TestContext } from '../helpers/env';
-import { graphqlHandler, installFetchMock, json } from '../helpers/fetch-mock';
-import { seedShop, THEME_DEV, THEME_LIVE } from '../helpers/fixtures';
+import { githubRepoHandler, graphqlHandler, installFetchMock, json } from '../helpers/fetch-mock';
+import { seedMapping, seedShop, THEME_DEV, THEME_LIVE } from '../helpers/fixtures';
 
 const SHOP = 'alpha.myshopify.com';
 const C1 = '1'.repeat(40);
@@ -117,6 +117,7 @@ function world() {
       },
     }),
   );
+  mock.on(githubRepoHandler());
   return { theme, upserts, history };
 }
 
@@ -128,7 +129,8 @@ describe('updating a theme, step by step', () => {
   async function setup() {
     t = createTestEnv();
     w = world();
-    await seedShop(t.env, SHOP);
+    const shop = await seedShop(t.env, SHOP);
+    await seedMapping(t.env, shop.id, THEME_DEV, 'main');
   }
   const api = async <T>(method: string, path: string, body?: unknown) => {
     const res = await app.request(
@@ -286,6 +288,9 @@ describe('updating a theme, step by step', () => {
   it('keeps the last synced commit of every branch in assets/theme-sync.json, also for duplicates', async () => {
     await setup();
     await sync(C1, { strategy: 'commit_changes' }); // main
+    // Re-map the theme to another branch (Theme mapping page), then sync from it.
+    const mapping = (await api<ThemeMappingsResponse>('GET', '/api/mappings')).body.data.items[0]!;
+    expect((await api('PUT', `/api/mappings/${mapping.id}`, { branch: 'UI-changes', confirm: true })).status).toBe(200);
     await sync(C2, { strategy: 'commit_changes', branch: 'UI-changes' });
     const marker = JSON.parse(w.theme.get('assets/theme-sync.json')!.value);
     expect(marker).toMatchObject({ lastSyncedUpdate: C2, branch: 'UI-changes' }); // the latest sync on top

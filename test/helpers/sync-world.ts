@@ -4,7 +4,7 @@
  * theme file system behind the GraphQL API.
  */
 import { createHash } from 'node:crypto';
-import { graphqlHandler, installFetchMock, json } from './fetch-mock';
+import { githubRepoHandler, graphqlHandler, installFetchMock, json } from './fetch-mock';
 import { SHA_B, SHA_D, THEME_DEV, THEME_LIVE } from './fixtures';
 
 export const blobSha = (content: string | Buffer) => {
@@ -123,7 +123,9 @@ export function installWorld(opts: WorldOptions = {}) {
           theme: {
             id: v.id,
             files: {
-              nodes: names.filter((n) => files.has(n)).map((n) => ({ filename: n, size: String(files.get(n)!.length), checksumMd5: null })),
+              nodes: names
+                .filter((n) => files.has(n))
+                .map((n) => ({ filename: n, size: String(files.get(n)!.length), checksumMd5: createHash('md5').update(files.get(n)!).digest('hex') })),
               pageInfo: { hasNextPage: false, endCursor: null },
             },
           },
@@ -174,5 +176,6 @@ export function installWorld(opts: WorldOptions = {}) {
     }),
   );
 
+  mock.on(githubRepoHandler());
   return { mock, themeFiles, upserts, deletes };
 }

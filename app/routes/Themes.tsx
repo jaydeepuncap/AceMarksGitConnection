@@ -10,6 +10,7 @@ export default function Themes() {
   const go = useNavigateHandler();
   const themes = useApiQuery(() => api.themes.list(), []);
   const lastSynced = useApiQuery(() => api.themes.lastSynced(), []);
+  const mappings = useApiQuery(() => api.mappings.list(), []);
   const settings = useApiQuery(() => api.settings.get(), []);
   const select = useMutation(api.settings.update);
 
@@ -55,6 +56,7 @@ export default function Themes() {
             <s-table-header-row>
               <s-table-header listSlot="primary">Theme</s-table-header>
               <s-table-header listSlot="inline">Role</s-table-header>
+              <s-table-header listSlot="labeled">Mapped branch</s-table-header>
               <s-table-header listSlot="labeled">Last update</s-table-header>
               <s-table-header>Actions</s-table-header>
             </s-table-header-row>
@@ -76,6 +78,18 @@ export default function Themes() {
                     </s-table-cell>
                     <s-table-cell>
                       <s-badge tone={role.tone}>{role.label}</s-badge>
+                    </s-table-cell>
+                    <s-table-cell>
+                      {(() => {
+                        const m = mappings.data?.items.find((x) => x.themeId === theme.id);
+                        return m ? (
+                          <s-text>
+                            <s-text type="strong">{m.branch}</s-text>
+                          </s-text>
+                        ) : (
+                          <s-text color="subdued">Not mapped</s-text>
+                        );
+                      })()}
                     </s-table-cell>
                     <s-table-cell>
                       {lastSynced.data?.[theme.id] ? (
@@ -101,13 +115,23 @@ export default function Themes() {
                         >
                           {theme.isLive ? 'Target live theme' : 'Use as target'}
                         </s-button>
-                        <s-button
-                          variant="tertiary"
-                          disabled={!theme.writable}
-                          onClick={go(`/commits?themeId=${encodeURIComponent(theme.id)}`)}
-                        >
-                          Select →
-                        </s-button>
+                        {mappings.data?.items.some((x) => x.themeId === theme.id) ? (
+                          <s-button
+                            variant="tertiary"
+                            disabled={!theme.writable}
+                            onClick={go(`/commits?themeId=${encodeURIComponent(theme.id)}`)}
+                          >
+                            Sync commits →
+                          </s-button>
+                        ) : (
+                          <s-button
+                            variant="tertiary"
+                            disabled={!theme.writable}
+                            onClick={go(`/mappings?themeId=${encodeURIComponent(theme.id)}`)}
+                          >
+                            Map a branch →
+                          </s-button>
+                        )}
                       </s-stack>
                     </s-table-cell>
                   </s-table-row>
