@@ -6,7 +6,7 @@
  */
 import { createHash } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { CommitsResponse, LastSynced, Paginated, SyncPreview, SyncRun, SyncRunDetail, ThemeMappingsResponse } from '../../shared/api-types';
+import type { CommitsResponse, LastSynced, Paginated, SyncPreview, SyncRun, SyncRunDetail, ThemeMapping, ThemeMappingsResponse } from '../../shared/api-types';
 import { app } from '../../worker/index';
 import { createLogger } from '../../worker/lib/logger';
 import { handleSyncMessage } from '../../worker/sync/dispatch';
@@ -432,6 +432,40 @@ describe('updating a theme, step by step', () => {
     expect(await history(`from=${today}&to=${today}`)).toHaveLength(2);
     expect(await history('to=2000-01-01')).toEqual([]);
     expect((await api('GET', '/api/sync/history?from=yesterday')).status).toBe(400);
+  });
+
+  it('a theme mapped to a branch again continues from its own last sync (no full sync needed)', async () => {
+    await setup();
+    // main → "abc" (THEME_DEV): sync C1.
+    await sync(C1, { strategy: 'commit_changes' });
+    const mappingId = (await api<ThemeMappingsResponse>('GET', '/api/mappings')).body.data.items[0]!.id;
+
+    // main → "xyz" (THEME_LIVE): sync C2 there.
+    const toXyz = await api<ThemeMapping>('PUT', `/api/mappings/${mappingId}`, { themeId: THEME_LIVE.id, confirm: true });
+    expect(toXyz.status).toBe(200);
+    const xyzPreview = (await api<SyncPreview>('POST', '/api/sync/preview', { commitSha: C2, themeId: THEME_LIVE.id, strategy: 'commit_changes' })).body.data;
+    await api('POST', '/api/sync', { syncId: xyzPreview.syncId, confirm: true, confirmLiveTheme: true, confirmThemeName: THEME_LIVE.name });
+    await drain();
+
+    // main → "abc" again.
+    expect((await api('PUT', `/api/mappings/${toXyz.body.data.id}`, { themeId: THEME_DEV.id, confirm: true })).status).toBe(200);
+
+    // abc still knows where it stands: last synced C1; C2 went to xyz only, so it is New for abc.
+    const list = (await api<CommitsResponse>('GET', `/api/commits?branch=main&themeId=${encodeURIComponent(THEME_DEV.id)}`)).body.data;
+    expect(list).toMatchObject({ lastSynced: { sha: C1 }, waiting: 2 });
+    expect(list.items.map((i) => [i.shortSha, i.syncStatus])).toEqual([
+      ['3333333', 'new'],
+      ['2222222', 'new'],
+      ['1111111', 'last_synced'],
+    ]);
+    const last = (await api<SyncRun>('GET', `/api/sync/last?themeId=${encodeURIComponent(THEME_DEV.id)}&branch=main`)).body.data;
+    expect(last).toMatchObject({ commitSha: C1, themeId: THEME_DEV.id });
+
+    // "From the last sync" catches abc up from C1 — C2 and C3 — without a full sync.
+    const next = (await api<SyncPreview>('POST', '/api/sync/preview', { commitSha: C3, themeId: THEME_DEV.id, strategy: 'since_last_sync' })).body.data;
+    expect(next.strategy).toBe('since_last_sync');
+    expect(next.base).toMatchObject({ sha: C1 });
+    expect(next.commitsIncluded.map((c) => c.sha)).toEqual([C2, C3]);
   });
 
   it('ignores a marker file from another repository', async () => {
