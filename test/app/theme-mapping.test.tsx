@@ -126,12 +126,10 @@ vi.mock('../../app/lib/api-client', async (importOriginal) => {
           waiting: 1,
           waitingMore: false,
         }),
-        stats: vi
-          .fn()
-          .mockResolvedValue({
-            ['d'.repeat(40)]: { files: 3, truncated: false },
-            ['e'.repeat(40)]: { files: 1, truncated: false },
-          }),
+        stats: vi.fn().mockResolvedValue({
+          ['d'.repeat(40)]: { files: 3, truncated: false },
+          ['e'.repeat(40)]: { files: 1, truncated: false },
+        }),
       },
     },
   };
