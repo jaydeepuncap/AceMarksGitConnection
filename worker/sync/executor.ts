@@ -277,6 +277,16 @@ async function processDeletes(
   }
 }
 
+/** Updates the run's file counters while it is running (the status is not changed). */
+async function saveProgress(db: Database, shopId: string, syncId: string): Promise<void> {
+  const counts = await countOperations(db, shopId, syncId);
+  await transitionSyncRun(db, shopId, syncId, ['running'], 'running', {
+    filesSucceeded: counts.succeeded,
+    filesFailed: counts.failed,
+    filesSkipped: counts.skipped,
+  });
+}
+
 /** Recomputes counters and, when nothing is pending, the final status. */
 export async function finalizeIfComplete(db: Database, shopId: string, syncId: string): Promise<SyncStatus | null> {
   const counts = await countOperations(db, shopId, syncId);
@@ -423,6 +433,8 @@ export async function processSyncChunk(
       const upserts = pending.filter((op) => op.action === 'upsert');
       if (upserts.length > 0) await processUpserts(ctx, run, upserts);
       if (deletes.length > 0) await processDeletes(ctx, run, deletes);
+      // Progress after every batch, so the result page counts files as they are updated.
+      await saveProgress(db, shopId, syncId);
     }
   } catch (err) {
     if (err instanceof ApiError && err.code === 'GITHUB_RATE_LIMITED') {

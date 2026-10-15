@@ -187,7 +187,14 @@ export const syncRoutes = new Hono<AppEnv>()
     }
 
     const operations = await listSyncOperations(db, shop.id, id);
-    return ok<SyncRunDetail>(c, { ...toSyncRunDto(run), operations: operations.map(toSyncOperationDto) });
+    const dto = toSyncRunDto(run);
+    if (run.status === 'queued' || run.status === 'running') {
+      // Live progress straight from the files, not the last saved counters.
+      dto.filesSucceeded = operations.filter((op) => op.status === 'succeeded').length;
+      dto.filesFailed = operations.filter((op) => op.status === 'failed').length;
+      dto.filesSkipped = operations.filter((op) => op.status === 'skipped').length;
+    }
+    return ok<SyncRunDetail>(c, { ...dto, operations: operations.map(toSyncOperationDto) });
   })
   .post('/history/:id/retry', syncLimiter, async (c) => {
     const id = parseOrThrow(uuidSchema, c.req.param('id'));

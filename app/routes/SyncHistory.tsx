@@ -12,7 +12,7 @@ import type { SyncOperation, SyncPreview, SyncStatus } from '../lib/types';
 import type { Tone } from '../lib/format';
 
 const PER_PAGE = 20;
-const POLL_MS = 3000;
+const POLL_MS = 2000;
 const ACTIVE: SyncStatus[] = ['queued', 'running'];
 
 const OP_BADGE: Record<SyncOperation['status'], { label: string; tone: Tone }> = {
@@ -170,7 +170,8 @@ function SyncDetail({ id, onBack, onOpen }: { id: string; onBack: () => void; on
   const retryHelps = failed.length === 0 || failed.some((op) => op.failure?.kind !== 'code');
 
   const operations = (data?.operations ?? []).filter((op) => showSkipped || op.status !== 'skipped');
-  const done = data ? data.filesSucceeded + data.filesFailed : 0;
+  // Files written or failed so far (live while the update runs).
+  const done = data ? Math.min(data.filesChanged, data.filesSucceeded + data.filesFailed) : 0;
 
   return (
     <AppLayout
@@ -191,6 +192,20 @@ function SyncDetail({ id, onBack, onOpen }: { id: string; onBack: () => void; on
         </>
       }
     >
+      {data && active && (
+        <s-banner tone="info" heading={data.status === 'queued' ? `Starting the update of ${data.themeName}…` : `Updating ${data.themeName} · ${done} of ${data.filesChanged} files`}>
+          <s-stack gap="small-200">
+            <s-progress accessibilityLabel="Update progress" max={Math.max(1, data.filesChanged)} value={done} />
+            <s-paragraph>
+              {`${Math.round((done / Math.max(1, data.filesChanged)) * 100)}% · ${data.filesSucceeded} updated${data.filesFailed ? ` · ${data.filesFailed} failed` : ''}${data.backedUp ? ` · ${data.backedUp} backed up first` : ''}`}
+            </s-paragraph>
+            <s-text color="subdued">
+              Each file is backed up right before it changes. You can leave this page; the update continues in the
+              background.
+            </s-text>
+          </s-stack>
+        </s-banner>
+      )}
       {data?.status === 'succeeded' && (
         <s-banner tone="success" heading="Update complete">
           <s-paragraph>{`Files: ${data.filesSucceeded} of ${data.filesChanged} updated${data.backedUp ? ` · backup of ${data.backedUp} file(s) saved first` : ''}`}</s-paragraph>
@@ -313,13 +328,6 @@ function SyncDetail({ id, onBack, onOpen }: { id: string; onBack: () => void; on
               {data.themeRole === 'MAIN' && <s-badge tone="warning">Live theme</s-badge>}
               <s-text color="subdued">Attempt {data.attempt}</s-text>
             </s-stack>
-            {active && (
-              <s-progress
-                accessibilityLabel="Sync progress"
-                max={Math.max(1, data.filesChanged)}
-                value={done}
-              />
-            )}
             <s-paragraph>
               <s-text type="strong">{data.repository}</s-text> @ {data.commitSha}
               {data.branch ? ` (${data.branch})` : ''}

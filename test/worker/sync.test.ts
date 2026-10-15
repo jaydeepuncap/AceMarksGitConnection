@@ -282,6 +282,18 @@ describe('sync workflow', () => {
       expect((await api('POST', `/api/sync/history/${p.data.syncId}/retry`, {})).status).toBe(409);
     });
 
+    it('reports progress file by file while the update runs', async () => {
+      await setup({ withQueue: true }); // the queue is not drained: the run stays in progress
+      const { body: p } = await preview({});
+      await api('POST', '/api/sync', { syncId: p.data.syncId, confirm: true });
+      const writes = p.data.operations.filter((o) => o.action !== 'skip');
+      // One file done, as after the first batch.
+      t.sqlite.prepare(`UPDATE sync_operations SET status = 'succeeded' WHERE sync_id = ? AND path = ?`).run(p.data.syncId, writes[0]!.path);
+      t.sqlite.prepare(`UPDATE sync_history SET status = 'running' WHERE id = ?`).run(p.data.syncId);
+      const detail = (await api<SyncRunDetail>('GET', `/api/sync/history/${p.data.syncId}`)).body.data;
+      expect(detail).toMatchObject({ status: 'running', filesSucceeded: 1, filesFailed: 0, filesChanged: writes.length });
+    });
+
     it('does not restore a completed update', async () => {
       await setup();
       const { body: p } = await preview({});
