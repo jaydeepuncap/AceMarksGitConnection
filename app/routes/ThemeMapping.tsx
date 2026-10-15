@@ -5,7 +5,7 @@ import { ErrorBanner } from '../components/ErrorBanner';
 import { LoadingState } from '../components/LoadingState';
 import { themeLabel } from '../components/MappingControls';
 import { BranchThemeTitle, Card, CardSection, KeyValue, StatusBadge } from '../components/Common';
-import { Stack, Text } from '../components/ui';
+import { Button, Modal, Paragraph, Stack, Text } from '../components/ui';
 import { api } from '../lib/api-client';
 import { showToast } from '../lib/app-bridge';
 import { firstLine, formatDate, mappingStatus, RESULT_BADGE, syncTypeLabel } from '../lib/format';
@@ -171,7 +171,6 @@ export default function ThemeMapping() {
   };
   const freeBranches = branchList.filter((b) => !mappingForBranch(b.name));
   const freeThemes = allThemes.filter((t) => !themeBlocked(t));
-  const showForm = adding || repoItems.length === 0;
   const nothingFree = !branches.loading && !themes.loading && (freeBranches.length === 0 || freeThemes.length === 0);
   /** Why "Add mapping" in the page header is disabled, shown in a banner below it. */
   const addBlocked = !nothingFree
@@ -189,6 +188,13 @@ export default function ThemeMapping() {
   const refresh = () => {
     mappings.reload();
     setRefreshKey((k) => k + 1);
+  };
+
+  const closeAdd = () => {
+    setAdding(false);
+    setNewBranch('');
+    setNewThemeId('');
+    create.clearError();
   };
 
   const doCreate = async () => {
@@ -211,7 +217,9 @@ export default function ThemeMapping() {
       title="Theme mapping"
       subtitle={`${repository} · each branch syncs to its own theme`}
       primaryAction={
-        showForm ? undefined : { content: 'Add mapping', onAction: () => setAdding(true), disabled: nothingFree }
+        repoItems.length === 0
+          ? undefined
+          : { content: 'Add mapping', onAction: () => setAdding(true), disabled: nothingFree }
       }
       secondaryActions={[
         {
@@ -234,7 +242,7 @@ export default function ThemeMapping() {
             </s-banner>
           )}
           <ErrorBanner error={branches.error} heading="Branches could not be loaded" onRetry={branches.reload} />
-          {addBlocked && !showForm && (
+          {addBlocked && !adding && (
             <s-banner tone="info" heading={`${addBlocked.heading} — Add mapping is unavailable`}>
               <s-paragraph>{addBlocked.text}</s-paragraph>
             </s-banner>
@@ -242,91 +250,95 @@ export default function ThemeMapping() {
         </>
       }
     >
-      {showForm && (
-        <s-section heading={repoItems.length === 0 ? 'Map your first branch' : 'Add a mapping'}>
+      {repoItems.length === 0 && (
+        <s-section heading="Map your first branch">
           <s-stack gap="base">
-            <s-paragraph color="subdued">
-              Pick a branch and the theme it should update — for example{' '}
+            <s-paragraph>
+              Connect a branch of {repository} to the Shopify theme it should update — for example{' '}
               <s-text type="strong">main → Live theme</s-text> and <s-text type="strong">staging → Staging copy</s-text>
-              . A branch updates one theme only, and a theme is updated by one branch only. Nothing in the theme changes
-              until you sync.
+              . Nothing in the theme changes until you sync.
             </s-paragraph>
-            {nothingFree ? (
-              <s-banner tone="info">
-                <s-paragraph>
-                  {freeBranches.length === 0
-                    ? 'Every branch is already mapped. Remove or change a mapping to free a branch.'
-                    : 'Every theme that can be synced is already mapped. Remove or change a mapping to free a theme, or duplicate a theme in Shopify.'}
-                </s-paragraph>
-              </s-banner>
-            ) : (
-              <s-grid gridTemplateColumns="repeat(auto-fit, minmax(220px, 1fr))" gap="base" alignItems="end">
-                <s-select
-                  label="Branch"
-                  value={newBranch || NONE}
-                  details={
-                    branches.loading
-                      ? 'Loading branches…'
-                      : `${freeBranches.length} of ${branchList.length} branches free`
-                  }
-                  onChange={(event) =>
-                    setNewBranch(event.currentTarget.value === NONE ? '' : event.currentTarget.value)
-                  }
-                >
-                  <s-option value={NONE}>Select a branch</s-option>
-                  {branchList.map((b) => {
-                    const m = mappingForBranch(b.name);
-                    return (
-                      <s-option key={b.name} value={b.name} disabled={!!m}>
-                        {`${b.name}${m ? ` — mapped to ${m.themeName}` : ''}`}
-                      </s-option>
-                    );
-                  })}
-                  {newBranch && !branchList.some((b) => b.name === newBranch) && (
-                    <s-option value={newBranch}>{newBranch}</s-option>
-                  )}
-                </s-select>
-                <s-select
-                  label="Shopify theme"
-                  value={newThemeId || NONE}
-                  details={
-                    themes.loading ? 'Loading themes…' : `${freeThemes.length} of ${allThemes.length} themes free`
-                  }
-                  onChange={(event) =>
-                    setNewThemeId(event.currentTarget.value === NONE ? '' : event.currentTarget.value)
-                  }
-                >
-                  <s-option value={NONE}>Select a theme</s-option>
-                  {allThemes.map((t) => {
-                    const reason = themeBlocked(t);
-                    return (
-                      <s-option key={t.id} value={t.id} disabled={!!reason}>
-                        {`${themeLabel(t)}${reason ? ` — ${reason}` : ''}`}
-                      </s-option>
-                    );
-                  })}
-                </s-select>
-                <s-stack direction="inline" gap="small-200">
-                  <s-button
-                    variant="primary"
-                    disabled={!newBranch || !newThemeId}
-                    loading={create.pending}
-                    onClick={doCreate}
-                  >
-                    Add mapping
-                  </s-button>
-                  {repoItems.length > 0 && (
-                    <s-button variant="tertiary" onClick={() => (setAdding(false), create.clearError())}>
-                      Cancel
-                    </s-button>
-                  )}
-                </s-stack>
-              </s-grid>
-            )}
-            <ErrorBanner error={create.error} heading="Mapping not added" onDismiss={create.clearError} />
+            <s-stack direction="inline">
+              <s-button variant="primary" icon="plus" disabled={nothingFree} onClick={() => setAdding(true)}>
+                Add mapping
+              </s-button>
+            </s-stack>
           </s-stack>
         </s-section>
       )}
+
+      <Modal id="add-mapping" open={adding} heading="Add a mapping" onHide={closeAdd}>
+        <Stack gap="base">
+          <Paragraph>
+            Pick a branch and the theme it should update. A branch updates one theme only, and a theme is updated by one
+            branch only. Nothing in the theme changes until you sync.
+          </Paragraph>
+          {nothingFree ? (
+            <s-banner tone="info">
+              <s-paragraph>
+                {freeBranches.length === 0
+                  ? 'Every branch is already mapped. Remove or change a mapping to free a branch.'
+                  : 'Every theme that can be synced is already mapped. Remove or change a mapping to free a theme, or duplicate a theme in Shopify.'}
+              </s-paragraph>
+            </s-banner>
+          ) : (
+            <>
+              <s-select
+                label="Branch"
+                value={newBranch || NONE}
+                details={
+                  branches.loading
+                    ? 'Loading branches…'
+                    : `${freeBranches.length} of ${branchList.length} branches free`
+                }
+                onChange={(event) => setNewBranch(event.currentTarget.value === NONE ? '' : event.currentTarget.value)}
+              >
+                <s-option value={NONE}>Select a branch</s-option>
+                {branchList.map((b) => {
+                  const m = mappingForBranch(b.name);
+                  return (
+                    <s-option key={b.name} value={b.name} disabled={!!m}>
+                      {`${b.name}${m ? ` — mapped to ${m.themeName}` : ''}`}
+                    </s-option>
+                  );
+                })}
+                {newBranch && !branchList.some((b) => b.name === newBranch) && (
+                  <s-option value={newBranch}>{newBranch}</s-option>
+                )}
+              </s-select>
+              <s-select
+                label="Shopify theme"
+                value={newThemeId || NONE}
+                details={themes.loading ? 'Loading themes…' : `${freeThemes.length} of ${allThemes.length} themes free`}
+                onChange={(event) => setNewThemeId(event.currentTarget.value === NONE ? '' : event.currentTarget.value)}
+              >
+                <s-option value={NONE}>Select a theme</s-option>
+                {allThemes.map((t) => {
+                  const reason = themeBlocked(t);
+                  return (
+                    <s-option key={t.id} value={t.id} disabled={!!reason}>
+                      {`${themeLabel(t)}${reason ? ` — ${reason}` : ''}`}
+                    </s-option>
+                  );
+                })}
+              </s-select>
+            </>
+          )}
+          <ErrorBanner error={create.error} heading="Mapping not added" onDismiss={create.clearError} />
+        </Stack>
+        <Button
+          slot="primary-action"
+          variant="primary"
+          disabled={!newBranch || !newThemeId || nothingFree}
+          loading={create.pending}
+          onClick={doCreate}
+        >
+          Add mapping
+        </Button>
+        <Button slot="secondary-actions" disabled={create.pending} onClick={closeAdd}>
+          Cancel
+        </Button>
+      </Modal>
 
       {repoItems.length > 0 && (
         // Cards sit directly on the page (not inside a section) so their titles render as larger headings.

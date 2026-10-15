@@ -1,5 +1,5 @@
 import React, { useId } from "react";
-import { Box, Button, Modal, Paragraph, Stack } from "../ui";
+import { Button, Modal, Paragraph } from "../ui";
 
 /**
  * Declarative confirm dialog. Replaces the imperative `showModal(id)` /
@@ -53,28 +53,21 @@ export function ConfirmModal({
       size="small"
       onHide={onClose}
     >
-      <Box padding="base">
-        {typeof message === "string" ? <Paragraph>{message}</Paragraph> : message}
-      </Box>
-      <Stack
-        direction="inline"
-        gap="small"
-        justifyContent="end"
-        padding="base"
+      {typeof message === "string" ? <Paragraph>{message}</Paragraph> : message}
+      {/* Actions go in the modal's footer slots, like every Polaris modal. */}
+      <Button
+        slot="primary-action"
+        variant="primary"
+        tone={destructive ? "critical" : "auto"}
+        loading={loading}
+        disabled={disabled}
+        onClick={onConfirm}
       >
-        <Button onClick={onClose} disabled={loading}>
-          {cancelLabel}
-        </Button>
-        <Button
-          variant="primary"
-          tone={destructive ? "critical" : "auto"}
-          loading={loading}
-          disabled={disabled}
-          onClick={onConfirm}
-        >
-          {confirmLabel}
-        </Button>
-      </Stack>
+        {confirmLabel}
+      </Button>
+      <Button slot="secondary-actions" onClick={onClose} disabled={loading}>
+        {cancelLabel}
+      </Button>
     </Modal>
   );
 }

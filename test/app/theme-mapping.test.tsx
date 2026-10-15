@@ -229,9 +229,11 @@ describe('Theme mapping page when everything is mapped', () => {
     const add = [...container.querySelectorAll('s-button')].filter((b) => b.textContent === 'Add mapping');
     expect(add.length).toBeGreaterThan(0);
     for (const button of add) expect(button.hasAttribute('disabled')).toBe(true);
-    // Only the page header offers "Add mapping"; a banner explains why it is disabled.
-    expect(add).toHaveLength(1);
-    expect(add[0]!.getAttribute('slot')).toBe('primary-action');
+    // On the page only the header offers "Add mapping" (the other is the closed modal's footer button);
+    // a banner explains why it is disabled.
+    const onPage = add.filter((b) => !b.closest('s-modal'));
+    expect(onPage).toHaveLength(1);
+    expect(onPage[0]!.getAttribute('slot')).toBe('primary-action');
     expect(container.querySelector('s-banner[heading^="Every branch is mapped"]')).not.toBeNull();
   });
 });
@@ -353,7 +355,11 @@ describe('Themes page', () => {
     expect(await screen.findAllByText('Open mapping', {}, wait)).toHaveLength(2);
     expect(screen.getByText('main')).toBeInTheDocument();
     fireEvent.click(screen.getByText('Map a branch'));
-    await waitFor(() => expect(container.querySelector('s-section[heading="Add a mapping"]')).not.toBeNull(), wait);
+    // The add form is a modal with its actions in the modal footer.
+    await waitFor(() => expect(container.querySelector('s-modal[heading="Add a mapping"]')).not.toBeNull(), wait);
+    const modal = container.querySelector('s-modal[heading="Add a mapping"]')!;
+    expect(modal.querySelector('s-button[slot="primary-action"]')?.textContent).toBe('Add mapping');
+    expect(modal.querySelector('s-button[slot="secondary-actions"]')?.textContent).toBe('Cancel');
     // The theme is preselected in the form once branches and themes have loaded.
     await waitFor(() => {
       const themeSelect = [...container.querySelectorAll('s-select')].find(

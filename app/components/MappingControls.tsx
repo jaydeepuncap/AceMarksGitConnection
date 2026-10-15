@@ -4,7 +4,7 @@ import { showToast } from '../lib/app-bridge';
 import { useMutation } from '../lib/hooks';
 import type { ShopifyTheme, SyncPreview, ThemeMapping } from '../lib/types';
 import { ErrorBanner } from './ErrorBanner';
-import { Box, Button, Modal, Option, Paragraph, Select, Stack } from './ui';
+import { Button, Modal, Option, Paragraph, Select, Stack } from './ui';
 import { ConfirmModal } from './Common/ConfirmModal';
 
 const NONE = '__none__';
@@ -131,40 +131,42 @@ export function MappingActionDialogs({
         size="small"
         onHide={close}
       >
-        <Box padding="base">
-          <Stack gap="base">
-            <Paragraph>
-              {`${mapping.branch} will sync to the new theme instead of ${mapping.themeName}. Nothing in either theme changes now, and ${mapping.themeName} keeps its sync history.`}
-            </Paragraph>
-            <Select
-              label="New theme"
-              value={newThemeId || NONE}
-              details={
-                free === 0 ? 'Every other theme is already mapped or cannot be synced.' : `${free} theme(s) available`
-              }
-              onChange={(event: Event) => {
-                const value = (event.currentTarget as HTMLSelectElement).value;
-                setNewThemeId(value === NONE ? '' : value);
-              }}
-            >
-              <Option value={NONE}>Select a theme</Option>
-              {themeOptions.map(({ theme: t, disabledReason }) => (
-                <Option key={t.id} value={t.id} disabled={!!disabledReason}>
-                  {`${themeLabel(t)}${disabledReason ? ` — ${disabledReason}` : ''}`}
-                </Option>
-              ))}
-            </Select>
-            <ErrorBanner error={update.error} heading="Theme not changed" onDismiss={update.clearError} />
-          </Stack>
-        </Box>
-        <Stack direction="inline" gap="small" justifyContent="end" padding="base">
-          <Button onClick={close} disabled={update.pending}>
-            Cancel
-          </Button>
-          <Button variant="primary" disabled={!newThemeId} loading={update.pending} onClick={doChange}>
-            {newTheme ? `Sync to ${newTheme.name}` : 'Change theme'}
-          </Button>
+        <Stack gap="base">
+          <Paragraph>
+            {`${mapping.branch} will sync to the new theme instead of ${mapping.themeName}. Nothing in either theme changes now, and ${mapping.themeName} keeps its sync history.`}
+          </Paragraph>
+          <Select
+            label="New theme"
+            value={newThemeId || NONE}
+            details={
+              free === 0 ? 'Every other theme is already mapped or cannot be synced.' : `${free} theme(s) available`
+            }
+            onChange={(event: Event) => {
+              const value = (event.currentTarget as HTMLSelectElement).value;
+              setNewThemeId(value === NONE ? '' : value);
+            }}
+          >
+            <Option value={NONE}>Select a theme</Option>
+            {themeOptions.map(({ theme: t, disabledReason }) => (
+              <Option key={t.id} value={t.id} disabled={!!disabledReason}>
+                {`${themeLabel(t)}${disabledReason ? ` — ${disabledReason}` : ''}`}
+              </Option>
+            ))}
+          </Select>
+          <ErrorBanner error={update.error} heading="Theme not changed" onDismiss={update.clearError} />
         </Stack>
+        <Button
+          slot="primary-action"
+          variant="primary"
+          disabled={!newThemeId}
+          loading={update.pending}
+          onClick={doChange}
+        >
+          {newTheme ? `Sync to ${newTheme.name}` : 'Change theme'}
+        </Button>
+        <Button slot="secondary-actions" onClick={close} disabled={update.pending}>
+          Cancel
+        </Button>
       </Modal>
       <ConfirmModal
         open={action === 'remove'}
