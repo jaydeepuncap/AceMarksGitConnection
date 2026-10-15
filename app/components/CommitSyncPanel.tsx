@@ -157,23 +157,28 @@ export function CommitSyncPanel({
 
   const offset = (page - 1) * COMMITS_PER_PAGE;
   const isPicked = (sha: string) => picked.some((p) => p.sha === sha);
-  const toggle = (index: number) => {
+  /**
+   * Selects or unselects a commit from the checkbox's own checked value, not by
+   * flipping the current selection, so a repeated change event cannot leave the
+   * box ticked while the commit is not selected.
+   */
+  const setCommitPicked = (index: number, checked: boolean) => {
     previewMutation.clearError();
     const commit = listed[index]!;
-    setPicked((current) =>
-      current.some((p) => p.sha === commit.sha)
-        ? current.filter((p) => p.sha !== commit.sha)
-        : [
-            ...current,
-            {
-              sha: commit.sha,
-              shortSha: commit.shortSha,
-              message: commit.message,
-              position: offset + index,
-              status: commit.syncStatus,
-            },
-          ],
-    );
+    setPicked((current) => {
+      const others = current.filter((p) => p.sha !== commit.sha);
+      if (!checked) return others;
+      return [
+        ...others,
+        {
+          sha: commit.sha,
+          shortSha: commit.shortSha,
+          message: commit.message,
+          position: offset + index,
+          status: commit.syncStatus,
+        },
+      ];
+    });
   };
   const allOnPage = listed.length > 0 && listed.every((c) => isPicked(c.sha));
   const selectPage = () =>
@@ -351,7 +356,12 @@ export function CommitSyncPanel({
                   <s-checkbox
                     accessibilityLabel={`Select commit ${commit.shortSha}`}
                     checked={on}
-                    onChange={() => toggle(index)}
+                    // Keep the box showing the selection after every render; the element keeps its own
+                    // checked state otherwise, which can drift from what is actually selected.
+                    ref={(el: (HTMLElement & { checked: boolean }) | null) => {
+                      if (el && el.checked !== on) el.checked = on;
+                    }}
+                    onChange={(event) => setCommitPicked(index, !!event.currentTarget.checked)}
                   />
                 </s-table-cell>
                 <s-table-cell>

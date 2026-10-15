@@ -242,24 +242,33 @@ describe('Commit selection on the mapping page', () => {
     );
     const wait = { timeout: 5000 };
     await screen.findByText('Add banner', {}, wait);
-    const toggle = (shortSha: string) =>
-      fireEvent(
-        [...container.querySelectorAll('s-checkbox')].find(
-          (c) => c.getAttribute('accessibilityLabel') === `Select commit ${shortSha}`,
-        )!,
-        new Event('change', { bubbles: true }),
-      );
+    // Like the real checkbox: the element flips its own checked state, then dispatches change.
+    const box = (shortSha: string) =>
+      [...container.querySelectorAll('s-checkbox')].find(
+        (c) => c.getAttribute('accessibilityLabel') === `Select commit ${shortSha}`,
+      ) as HTMLElement & { checked?: boolean };
+    const toggle = (shortSha: string) => {
+      const el = box(shortSha);
+      el.checked = !el.checked;
+      fireEvent(el, new Event('change', { bubbles: true }));
+    };
     expect(screen.queryByText('When you select one commit, sync')).not.toBeInTheDocument();
     const reviewSync = () => screen.getByText('Review sync');
 
     toggle('ddddddd');
     expect(screen.getByText('1 selected')).toBeInTheDocument();
+    // A repeated change event keeps the commit selected once instead of flipping it back.
+    fireEvent(box('ddddddd'), new Event('change', { bubbles: true }));
+    expect(screen.getByText('1 selected')).toBeInTheDocument();
+    expect(box('ddddddd').checked).toBe(true);
     fireEvent.click(reviewSync());
     await waitFor(() => expect(preview).toHaveBeenCalledTimes(1), wait);
     expect(preview.mock.calls[0]![0]).toMatchObject({ commitSha: 'd'.repeat(40), strategy: 'since_last_sync' });
 
     toggle('ddddddd');
     toggle('eeeeeee');
+    expect(box('ddddddd').checked).toBe(false);
+    expect(screen.getByText('1 selected')).toBeInTheDocument();
     expect(container.querySelector('s-banner[heading="eeeeeee is already in the theme"]')).not.toBeNull();
     fireEvent.click(reviewSync());
     await waitFor(() => expect(preview).toHaveBeenCalledTimes(2), wait);
