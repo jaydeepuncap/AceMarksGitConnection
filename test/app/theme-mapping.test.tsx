@@ -38,7 +38,9 @@ vi.mock('../../app/lib/api-client', async (importOriginal) => {
     ...actual,
     api: {
       settings: {
-        get: vi.fn().mockResolvedValue({ shop: {}, settings: { defaultRepository: 'acme/theme', defaultBranch: 'main' } }),
+        get: vi
+          .fn()
+          .mockResolvedValue({ shop: {}, settings: { defaultRepository: 'acme/theme', defaultBranch: 'main' } }),
         update: vi.fn(),
       },
       github: {
@@ -68,7 +70,9 @@ vi.mock('../../app/lib/api-client', async (importOriginal) => {
       },
       themes: { list: vi.fn().mockResolvedValue([theme('1', 'abc'), theme('2', 'xyz'), theme('3', 'spare')]) },
       mappings: {
-        list: vi.fn().mockResolvedValue({ items: [mapping('m1', 'main', '1', 'abc'), mapping('m2', 'staging', '2', 'xyz')] }),
+        list: vi
+          .fn()
+          .mockResolvedValue({ items: [mapping('m1', 'main', '1', 'abc'), mapping('m2', 'staging', '2', 'xyz')] }),
         create: vi.fn(),
         update: vi.fn(),
         remove: vi.fn(),
@@ -82,17 +86,52 @@ vi.mock('../../app/lib/api-client', async (importOriginal) => {
       commits: {
         list: vi.fn().mockResolvedValue({
           items: [
-            { sha: 'd'.repeat(40), shortSha: 'ddddddd', message: 'Add banner', authorName: 'Dev', authorLogin: 'dev', authorAvatarUrl: null, date: '2026-10-15T09:00:00Z', htmlUrl: '', parents: [], syncStatus: 'new' },
-            { sha: 'e'.repeat(40), shortSha: 'eeeeeee', message: 'Fix header', authorName: 'Dev', authorLogin: 'dev', authorAvatarUrl: null, date: '2026-10-14T09:00:00Z', htmlUrl: '', parents: [], syncStatus: 'last_synced' },
+            {
+              sha: 'd'.repeat(40),
+              shortSha: 'ddddddd',
+              message: 'Add banner',
+              authorName: 'Dev',
+              authorLogin: 'dev',
+              authorAvatarUrl: null,
+              date: '2026-10-15T09:00:00Z',
+              htmlUrl: '',
+              parents: [],
+              syncStatus: 'new',
+            },
+            {
+              sha: 'e'.repeat(40),
+              shortSha: 'eeeeeee',
+              message: 'Fix header',
+              authorName: 'Dev',
+              authorLogin: 'dev',
+              authorAvatarUrl: null,
+              date: '2026-10-14T09:00:00Z',
+              htmlUrl: '',
+              parents: [],
+              syncStatus: 'last_synced',
+            },
           ],
           page: 1,
           perPage: 20,
           hasNextPage: false,
-          lastSynced: { themeId: 'gid://shopify/OnlineStoreTheme/1', branch: 'main', sha: 'e'.repeat(40), shortSha: 'eeeeeee', message: 'Fix header', syncedAt: '2026-10-14T10:00:00Z', syncId: null },
+          lastSynced: {
+            themeId: 'gid://shopify/OnlineStoreTheme/1',
+            branch: 'main',
+            sha: 'e'.repeat(40),
+            shortSha: 'eeeeeee',
+            message: 'Fix header',
+            syncedAt: '2026-10-14T10:00:00Z',
+            syncId: null,
+          },
           waiting: 1,
           waitingMore: false,
         }),
-        stats: vi.fn().mockResolvedValue({ ['d'.repeat(40)]: { files: 3, truncated: false }, ['e'.repeat(40)]: { files: 1, truncated: false } }),
+        stats: vi
+          .fn()
+          .mockResolvedValue({
+            ['d'.repeat(40)]: { files: 3, truncated: false },
+            ['e'.repeat(40)]: { files: 1, truncated: false },
+          }),
       },
     },
   };
@@ -112,7 +151,9 @@ describe('Theme mapping page', () => {
     // The commit was recorded from the theme file, not by a sync in this app — the card says so.
     expect(screen.getAllByText(/Not synced from this app yet · recorded from the theme file/)).toHaveLength(2);
     // The whole card is the clickable surface (no nested buttons).
-    const cards = container.querySelectorAll('s-clickable[accessibilityLabel^="Open "], s-clickable[accessibilitylabel^="Open "]');
+    const cards = container.querySelectorAll(
+      's-clickable[accessibilityLabel^="Open "], s-clickable[accessibilitylabel^="Open "]',
+    );
     expect(cards).toHaveLength(2);
     expect(cards[0]!.querySelector('s-button')).toBeNull();
 
@@ -174,7 +215,9 @@ describe('Mapping page', () => {
     expect(screen.getByText('Select new (1)')).toBeInTheDocument();
     // History and Full sync tabs.
     fireEvent.click(screen.getByText('History'));
-    expect(await screen.findByText('No syncs applied to this theme from this branch yet.', {}, wait)).toBeInTheDocument();
+    expect(
+      await screen.findByText('No syncs applied to this theme from this branch yet.', {}, wait),
+    ).toBeInTheDocument();
     fireEvent.click(screen.getByText('Full sync'));
     expect(await screen.findByText('Review full sync', {}, wait)).toBeInTheDocument();
     // Change theme and Remove mapping are page actions at the top.
