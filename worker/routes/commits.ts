@@ -3,11 +3,12 @@
  * 40-character SHA, which is the single source of truth for later syncs.
  *
  *   GET /api/commits              ?repository&branch&path&page&perPage
+ *   GET /api/commits/stats        ?repository&shas=a,b,…  changed-file count per commit (≤30, cached per SHA)
  *   GET /api/commits/:sha         ?repository
  *   GET /api/commits/:sha/files   ?repository&page&perPage   (up to 3000 files per commit)
  */
 import { Hono } from 'hono';
-import type { CommitDetail, CommitFile, CommitFilesResponse, CommitListItem, CommitsResponse } from '../../shared/api-types';
+import type { CommitDetail, CommitFile, CommitFilesResponse, CommitListItem, CommitsResponse, CommitStatsResponse } from '../../shared/api-types';
 import type { AppEnv } from '../env';
 import { cached, cacheKeys } from '../lib/cache';
 import { adminClient, githubClient, resolveRepository } from '../lib/clients';
@@ -18,6 +19,7 @@ import {
   commitFilesQuerySchema,
   commitQuerySchema,
   commitShaSchema,
+  commitStatsQuerySchema,
   commitsQuerySchema,
   parseOrThrow,
 } from '../lib/validators';
@@ -85,6 +87,32 @@ export const commitsRoutes = new Hono<AppEnv>()
       }
     });
     return ok<CommitsResponse>(c, response);
+  })
+  .get('/stats', async (c) => {
+    const query = parseOrThrow(commitStatsQuerySchema, c.req.query());
+    const { shop } = c.get('auth');
+    const { client, connection } = await githubClient(c);
+    const target = await resolveRepository(c, connection, query.repository);
+    const out: CommitStatsResponse = {};
+    // A few at a time; commits never change, so each count is cached for a day.
+    for (let i = 0; i < query.shas.length; i += 5) {
+      await Promise.all(
+        query.shas.slice(i, i + 5).map(async (sha) => {
+          const all = await cached<{ files: CommitFile[]; truncated: boolean }>(
+            c.env.KV,
+            cacheKeys.commitFiles(shop.id, target.fullName, sha),
+            86_400,
+            async () => {
+              const result = await client.getAllCommitFiles(target.owner, target.repo, sha);
+              return { files: result.files, truncated: result.truncated };
+            },
+            c.get('logger'),
+          );
+          out[sha] = { files: all.files.length, truncated: all.truncated };
+        }),
+      );
+    }
+    return ok<CommitStatsResponse>(c, out);
   })
   .get('/:sha', async (c) => {
     const sha = parseOrThrow(commitShaSchema, c.req.param('sha'));

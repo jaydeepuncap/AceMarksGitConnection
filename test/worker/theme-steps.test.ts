@@ -118,7 +118,7 @@ function world() {
     }),
   );
   mock.on(githubRepoHandler());
-  return { theme, upserts, history };
+  return { theme, upserts, history, mock };
 }
 
 describe('updating a theme, step by step', () => {
@@ -329,6 +329,90 @@ describe('updating a theme, step by step', () => {
     expect(res.body.error.code).toBe('ALREADY_SYNCED');
     // "Only the selected commit" can still push it again.
     expect((await api('POST', '/api/sync/preview', { commitSha: C1, themeId: THEME_DEV.id, branch: 'main', strategy: 'commit_changes' })).status).toBe(201);
+  });
+
+  describe('multiple commits', () => {
+    const multi = (commitShas: string[], extra: Record<string, unknown> = {}) =>
+      api<SyncPreview>('POST', '/api/sync/preview', {
+        themeId: THEME_DEV.id,
+        branch: 'main',
+        strategy: 'selected_commits',
+        commitShas,
+        commitSha: commitShas.includes(C3) ? C3 : commitShas.includes(C2) ? C2 : commitShas[0],
+        ...extra,
+      });
+
+    it('combines a continuous range in branch order, each file from the commit that last changed it', async () => {
+      await setup();
+      await sync(C1, { strategy: 'commit_changes' });
+      const res = await multi([C3, C2], { allowDeletes: true }); // any order
+      expect(res.status).toBe(201);
+      const preview = res.body.data;
+      expect(preview.strategy).toBe('selected_commits');
+      expect(preview.commitsIncluded.map((c) => c.sha)).toEqual([C2, C3]);
+      expect(preview.conflicts).toEqual([]);
+      const byPath = Object.fromEntries(preview.operations.map((o) => [o.path, o]));
+      expect(byPath['snippets/size-chart.liquid']).toMatchObject({ action: 'upsert', sourceCommitSha: C2, commits: ['2222222'] });
+      expect(byPath['sections/cart.liquid']).toMatchObject({ action: 'upsert', sourceCommitSha: C3 });
+      expect(byPath['snippets/old-cart.liquid']).toMatchObject({ action: 'delete' });
+
+      await api('POST', '/api/sync', { syncId: preview.syncId, confirm: true });
+      await drain();
+      expect(w.theme.get('snippets/size-chart.liquid')!.value).toBe(F2['snippets/size-chart.liquid']);
+      expect(w.theme.get('sections/cart.liquid')!.value).toBe(F3['sections/cart.liquid']);
+      expect(w.theme.has('snippets/old-cart.liquid')).toBe(false);
+      // Every selected commit is marked as added.
+      const list = (await api<CommitsResponse>('GET', `/api/commits?branch=main&themeId=${encodeURIComponent(THEME_DEV.id)}`)).body.data;
+      expect(list.items.map((i) => i.syncStatus)).toEqual(['last_synced', 'added', 'added']);
+    });
+
+    it('takes content from the exact selected commits even when the branch moved on', async () => {
+      await setup();
+      // Branch head is C3; only C1 and C2 are selected.
+      const res = await multi([C1, C2]);
+      expect(res.status).toBe(201);
+      await api('POST', '/api/sync', { syncId: res.body.data.syncId, confirm: true });
+      await drain();
+      expect(w.theme.get('snippets/size-chart.liquid')!.value).toBe(F2['snippets/size-chart.liquid']);
+      // C3 changed sections/cart.liquid but was not selected: the theme keeps the C1 version.
+      expect(w.theme.get('sections/cart.liquid')!.value).toBe(F1['sections/cart.liquid']);
+      const refs = w.mock.calls
+        .filter((r) => r.url.includes('/contents/snippets/size-chart.liquid'))
+        .map((r) => new URL(r.url).searchParams.get('ref'));
+      // Code check (preview) and write both read the file at exactly C2, never the branch head.
+      expect(refs.length).toBeGreaterThan(0);
+      expect(new Set(refs)).toEqual(new Set([C2]));
+    });
+
+    it('explains files that overlap with an unselected commit in between', async () => {
+      await setup();
+      const C4 = '4'.repeat(40);
+      w.history.push({ sha: C4, message: 'Tweak cart again', files: { ...F3, 'sections/cart.liquid': '{% comment %}v4{% endcomment %}' } });
+      const res = await api<SyncPreview>('POST', '/api/sync/preview', {
+        themeId: THEME_DEV.id,
+        branch: 'main',
+        strategy: 'selected_commits',
+        commitShas: [C2, C4],
+        commitSha: C4,
+      });
+      expect(res.status).toBe(201);
+      expect(res.body.data.conflicts).toEqual([
+        'sections/cart.liquid: the version from 4444444 also contains the change from 3333333 "Update cart functionality", which is not selected.',
+      ]);
+      expect(res.body.data.warnings.join(' ')).toMatch(/overlap with commits that are not selected/);
+      // C3 added cart-item.liquid but C3 is not selected: it is not part of the plan.
+      expect(res.body.data.operations.map((o) => o.path)).not.toContain('snippets/cart-item.liquid');
+    });
+
+    it('rejects commits outside the branch and inconsistent requests', async () => {
+      await setup();
+      const outside = await multi([C2, 'f'.repeat(40)], { commitSha: C2 });
+      expect(outside.status).toBe(422);
+      expect(outside.body.error).toMatchObject({ code: 'VALIDATION_ERROR' });
+      // commitSha must be the newest selected commit; strategy and commitShas go together.
+      expect((await multi([C2, C3], { commitSha: C2 })).status).toBe(400);
+      expect((await api('POST', '/api/sync/preview', { themeId: THEME_DEV.id, commitSha: C3, strategy: 'selected_commits' })).status).toBe(400);
+    });
   });
 
   it('ignores a marker file from another repository', async () => {

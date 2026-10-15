@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { AppLayout } from '../components/AppLayout';
 import { ConfirmSyncModal } from '../components/ConfirmSyncModal';
 import { ErrorBanner } from '../components/ErrorBanner';
+import { LastSyncCard } from '../components/LastSyncCard';
 import { LoadingInline, LoadingState } from '../components/LoadingState';
 import { api } from '../lib/api-client';
 import { showToast } from '../lib/app-bridge';
@@ -174,6 +175,14 @@ function CommitDetailSection({ sha, repository }: { sha: string; repository: str
   );
 }
 
+/** A selected commit and where it sits in the branch (0 = newest), for ordering. */
+interface Picked {
+  sha: string;
+  shortSha: string;
+  message: string;
+  position: number;
+}
+
 export default function Commits() {
   const navigate = useNavigate();
   const [params] = useSearchParams();
@@ -184,7 +193,7 @@ export default function Commits() {
   const defaults = settings.data?.settings;
   const [branch, setBranch] = useState(params.get('branch') ?? '');
   const [page, setPage] = useState(1);
-  const [selectedSha, setSelectedSha] = useState<string | null>(null);
+  const [picked, setPicked] = useState<Picked[]>([]);
   const [strategy, setStrategy] = useState<SyncStrategy>('since_last_sync');
   const [allowDeletes, setAllowDeletes] = useState(false);
   const [preview, setPreview] = useState<SyncPreview | null>(null);
@@ -193,7 +202,7 @@ export default function Commits() {
   useEffect(() => {
     if (!defaults) return;
     setBranch((b) => b || defaults.defaultBranch || '');
-    setStrategy(defaults.syncPreferences.strategy);
+    setStrategy(defaults.syncPreferences.strategy === 'selected_commits' ? 'since_last_sync' : defaults.syncPreferences.strategy);
     setAllowDeletes(defaults.syncPreferences.allowDeletes);
   }, [defaults]);
 
@@ -215,37 +224,72 @@ export default function Commits() {
     [repository, branch, page, themeId],
     !!repository,
   );
+  const listed = commits.data?.items ?? [];
+  const pageShas = listed.map((c) => c.sha).join(',');
+  // Changed-file counts for the commits on this page (cached per commit on the server).
+  const stats = useApiQuery(() => api.commits.stats(pageShas.split(','), repository), [pageShas, repository], !!pageShas);
   const lastSynced = commits.data?.lastSynced ?? null;
 
   const previewMutation = useMutation(api.sync.preview);
   const confirmMutation = useMutation(api.sync.confirm);
 
-  if (settings.loading && !settings.data) return <LoadingState title="Commits" />;
+  if (settings.loading && !settings.data) return <LoadingState title="Commit sync" />;
 
-  const writableThemes = (themes.data ?? []).filter((t) => t.writable);
-  // Earlier commits (below the selected one) that are not in the theme yet; they are synced along with it.
-  const listed = commits.data?.items ?? [];
+  const selectedTheme = (themes.data ?? []).find((t) => t.id === themeId);
+  const offset = (page - 1) * COMMITS_PER_PAGE;
+  const isPicked = (sha: string) => picked.some((p) => p.sha === sha);
+  const toggle = (sha: string, index: number) => {
+    previewMutation.clearError();
+    const commit = listed[index]!;
+    setPicked((current) =>
+      current.some((p) => p.sha === sha)
+        ? current.filter((p) => p.sha !== sha)
+        : [...current, { sha, shortSha: commit.shortSha, message: commit.message, position: offset + index }],
+    );
+  };
+  const allOnPage = listed.length > 0 && listed.every((c) => isPicked(c.sha));
+  const selectPage = () =>
+    setPicked((current) => [
+      ...current,
+      ...listed
+        .map((c, i) => ({ sha: c.sha, shortSha: c.shortSha, message: c.message, position: offset + i }))
+        .filter((c) => !current.some((p) => p.sha === c.sha)),
+    ]);
+  const clearSelection = () => {
+    previewMutation.clearError();
+    setPicked([]);
+  };
+
+  const multiple = picked.length > 1;
+  // Branch order: newest first (smallest position).
+  const ordered = [...picked].sort((a, b) => a.position - b.position);
+  const newest = ordered[0] ?? null;
+  const selectedSha = picked.length === 1 ? picked[0]!.sha : null;
+  const effectiveStrategy: SyncStrategy = multiple ? 'selected_commits' : strategy;
+
+  // Single commit: earlier commits that are not in the theme yet.
   const selectedIndex = listed.findIndex((c) => c.sha === selectedSha);
   const catchUp =
     selectedIndex >= 0 && strategy !== 'full_snapshot' && listed[selectedIndex]!.syncStatus === 'new'
       ? listed.slice(selectedIndex + 1).filter((c) => c.syncStatus === 'new').length
       : 0;
-  const selectedTheme = writableThemes.find((t) => t.id === themeId);
   const selectedStatus = selectedIndex >= 0 ? listed[selectedIndex]!.syncStatus : null;
-  // Pushing "from the last sync" to the commit the theme is already on has nothing to do.
-  const alreadyOn = strategy === 'since_last_sync' && !!selectedSha && selectedSha === lastSynced?.sha;
-  // An older, already added commit: "from the last sync" would undo the later updates.
-  const goesBack = strategy === 'since_last_sync' && selectedStatus === 'added';
+  const alreadyOn = !multiple && strategy === 'since_last_sync' && !!selectedSha && selectedSha === lastSynced?.sha;
+  const goesBack = !multiple && strategy === 'since_last_sync' && selectedStatus === 'added';
+  // Multiple: a selection with gaps (unselected commits in between) on the loaded pages.
+  const gaps =
+    multiple && ordered.length > 1 ? ordered[ordered.length - 1]!.position - ordered[0]!.position + 1 - ordered.length : 0;
 
   const runPreview = async () => {
-    if (!selectedSha || !themeId) return;
+    if (!newest || !themeId) return;
     confirmMutation.clearError();
     const result = await previewMutation.run({
       repository,
-      branch: branch || commits.data?.lastSynced?.branch || undefined,
-      commitSha: selectedSha,
+      branch: branch || undefined,
+      commitSha: newest.sha,
       themeId,
-      strategy,
+      strategy: effectiveStrategy,
+      ...(multiple ? { commitShas: picked.map((p) => p.sha) } : {}),
       allowDeletes,
     });
     if (result) {
@@ -266,9 +310,9 @@ export default function Commits() {
 
   if (!repository) {
     return (
-      <AppLayout title="Commits">
+      <AppLayout title="Commit sync">
         <s-section heading="Choose a repository first">
-          <s-paragraph>Select a default repository in Settings to browse its commits.</s-paragraph>
+          <s-paragraph>Select a repository in Settings to browse its commits.</s-paragraph>
           <s-button slot="secondary-actions" variant="primary" onClick={() => navigate('/settings')}>
             Open settings
           </s-button>
@@ -279,11 +323,12 @@ export default function Commits() {
 
   return (
     <AppLayout
-      title="Commits"
+      title="Commit sync"
       subtitle={`${repository}${branch ? ` · ${branch}` : ''}`}
       banners={
         <>
           <ErrorBanner error={settings.error ?? themes.error} onRetry={() => (settings.reload(), themes.reload())} />
+          <ErrorBanner error={mappings.error} heading="Theme mappings could not be loaded" onRetry={mappings.reload} />
           <ErrorBanner error={commits.error} onRetry={commits.reload} heading="Commits could not be loaded" />
           <ErrorBanner error={previewMutation.error} heading="Preview failed" onDismiss={previewMutation.clearError} />
         </>
@@ -299,10 +344,10 @@ export default function Commits() {
                 const value = event.currentTarget.value;
                 setBranch(value === DEFAULT_BRANCH ? '' : value);
                 setPage(1);
-                setSelectedSha(null);
+                setPicked([]);
               }}
             >
-              <s-option value={DEFAULT_BRANCH}>Repository default</s-option>
+              <s-option value={DEFAULT_BRANCH}>Select a branch</s-option>
               {(branches.data?.items ?? []).map((b) => (
                 <s-option key={b.name} value={b.name}>
                   {b.name}
@@ -313,7 +358,7 @@ export default function Commits() {
               <s-text type="strong">Mapped theme</s-text>
               {mapping ? (
                 <s-text>
-                  {`${mapping.themeName}${selectedTheme?.isLive ? ' (LIVE)' : ''}`}{' '}
+                  {`${mapping.themeName}${selectedTheme?.isLive ? ' (LIVE)' : ''} · ID ${mapping.themeId.split('/').pop()}`}{' '}
                   <s-button variant="tertiary" onClick={() => navigate(`/mappings?branch=${encodeURIComponent(branch)}`)}>
                     Change
                   </s-button>
@@ -329,24 +374,34 @@ export default function Commits() {
                 </s-text>
               )}
             </s-stack>
-            <s-select
-              label="Push"
-              details="Default from Settings → Sync preferences"
-              value={strategy}
-              onChange={(event) => setStrategy(event.currentTarget.value as SyncStrategy)}
-            >
-              <s-option value="since_last_sync">From the last sync to the selected commit</s-option>
-              <s-option value="commit_changes">Only the selected commit</s-option>
-              <s-option value="full_snapshot">Full snapshot</s-option>
-            </s-select>
+            {multiple ? (
+              <s-stack gap="small-200">
+                <s-text type="strong">Push</s-text>
+                <s-text>{`The ${picked.length} selected commits, combined in branch order`}</s-text>
+              </s-stack>
+            ) : (
+              <s-select
+                label="Push"
+                details="Default from Settings → Sync preferences"
+                value={strategy}
+                onChange={(event) => setStrategy(event.currentTarget.value as SyncStrategy)}
+              >
+                <s-option value="since_last_sync">From the last sync to the selected commit</s-option>
+                <s-option value="commit_changes">Only the selected commit</s-option>
+                <s-option value="full_snapshot">Full sync at the selected commit</s-option>
+              </s-select>
+            )}
           </s-grid>
           <s-checkbox
-            label="Apply deletions (removed and renamed-away files)"
+            label={
+              effectiveStrategy === 'full_snapshot'
+                ? 'Delete theme files that are not in the repository'
+                : 'Apply deletions (removed and renamed-away files)'
+            }
             checked={allowDeletes}
-            disabled={strategy === 'full_snapshot'}
             onChange={(event) => setAllowDeletes(event.currentTarget.checked)}
           />
-          {selectedTheme && (
+          {selectedTheme && !multiple && (
             <s-box padding="small" background="subdued" borderRadius="base">
               {lastSynced ? (
                 <s-stack gap="small-300">
@@ -356,32 +411,38 @@ export default function Commits() {
                   </s-text>
                   <s-text color="subdued">
                     {commits.data && commits.data.waiting > 0
-                      ? `${commits.data.waiting}${commits.data.waitingMore ? '+' : ''} ${commits.data.waiting === 1 ? 'update' : 'updates'} waiting · ${strategy === 'commit_changes' ? 'only the selected one is pushed' : 'syncing one also pushes the earlier ones not added yet'}`
+                      ? `${commits.data.waiting}${commits.data.waitingMore ? '+' : ''} ${commits.data.waiting === 1 ? 'update' : 'updates'} waiting`
                       : 'Up to date with this branch'}
                   </s-text>
                 </s-stack>
               ) : (
                 <s-text color="subdued">
-                  {`${selectedTheme.name} has no last synced commit from this branch yet. The first sync records it in the theme (assets/theme-sync.json), so duplicates of this theme keep their status.`}
+                  {`${selectedTheme.name} has no last synced commit from this branch yet. Run a full sync from the Theme mapping page first.`}
                 </s-text>
               )}
             </s-box>
           )}
-          {strategy === 'since_last_sync' && (
-            <s-text color="subdued">
-              Pushes every update between the theme&apos;s last synced commit and the selected one together, in order, so
-              no developer work is left out. The preview lists every file and the commit it comes from.
-            </s-text>
-          )}
-          {strategy === 'commit_changes' && (
-            <s-text color="subdued">
-              Pushes only the files changed in the selected commit; earlier updates that are not in the theme yet are
-              left out.
-            </s-text>
-          )}
-          {selectedTheme?.isLive && (
-            <s-banner tone="warning" heading="Live theme selected">
-              <s-paragraph>Syncing will change the storefront customers see. You will be asked to confirm twice.</s-paragraph>
+          {multiple && (
+            <s-banner tone={gaps > 0 ? 'warning' : 'info'} heading={`${picked.length} commits selected`}>
+              <s-paragraph>
+                {`Changes are combined oldest to newest; when several selected commits change the same file, the newest version is used, and each file is read from exactly the commit it comes from.${
+                  gaps > 0
+                    ? ` ${gaps} commit(s) between your selection are not selected: files they also changed are listed as conflicts in the preview.`
+                    : ''
+                }`}
+              </s-paragraph>
+              <s-stack direction="inline" gap="small-200">
+                {[...ordered].reverse().map((p) => (
+                  <s-clickable-chip
+                    key={p.sha}
+                    removable
+                    accessibilityLabel={`Remove ${p.shortSha} from the selection`}
+                    onRemove={() => setPicked((cur) => cur.filter((x) => x.sha !== p.sha))}
+                  >
+                    {`${p.shortSha} ${firstLine(p.message).slice(0, 40)}`}
+                  </s-clickable-chip>
+                ))}
+              </s-stack>
             </s-banner>
           )}
           {alreadyOn && selectedTheme && lastSynced && (
@@ -398,18 +459,29 @@ export default function Commits() {
               </s-paragraph>
             </s-banner>
           )}
+          {selectedTheme?.isLive && (
+            <s-banner tone="warning" heading="Live theme">
+              <s-paragraph>Syncing will change the storefront customers see. You will be asked to confirm twice.</s-paragraph>
+            </s-banner>
+          )}
           <s-stack direction="inline" gap="small-200" alignItems="center">
             <s-button
               variant="primary"
-              disabled={!selectedSha || !themeId || alreadyOn}
+              disabled={picked.length === 0 || !themeId || alreadyOn}
               loading={previewMutation.pending}
               onClick={runPreview}
             >
-              Preview sync
+              {multiple ? `Preview ${picked.length} commits` : 'Preview sync'}
             </s-button>
             <s-text color="subdued">
-              {selectedSha ? `Selected commit ${selectedSha.slice(0, 7)}` : 'Select a commit below'}
-              {catchUp > 0 ? ` · ${strategy === 'commit_changes' ? 'leaves out' : 'also pushes'} ${catchUp}${commits.data?.hasNextPage && listed[listed.length - 1]?.syncStatus === 'new' ? '+' : ''} earlier ${catchUp === 1 ? 'update' : 'updates'} not added yet` : ''}{' '}
+              {picked.length === 0
+                ? 'Select one or more commits below'
+                : multiple
+                  ? `${picked.length} selected`
+                  : `Selected commit ${picked[0]!.shortSha}`}
+              {catchUp > 0 && !multiple
+                ? ` · ${strategy === 'commit_changes' ? 'leaves out' : 'also pushes'} ${catchUp} earlier ${catchUp === 1 ? 'update' : 'updates'} not added yet`
+                : ''}{' '}
               · previews never modify the theme
             </s-text>
           </s-stack>
@@ -417,6 +489,20 @@ export default function Commits() {
       </s-section>
 
       <s-section padding="none" accessibilityLabel="Commit history">
+        <s-box padding="base">
+          <s-stack direction="inline" gap="small-200" alignItems="center" justifyContent="space-between">
+            <s-text type="strong">{`Commits on ${branch || 'the default branch'}`}</s-text>
+            <s-stack direction="inline" gap="small-200" alignItems="center">
+              <s-text color="subdued">{`${picked.length} selected`}</s-text>
+              <s-button variant="tertiary" disabled={listed.length === 0 || allOnPage} onClick={selectPage}>
+                Select all on this page
+              </s-button>
+              <s-button variant="tertiary" disabled={picked.length === 0} onClick={clearSelection}>
+                Clear selection
+              </s-button>
+            </s-stack>
+          </s-stack>
+        </s-box>
         <s-table
           variant="auto"
           loading={commits.loading}
@@ -427,50 +513,49 @@ export default function Commits() {
           onNextPage={() => setPage((p) => p + 1)}
         >
           <s-table-header-row>
+            <s-table-header>Select</s-table-header>
             <s-table-header listSlot="primary">Message</s-table-header>
             <s-table-header listSlot="kicker">SHA</s-table-header>
             <s-table-header listSlot="secondary">Author</s-table-header>
             <s-table-header listSlot="labeled">Date</s-table-header>
+            <s-table-header listSlot="labeled">Files</s-table-header>
             <s-table-header listSlot="inline">Status</s-table-header>
-            <s-table-header>Select</s-table-header>
           </s-table-header-row>
           <s-table-body>
-            {(commits.data?.items ?? []).map((commit) => (
-              <s-table-row key={commit.sha}>
-                <s-table-cell>
-                  <s-stack direction="inline" gap="small-200" alignItems="center">
-                    <s-text type={selectedSha === commit.sha ? 'strong' : 'generic'}>{firstLine(commit.message)}</s-text>
-                    {selectedSha === commit.sha && <s-badge tone="info">Selected</s-badge>}
-                  </s-stack>
-                </s-table-cell>
-                <s-table-cell>
-                  <s-link href={commit.htmlUrl} target="_blank">
-                    {commit.shortSha}
-                  </s-link>
-                </s-table-cell>
-                <s-table-cell>{commit.authorLogin ?? commit.authorName ?? '—'}</s-table-cell>
-                <s-table-cell>{formatDate(commit.date)}</s-table-cell>
-                <s-table-cell>
-                  {commit.syncStatus ? (
-                    <s-badge tone={SYNC_STATUS[commit.syncStatus].tone}>{SYNC_STATUS[commit.syncStatus].label}</s-badge>
-                  ) : (
-                    <s-text color="subdued">—</s-text>
-                  )}
-                </s-table-cell>
-                <s-table-cell>
-                  <s-button
-                    variant={selectedSha === commit.sha ? 'primary' : 'secondary'}
-                    accessibilityLabel={`Select commit ${commit.shortSha}`}
-                    onClick={() => {
-                      previewMutation.clearError();
-                      setSelectedSha(commit.sha);
-                    }}
-                  >
-                    {selectedSha === commit.sha ? 'Selected' : 'Select'}
-                  </s-button>
-                </s-table-cell>
-              </s-table-row>
-            ))}
+            {listed.map((commit, index) => {
+              const count = stats.data?.[commit.sha];
+              return (
+                <s-table-row key={commit.sha}>
+                  <s-table-cell>
+                    <s-checkbox
+                      accessibilityLabel={`Select commit ${commit.shortSha}`}
+                      checked={isPicked(commit.sha)}
+                      onChange={() => toggle(commit.sha, index)}
+                    />
+                  </s-table-cell>
+                  <s-table-cell>
+                    <s-text type={isPicked(commit.sha) ? 'strong' : 'generic'}>{firstLine(commit.message)}</s-text>
+                  </s-table-cell>
+                  <s-table-cell>
+                    <s-link href={commit.htmlUrl} target="_blank">
+                      {commit.shortSha}
+                    </s-link>
+                  </s-table-cell>
+                  <s-table-cell>{commit.authorLogin ?? commit.authorName ?? '—'}</s-table-cell>
+                  <s-table-cell>{formatDate(commit.date)}</s-table-cell>
+                  <s-table-cell>
+                    {count ? `${count.files}${count.truncated ? '+' : ''}` : stats.loading ? '…' : '—'}
+                  </s-table-cell>
+                  <s-table-cell>
+                    {commit.syncStatus ? (
+                      <s-badge tone={SYNC_STATUS[commit.syncStatus].tone}>{SYNC_STATUS[commit.syncStatus].label}</s-badge>
+                    ) : (
+                      <s-text color="subdued">—</s-text>
+                    )}
+                  </s-table-cell>
+                </s-table-row>
+              );
+            })}
           </s-table-body>
         </s-table>
         {!commits.loading && commits.data?.items.length === 0 && (
@@ -483,11 +568,13 @@ export default function Commits() {
       {selectedSha && <CommitDetailSection sha={selectedSha} repository={repository} />}
 
       {selectedTheme && (
-        <ThemeBranchHistory
-          themeId={selectedTheme.id}
-          branch={branch || lastSynced?.branch || defaults?.defaultBranch || ''}
-          themeName={selectedTheme.name}
-        />
+        <s-section heading="Last sync">
+          <LastSyncCard themeId={selectedTheme.id} branch={branch || undefined} />
+        </s-section>
+      )}
+
+      {selectedTheme && (
+        <ThemeBranchHistory themeId={selectedTheme.id} branch={branch} themeName={selectedTheme.name} />
       )}
 
       <ConfirmSyncModal

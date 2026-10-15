@@ -76,7 +76,13 @@ export interface ShopInfo {
   canWriteThemes: boolean;
 }
 
-export const SYNC_STRATEGY_VALUES = ['commit_changes', 'full_snapshot', 'since_last_sync'] as const;
+/**
+ * commit_changes   — one commit's changed files ("single commit")
+ * selected_commits — several selected commits combined ("multiple commits")
+ * since_last_sync  — every commit from the theme's last sync to the selected one
+ * full_snapshot    — every theme file at the commit ("full sync")
+ */
+export const SYNC_STRATEGY_VALUES = ['commit_changes', 'full_snapshot', 'since_last_sync', 'selected_commits'] as const;
 export type SyncStrategy = (typeof SYNC_STRATEGY_VALUES)[number];
 
 export interface SyncPreferences {
@@ -299,6 +305,8 @@ export interface SyncPreviewRequest {
   commitSha: string;
   themeId: string;
   strategy?: SyncStrategy;
+  /** strategy "selected_commits": the selected commits (full SHAs, any order; all on the branch). */
+  commitShas?: string[];
   allowDeletes?: boolean;
   /** Restrict the plan to these theme paths (subset of the commit's files). */
   includePaths?: string[];
@@ -316,6 +324,8 @@ export interface SyncPlanOperation {
   skipReason: string | null;
   /** Preview only: short SHAs of the included commits that changed this file (oldest first). */
   commits?: string[];
+  /** The commit this file's content is taken from, when not the sync's commit (multiple commits). */
+  sourceCommitSha?: string | null;
 }
 
 export interface SyncPreviewSummary {
@@ -358,6 +368,8 @@ export interface SyncPreview {
   base: { sha: string; shortSha: string; message: string | null } | null;
   /** Every update the sync brings in, oldest first. */
   commitsIncluded: IncludedCommit[];
+  /** Multiple commits: files whose content also carries changes of unselected commits in between. */
+  conflicts: string[];
   checks: SyncChecks;
   expiresAt: string;
   repository: string;
@@ -512,3 +524,11 @@ export interface UpdateThemeMappingRequest {
   themeId?: string;
   confirm: true;
 }
+
+/** Changed-file count of a commit (for the commit list). */
+export interface CommitStats {
+  files: number;
+  /** GitHub stopped listing at 3000 files. */
+  truncated: boolean;
+}
+export type CommitStatsResponse = Record<string, CommitStats>;

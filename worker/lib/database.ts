@@ -550,8 +550,9 @@ export const addBackedUp = (db: Database, shopId: string, syncId: string, n: num
 export const addIgnored = (db: Database, shopId: string, syncId: string, n: number) => addToRunCounter(db, shopId, syncId, 'ignored', n);
 
 /**
- * Commits of `shas` fully synced to the theme from `branch`
- * (runs recorded without a branch count as the given branch).
+ * Commits of `shas` fully synced to the theme from `branch`: the commit of
+ * every succeeded run plus all commits it brought in (multiple commits, since
+ * last sync). Runs recorded without a branch count as the given branch.
  */
 export async function syncedCommits(
   db: Database,
@@ -561,19 +562,17 @@ export async function syncedCommits(
   shas: string[],
 ): Promise<Set<string>> {
   if (shas.length === 0) return new Set();
-  const rows = await db
-    .selectDistinct({ sha: syncHistory.commitSha })
-    .from(syncHistory)
-    .where(
-      and(
-        eq(syncHistory.shopId, shopId),
-        eq(syncHistory.themeId, themeId),
-        eq(syncHistory.status, 'succeeded'),
-        inArray(syncHistory.commitSha, shas.slice(0, 90)),
-        ...(branch ? [sql`(${syncHistory.branch} = ${branch} or ${syncHistory.branch} is null)`] : []),
-      ),
-    );
-  return new Set(rows.map((r) => r.sha));
+  const wanted = new Set(shas.map((s) => s.toLowerCase()));
+  const branchFilter = branch ? sql`and (h.branch = ${branch} or h.branch is null)` : sql``;
+  const rows = await db.all<{ sha: string | null }>(sql`
+    select h.commit_sha as sha from sync_history h
+      where h.shop_id = ${shopId} and h.theme_id = ${themeId} and h.status = 'succeeded' ${branchFilter}
+    union
+    select json_extract(j.value, '$.sha') as sha
+      from sync_history h, json_each(h.options, '$.commitsIncluded') j
+      where h.shop_id = ${shopId} and h.theme_id = ${themeId} and h.status = 'succeeded' ${branchFilter}
+  `);
+  return new Set(rows.map((r) => r.sha?.toLowerCase()).filter((sha): sha is string => !!sha && wanted.has(sha)));
 }
 
 // ---------------------------------------------------------------------------

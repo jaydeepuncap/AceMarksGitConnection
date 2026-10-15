@@ -36,6 +36,7 @@ const STRATEGY_LABEL: Record<SyncPreview['strategy'], string> = {
   since_last_sync: 'from the last sync to the selected commit',
   commit_changes: 'only the selected commit',
   full_snapshot: 'full snapshot',
+  selected_commits: 'the selected commits',
 };
 
 function actionBadge(op: SyncPlanOperation): { label: string; tone: Tone } {

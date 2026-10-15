@@ -153,6 +153,7 @@ export const syncRoutes = new Hono<AppEnv>()
         allowDeletes: body.allowDeletes ?? settings.syncPreferences.allowDeletes,
         preferences: settings.syncPreferences,
         includePaths: body.includePaths,
+        commitShas: body.commitShas,
       },
     );
     return ok<SyncPreview>(c, preview, 'Preview generated. No changes were made to the theme.', 201);

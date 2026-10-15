@@ -177,6 +177,9 @@ export const createGithubConnectionSchema = z
   })
   .strict();
 
+/** Most commits a multi-commit sync can combine. */
+export const MAX_SELECTED_COMMITS = 50;
+
 export const syncPreviewSchema = z
   .object({
     repository: repositorySchema.optional(),
@@ -184,10 +187,19 @@ export const syncPreviewSchema = z
     commitSha: commitShaSchema,
     themeId: themeIdSchema,
     strategy: z.enum(SYNC_STRATEGY_VALUES).optional(),
+    commitShas: z.array(commitShaSchema).min(2).max(MAX_SELECTED_COMMITS).optional(),
     allowDeletes: z.boolean().optional(),
     includePaths: z.array(themePathSchema).max(3000).optional(),
   })
-  .strict();
+  .strict()
+  .refine((v) => (v.strategy === 'selected_commits') === (v.commitShas !== undefined), {
+    message: 'Select at least two commits for strategy "selected_commits" (and only for it)',
+    path: ['commitShas'],
+  })
+  .refine((v) => !v.commitShas || v.commitShas.includes(v.commitSha), {
+    message: 'commitSha must be one of the selected commits (the newest)',
+    path: ['commitSha'],
+  });
 
 export const confirmSyncSchema = z
   .object({
@@ -261,5 +273,15 @@ export const lastSyncQuerySchema = z
   .object({
     themeId: themeIdSchema,
     branch: branchSchema.optional(),
+  })
+  .strict();
+
+export const commitStatsQuerySchema = z
+  .object({
+    repository: repositorySchema.optional(),
+    shas: z
+      .string()
+      .transform((v) => v.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean))
+      .pipe(z.array(commitShaSchema).min(1).max(30)),
   })
   .strict();

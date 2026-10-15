@@ -161,7 +161,7 @@ export const SYNC_STATUSES = [
 ] as const;
 export type SyncStatus = (typeof SYNC_STATUSES)[number];
 
-export const SYNC_STRATEGIES = ['commit_changes', 'full_snapshot', 'since_last_sync'] as const;
+export const SYNC_STRATEGIES = ['commit_changes', 'full_snapshot', 'since_last_sync', 'selected_commits'] as const;
 export type SyncStrategy = (typeof SYNC_STRATEGIES)[number];
 
 export const syncHistory = sqliteTable(

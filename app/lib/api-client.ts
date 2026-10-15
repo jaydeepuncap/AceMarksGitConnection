@@ -12,6 +12,7 @@ import type {
   ApiErrorBody,
   ApiErrorCode,
   IgnorePreviewResponse,
+  CommitStatsResponse,
   CreateThemeMappingRequest,
   ThemeMapping,
   ThemeMappingsResponse,
@@ -187,6 +188,8 @@ export const api = {
       apiRequest<CommitDetail>('GET', `/api/commits/${encodeURIComponent(sha)}`, { query: { repository } }),
     files: (sha: string, query: { repository?: string; page?: number; perPage?: number } = {}) =>
       apiRequest<CommitFilesResponse>('GET', `/api/commits/${encodeURIComponent(sha)}/files`, { query }),
+    stats: (shas: string[], repository?: string) =>
+      apiRequest<CommitStatsResponse>('GET', '/api/commits/stats', { query: { shas: shas.join(','), repository } }),
   },
   sync: {
     preview: (body: SyncPreviewRequest) => apiRequest<SyncPreview>('POST', '/api/sync/preview', { body }),

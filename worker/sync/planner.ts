@@ -39,6 +39,7 @@ import { createSyncPreview, type Database, type NewSyncOperation } from '../lib/
 import { GITHUB_MAX_COMMIT_FILES, type GitHubClient } from '../lib/github-client';
 import type { Logger } from '../lib/logger';
 import { ApiError } from '../lib/response';
+import { planSelectedCommits } from './multi-commit';
 import { resolveLastSynced } from './theme-state';
 import {
   getTheme,
@@ -73,6 +74,8 @@ export interface PlanInput {
   allowDeletes: boolean;
   preferences: SyncPreferences;
   includePaths?: string[];
+  /** strategy "selected_commits": the selected commits (commitSha is the newest of them). */
+  commitShas?: string[];
 }
 
 type PlannedOp = SyncPlanOperation;
@@ -273,7 +276,7 @@ async function runCodeCheck(
   for (let i = 0; i < checked.length; i += 6) {
     await Promise.all(
       checked.slice(i, i + 6).map(async (op) => {
-        const bytes = await github.getFileAtCommit(input.owner, input.repo, op.sourcePath ?? op.path, input.commitSha);
+        const bytes = await github.getFileAtCommit(input.owner, input.repo, op.sourcePath ?? op.path, op.sourceCommitSha ?? input.commitSha);
         if (op.blobSha && (await gitBlobSha(bytes)) !== op.blobSha) {
           issues.push({ path: op.path, line: null, message: 'Downloaded content does not match the commit (integrity check failed)' });
           return;
@@ -414,7 +417,7 @@ export async function buildSyncPreview(
   let since: Awaited<ReturnType<GitHubClient['listCommitsUntil']>> | null = null;
   let strategy: SyncStrategy = input.strategy;
   const warnings: string[] = [];
-  if (last && last.commitSha !== input.commitSha && strategy !== 'full_snapshot') {
+  if (last && last.commitSha !== input.commitSha && strategy !== 'full_snapshot' && strategy !== 'selected_commits') {
     since = await github.listCommitsUntil(input.owner, input.repo, input.commitSha, last.commitSha, 300);
     const earlier = since.found ? since.commits.length - 1 : 0;
     if (strategy === 'commit_changes' && earlier > 0) {
@@ -438,6 +441,8 @@ export async function buildSyncPreview(
 
   let ops: PlannedOp[];
   let themeListing: Awaited<ReturnType<typeof listAllThemeFiles>> | null = null;
+  /** Multiple commits: files whose content also carries changes of unselected commits. */
+  let conflicts: string[] = [];
   let commitsIncluded: IncludedCommit[] = [
     { sha: input.commitSha, shortSha: input.commitSha.slice(0, 7), message: commitData.commit.commit.message },
   ];
@@ -508,6 +513,25 @@ export async function buildSyncPreview(
     if (deletesDisabled > 0) {
       warnings.push(`${deletesDisabled} file(s) removed since the last sync stay in the theme because deletions are disabled.`);
     }
+  } else if (strategy === 'selected_commits') {
+    if (!input.branch || !input.commitShas || input.commitShas.length < 2) {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'Select at least two commits of a branch');
+    }
+    const plan = await planSelectedCommits(github, {
+      owner: input.owner,
+      repo: input.repo,
+      branch: input.branch,
+      commitShas: input.commitShas,
+      preferences: input.preferences,
+      allowDeletes: input.allowDeletes,
+    });
+    if (plan.commitsIncluded[plan.commitsIncluded.length - 1]!.sha.toLowerCase() !== input.commitSha) {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'commitSha must be the newest of the selected commits');
+    }
+    ops = plan.ops;
+    commitsIncluded = plan.commitsIncluded;
+    conflicts = plan.conflicts;
+    warnings.push(...plan.warnings);
   } else if (strategy === 'commit_changes') {
     if (commitData.truncated) {
       warnings.push(
@@ -661,6 +685,7 @@ export async function buildSyncPreview(
     existsInTheme: op.existsInTheme,
     status: op.action === 'skip' ? 'skipped' : 'pending',
     skipReason: op.skipReason,
+    sourceCommitSha: op.sourceCommitSha ?? null,
   }));
 
   const base = last && baseFiles ? { sha: last.commitSha, shortSha: last.commitSha.slice(0, 7), message: baseMessage } : null;
@@ -685,6 +710,7 @@ export async function buildSyncPreview(
         ignored: summary.ignored,
         baseSha: base?.sha ?? null,
         commitsIncluded: commitsIncluded.slice(0, 100),
+        conflicts: conflicts.slice(0, 100),
         checks,
       },
       initiatedBy: input.userId,
@@ -700,6 +726,7 @@ export async function buildSyncPreview(
     expiresAt: expiresAt.toISOString(),
     base,
     commitsIncluded,
+    conflicts,
     checks,
     repository: `${input.owner}/${input.repo}`,
     branch: input.branch,
