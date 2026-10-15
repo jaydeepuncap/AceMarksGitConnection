@@ -8,7 +8,7 @@ import { BranchThemeTitle, Card, CardSection, KeyValue, StatusBadge } from '../c
 import { Stack, Text } from '../components/ui';
 import { api } from '../lib/api-client';
 import { showToast } from '../lib/app-bridge';
-import { firstLine, formatDate, mappingStatus, RESULT_BADGE, syncTypeLabel } from '../lib/format';
+import { firstLine, formatDate, mappingStatus, RESULT_BADGE, syncTypeLabel, THEME_ROLE_BADGE } from '../lib/format';
 import { useApiQuery, useMutation, useNavigateHandler } from '../lib/hooks';
 import type { GithubBranch, ShopifyTheme, ThemeMapping as Mapping } from '../lib/types';
 
@@ -123,6 +123,7 @@ export default function ThemeMapping() {
   const github = useApiQuery(() => api.github.connection(), []);
   const themes = useApiQuery(() => api.themes.list(), []);
   const mappings = useApiQuery(() => api.mappings.list(), []);
+  const themeCommits = useApiQuery(() => api.themes.lastSynced(), []);
 
   const repository = settings.data?.settings.defaultRepository ?? '';
   const connected = !!github.data?.connected;
@@ -186,8 +187,15 @@ export default function ThemeMapping() {
           text: 'Each theme that can be synced already receives a branch. Open a mapping to change or remove it, or duplicate a theme in Shopify, then add a new one.',
         };
 
+  const mapTheme = (themeId: string) => {
+    setNewThemeId(themeId);
+    setAdding(true);
+    window.scrollTo?.({ top: 0, behavior: 'smooth' });
+  };
+
   const refresh = () => {
     mappings.reload();
+    themeCommits.reload();
     setRefreshKey((k) => k + 1);
   };
 
@@ -226,6 +234,13 @@ export default function ThemeMapping() {
             onRetry={() => (settings.reload(), mappings.reload())}
           />
           <ErrorBanner error={themes.error} heading="Themes could not be loaded" onRetry={themes.reload} />
+          {settings.data && !settings.data.shop.canWriteThemes && (
+            <s-banner tone="warning" heading="Theme write access not granted">
+              <s-paragraph>
+                The app can list themes but cannot change their files until the write_themes scope is granted.
+              </s-paragraph>
+            </s-banner>
+          )}
           <ErrorBanner error={branches.error} heading="Branches could not be loaded" onRetry={branches.reload} />
           {addBlocked && !showForm && (
             <s-banner tone="info" heading={`${addBlocked.heading} — Add mapping is unavailable`}>
@@ -334,6 +349,83 @@ export default function ThemeMapping() {
             />
           ))}
         </Stack>
+      )}
+
+      {allThemes.length > 0 && (
+        <s-section heading="Store themes">
+          <s-stack gap="base">
+            <s-paragraph color="subdued">Every theme in the store and the branch it receives.</s-paragraph>
+            <s-table variant="auto">
+              <s-table-header-row>
+                <s-table-header listSlot="primary">Theme</s-table-header>
+                <s-table-header listSlot="inline">Role</s-table-header>
+                <s-table-header listSlot="secondary">Receives</s-table-header>
+                <s-table-header listSlot="labeled">Theme is on</s-table-header>
+                <s-table-header>Action</s-table-header>
+              </s-table-header-row>
+              <s-table-body>
+                {allThemes.map((t) => {
+                  const m = items.find((x) => x.themeId === t.id);
+                  const role = THEME_ROLE_BADGE[t.role];
+                  const on = themeCommits.data?.[t.id];
+                  return (
+                    <s-table-row key={t.id}>
+                      <s-table-cell>
+                        <s-stack gap="none">
+                          <s-stack direction="inline" gap="small-200" alignItems="center">
+                            <s-text type="strong">{t.name}</s-text>
+                            {t.processing && <s-badge tone="caution">Processing</s-badge>}
+                          </s-stack>
+                          <s-text color="subdued">{`ID ${t.numericId}`}</s-text>
+                        </s-stack>
+                      </s-table-cell>
+                      <s-table-cell>
+                        <s-badge tone={role.tone}>{role.label}</s-badge>
+                      </s-table-cell>
+                      <s-table-cell>
+                        {m ? (
+                          <s-stack direction="inline" gap="small-100" alignItems="center">
+                            <s-icon type="git-branch" />
+                            <s-text>{sameRepo(m) ? m.branch : `${m.repository} · ${m.branch}`}</s-text>
+                          </s-stack>
+                        ) : (
+                          <s-text color="subdued">{t.writable ? 'Not mapped' : 'Cannot be synced'}</s-text>
+                        )}
+                      </s-table-cell>
+                      <s-table-cell>
+                        {on ? (
+                          <s-stack gap="none">
+                            <s-text>{`${on.shortSha} · ${firstLine(on.message)}`}</s-text>
+                            <s-text color="subdued">{`${on.branch} · ${formatDate(on.syncedAt)}`}</s-text>
+                          </s-stack>
+                        ) : (
+                          <s-text color="subdued">No sync yet</s-text>
+                        )}
+                      </s-table-cell>
+                      <s-table-cell>
+                        {m && sameRepo(m) ? (
+                          <s-button variant="tertiary" onClick={go(`/mappings/${m.id}`)}>
+                            Open mapping
+                          </s-button>
+                        ) : !m && t.writable ? (
+                          <s-button
+                            variant="tertiary"
+                            disabled={freeBranches.length === 0}
+                            onClick={() => mapTheme(t.id)}
+                          >
+                            Map a branch
+                          </s-button>
+                        ) : (
+                          <s-text color="subdued">—</s-text>
+                        )}
+                      </s-table-cell>
+                    </s-table-row>
+                  );
+                })}
+              </s-table-body>
+            </s-table>
+          </s-stack>
+        </s-section>
       )}
 
       {otherRepoItems.length > 0 && (

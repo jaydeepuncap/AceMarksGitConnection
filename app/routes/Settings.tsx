@@ -6,14 +6,10 @@ import { LoadingState } from '../components/LoadingState';
 import { api } from '../lib/api-client';
 import { showToast } from '../lib/app-bridge';
 import { formatDate } from '../lib/format';
-import { useApiQuery, useMutation, useNavigateHandler } from '../lib/hooks';
+import { useApiQuery, useMutation } from '../lib/hooks';
 import type { UpdateSettingsRequest } from '../lib/types';
 import { ignorePatternError } from '../../shared/theme-paths';
-import {
-  validateGithubToken,
-  validateRepository,
-  validateThemeRootInput,
-} from '../lib/validation';
+import { validateGithubToken, validateRepository, validateThemeRootInput } from '../lib/validation';
 
 /** Select value for "no choice" — an empty option value is not reliable in <s-select>. */
 const NONE = '__none__';
@@ -87,8 +83,8 @@ function GithubConnectionSection({ onChanged }: { onChanged: () => void }) {
           <s-link href="https://github.com/settings/personal-access-tokens/new" target="_blank">
             fine-grained personal access token
           </s-link>{' '}
-          limited to your theme repository with Contents: Read-only and Metadata: Read-only. The token is encrypted
-          on the server and is never shown again.
+          limited to your theme repository with Contents: Read-only and Metadata: Read-only. The token is encrypted on
+          the server and is never shown again.
         </s-paragraph>
         <s-password-field
           label={info ? 'Replace token' : 'Personal access token'}
@@ -157,13 +153,11 @@ function DisconnectModal({
 }
 
 export default function Settings() {
-  const go = useNavigateHandler();
   const settingsQuery = useApiQuery(() => api.settings.get(), []);
   const githubQuery = useApiQuery(() => api.github.connection(), []);
   const save = useMutation(api.settings.update);
 
   const [repository, setRepository] = useState('');
-  const [branch, setBranch] = useState('');
   const [themeRoot, setThemeRoot] = useState('');
   const [ignorePatterns, setIgnorePatterns] = useState<string[]>([]);
 
@@ -171,17 +165,17 @@ export default function Settings() {
   useEffect(() => {
     if (!settings) return;
     setRepository(settings.defaultRepository ?? '');
-    setBranch(settings.defaultBranch ?? '');
     setThemeRoot(settings.syncPreferences.themeRoot);
     setIgnorePatterns(settings.syncPreferences.ignorePatterns);
   }, [settings]);
 
   const connected = !!githubQuery.data?.connected;
-  const repoValid = repository.trim() !== '' && !validateRepository(repository);
-  const branchesQuery = useApiQuery(
-    () => api.github.branches({ repository: repository.trim(), perPage: 100 }),
-    [repoValid ? repository.trim() : ''],
-    repoValid && connected,
+  const savedRepository = settings?.defaultRepository ?? '';
+  // Details of the saved repository, shown under the choice.
+  const repoInfo = useApiQuery(
+    () => api.github.repository(savedRepository),
+    [savedRepository, connected],
+    !!savedRepository && connected,
   );
 
   const repoError = repository.trim() ? validateRepository(repository) : null;
@@ -196,20 +190,19 @@ export default function Settings() {
     const body: UpdateSettingsRequest = {
       syncPreferences: { themeRoot, ignorePatterns: ignorePatterns.map((p) => p.trim()) },
     };
-    if (repository.trim() !== (settings?.defaultRepository ?? '') || branch !== (settings?.defaultBranch ?? '')) {
+    // Each mapping chooses its own branch, so only the repository is saved here.
+    if (repository.trim() !== savedRepository) {
       body.defaultRepository = repository.trim() || null;
-      body.defaultBranch = repository.trim() ? branch || null : null;
+      body.defaultBranch = null;
     }
     const result = await save.run(body);
     if (result) {
       settingsQuery.setData(result);
       showToast('Settings saved');
     }
-  }, [invalid, themeRoot, ignorePatterns, repository, branch, settings, save, settingsQuery]);
+  }, [invalid, themeRoot, ignorePatterns, repository, savedRepository, save, settingsQuery]);
 
   if (settingsQuery.loading && !settingsQuery.data) return <LoadingState title="Settings" />;
-
-  const branches = branchesQuery.data?.items ?? [];
 
   return (
     <AppLayout
@@ -229,54 +222,60 @@ export default function Settings() {
         }}
       />
 
-      <s-section heading="Repository and branch">
-        <s-button slot="secondary-actions" variant="tertiary" disabled={!connected} onClick={go('/repositories')}>
-          Browse repositories
-        </s-button>
+      <s-section heading="Repository">
         <s-stack gap="base">
-          <s-grid gridTemplateColumns="repeat(auto-fit, minmax(240px, 1fr))" gap="base">
-            <s-select
-              label="Repository"
-              value={repository || NONE}
-              disabled={!connected || reposQuery.loading}
-              details={
-                reposQuery.error
-                  ? reposQuery.error.message
+          <s-paragraph color="subdued">
+            The app syncs from one repository. Each branch is connected to its own theme on the Theme mapping page.
+          </s-paragraph>
+          <s-select
+            label="Repository"
+            value={repository || NONE}
+            disabled={!connected || reposQuery.loading}
+            details={
+              reposQuery.error
+                ? reposQuery.error.message
+                : !connected
+                  ? 'Connect GitHub first.'
                   : 'Repositories the connected token can read. Access is verified again when you save.'
-              }
-              error={repoError ?? undefined}
-              onChange={(event) => {
-                const value = event.currentTarget.value === NONE ? '' : event.currentTarget.value;
-                setRepository(value);
-                setBranch('');
-              }}
-            >
-              <s-option value={NONE}>No repository</s-option>
-              {repos.map((r) => (
-                <s-option key={r.fullName} value={r.fullName}>
-                  {`${r.fullName}${r.private ? ' (private)' : ''}`}
-                </s-option>
-              ))}
-              {repository && !repos.some((r) => r.fullName === repository) && (
-                <s-option value={repository}>{repository}</s-option>
-              )}
-            </s-select>
-            <s-select
-              label="Branch"
-              value={branch || NONE}
-              disabled={!repoValid || branchesQuery.loading}
-              details={branchesQuery.error ? branchesQuery.error.message : undefined}
-              onChange={(event) => setBranch(event.currentTarget.value === NONE ? '' : event.currentTarget.value)}
-            >
-              <s-option value={NONE}>Repository default branch</s-option>
-              {branches.map((b) => (
-                <s-option key={b.name} value={b.name}>
-                  {b.name}
-                </s-option>
-              ))}
-              {branch && !branches.some((b) => b.name === branch) && <s-option value={branch}>{branch}</s-option>}
-            </s-select>
-          </s-grid>
+            }
+            error={repoError ?? undefined}
+            onChange={(event) => setRepository(event.currentTarget.value === NONE ? '' : event.currentTarget.value)}
+          >
+            <s-option value={NONE}>No repository</s-option>
+            {repos.map((r) => (
+              <s-option key={r.fullName} value={r.fullName}>
+                {`${r.fullName}${r.private ? ' (private)' : ''}`}
+              </s-option>
+            ))}
+            {repository && !repos.some((r) => r.fullName === repository) && (
+              <s-option value={repository}>{repository}</s-option>
+            )}
+          </s-select>
+          {repository.trim() !== savedRepository && savedRepository && (
+            <s-banner tone="warning" heading="Changing the repository">
+              <s-paragraph>
+                {`Mappings of ${savedRepository} stay as they are but cannot sync until you switch back. Their themes stay mapped, so remove those mappings first if you want to map the themes to the new repository.`}
+              </s-paragraph>
+            </s-banner>
+          )}
+          {repoInfo.data && repository.trim() === savedRepository && (
+            <s-box padding="small" background="subdued" borderRadius="base">
+              <s-stack direction="inline" gap="small-200" alignItems="center" justifyContent="space-between">
+                <s-stack direction="inline" gap="small-200" alignItems="center">
+                  <s-icon type="git-repository" />
+                  <s-text type="strong">{repoInfo.data.fullName}</s-text>
+                  <s-badge tone="neutral">{repoInfo.data.private ? 'Private' : 'Public'}</s-badge>
+                  <s-badge tone={repoInfo.data.permissions.push ? 'info' : 'neutral'}>
+                    {repoInfo.data.permissions.push ? 'Read & write' : 'Read only'}
+                  </s-badge>
+                  <s-text color="subdued">{`Default branch ${repoInfo.data.defaultBranch}`}</s-text>
+                </s-stack>
+                <s-link href={repoInfo.data.htmlUrl} target="_blank">
+                  View on GitHub
+                </s-link>
+              </s-stack>
+            </s-box>
+          )}
           <s-text-field
             label="Theme root folder"
             placeholder="e.g. theme (leave empty if the theme is at the repository root)"
@@ -286,18 +285,6 @@ export default function Settings() {
             error={rootError ?? undefined}
             onInput={(event) => setThemeRoot(event.currentTarget.value)}
           />
-          {settings?.defaultRepository && (
-            <s-box padding="small" background="subdued" borderRadius="base">
-              <s-stack direction="inline" gap="small-200" alignItems="center">
-                <s-badge tone={connected ? 'success' : 'caution'}>{connected ? 'Connected' : 'GitHub not connected'}</s-badge>
-                <s-text>
-                  Owner <s-text type="strong">{settings.defaultRepository.split('/')[0]}</s-text> · repository{' '}
-                  <s-text type="strong">{settings.defaultRepository.split('/')[1]}</s-text> · branch{' '}
-                  <s-text type="strong">{settings.defaultBranch ?? 'repository default'}</s-text>
-                </s-text>
-              </s-stack>
-            </s-box>
-          )}
         </s-stack>
       </s-section>
 

@@ -9,7 +9,8 @@ import { useApiQuery, useNavigateHandler } from '../lib/hooks';
 export default function Dashboard() {
   const go = useNavigateHandler();
   const load = useCallback(
-    () => Promise.all([api.settings.get(), api.github.connection(), api.sync.history({ perPage: 5 }), api.mappings.list()]),
+    () =>
+      Promise.all([api.settings.get(), api.github.connection(), api.sync.history({ perPage: 5 }), api.mappings.list()]),
     [],
   );
   const { data, error, loading, reload } = useApiQuery(load, []);
@@ -72,10 +73,14 @@ export default function Dashboard() {
         <s-section heading="Repository">
           <s-stack gap="small-200">
             <s-text type="strong">{settings?.defaultRepository ?? 'No repository selected'}</s-text>
-            <s-text color="subdued">Branch: {settings?.defaultBranch ?? '—'}</s-text>
+            <s-text color="subdued">
+              {settings?.defaultRepository
+                ? `${mappings.filter((m) => m.repository.toLowerCase() === settings.defaultRepository!.toLowerCase()).length} branch(es) mapped to themes`
+                : 'Choose the repository to sync from in Settings.'}
+            </s-text>
             <s-stack direction="inline">
-              <s-button onClick={go('/repositories')} disabled={!github?.connected}>
-                Choose repository
+              <s-button onClick={go('/settings')} disabled={!github?.connected}>
+                {settings?.defaultRepository ? 'Change in Settings' : 'Choose repository'}
               </s-button>
             </s-stack>
           </s-stack>

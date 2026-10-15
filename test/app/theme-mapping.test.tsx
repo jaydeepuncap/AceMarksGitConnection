@@ -4,7 +4,7 @@ import { MemoryRouter } from 'react-router-dom';
 import type * as ApiClientModule from '../../app/lib/api-client';
 import { Route, Routes } from 'react-router-dom';
 import MappingDetail from '../../app/routes/MappingDetail';
-import RepositoryDetail from '../../app/routes/RepositoryDetail';
+import Settings from '../../app/routes/Settings';
 import ThemeMapping from '../../app/routes/ThemeMapping';
 
 // vi.mock is hoisted above imports, so its fixtures must be hoisted too.
@@ -38,9 +38,14 @@ vi.mock('../../app/lib/api-client', async (importOriginal) => {
     ...actual,
     api: {
       settings: {
-        get: vi
-          .fn()
-          .mockResolvedValue({ shop: {}, settings: { defaultRepository: 'acme/theme', defaultBranch: 'main' } }),
+        get: vi.fn().mockResolvedValue({
+          shop: { canWriteThemes: true },
+          settings: {
+            defaultRepository: 'acme/theme',
+            defaultBranch: 'main',
+            syncPreferences: { themeRoot: '', ignorePatterns: [] },
+          },
+        }),
         update: vi.fn(),
       },
       github: {
@@ -56,6 +61,12 @@ vi.mock('../../app/lib/api-client', async (importOriginal) => {
           hasNextPage: false,
         }),
         branch: vi.fn(),
+        repositories: vi.fn().mockResolvedValue({
+          items: [{ id: 1, fullName: 'acme/theme', private: true, defaultBranch: 'main' }],
+          page: 1,
+          perPage: 100,
+          hasNextPage: false,
+        }),
         repository: vi.fn().mockResolvedValue({
           id: 1,
           fullName: 'acme/theme',
@@ -68,7 +79,10 @@ vi.mock('../../app/lib/api-client', async (importOriginal) => {
           permissions: { pull: true, push: false, admin: false },
         }),
       },
-      themes: { list: vi.fn().mockResolvedValue([theme('1', 'abc'), theme('2', 'xyz'), theme('3', 'spare')]) },
+      themes: {
+        list: vi.fn().mockResolvedValue([theme('1', 'abc'), theme('2', 'xyz'), theme('3', 'spare')]),
+        lastSynced: vi.fn().mockResolvedValue({}),
+      },
       mappings: {
         list: vi
           .fn()
@@ -320,24 +334,40 @@ describe('Changed files of a commit', () => {
   });
 });
 
-describe('Repository page', () => {
-  it('shows every branch with its mapped theme and the themes each branch updates', async () => {
-    render(
-      <MemoryRouter initialEntries={['/repositories/acme/theme']}>
-        <Routes>
-          <Route path="/repositories/:owner/:name" element={<RepositoryDetail />} />
-        </Routes>
+describe('Store themes on the Theme mapping page', () => {
+  it('lists every theme with the branch it receives and offers to map a free theme', async () => {
+    const { container } = render(
+      <MemoryRouter initialEntries={['/mappings']}>
+        <ThemeMapping />
       </MemoryRouter>,
     );
     const wait = { timeout: 5000 };
-    expect(await screen.findByText('acme/theme', {}, wait)).toBeInTheDocument();
-    expect(screen.getByText('Selected')).toBeInTheDocument();
-    expect(await screen.findByText('dev', {}, wait)).toBeInTheDocument();
-    // main → abc and staging → xyz are mapped; dev can be mapped to the free theme.
-    expect(screen.getAllByText('Open mapping').length).toBeGreaterThanOrEqual(2);
-    expect(screen.getByText('Map to a theme')).toBeInTheDocument();
-    expect(screen.getByText('Branch main')).toBeInTheDocument();
-    expect(screen.getByText('Branch staging')).toBeInTheDocument();
-    expect(screen.getByText('Free — not mapped')).toBeInTheDocument(); // "spare"
+    expect(await screen.findByText('spare', {}, wait)).toBeInTheDocument();
+    // main → abc and staging → xyz open their mapping; "spare" can receive a free branch.
+    expect(await screen.findAllByText('Open mapping', {}, wait)).not.toHaveLength(0);
+    fireEvent.click(screen.getByText('Map a branch'));
+    await waitFor(() => expect(container.querySelector('s-section[heading="Add a mapping"]')).not.toBeNull(), wait);
+    // The theme is preselected in the form.
+    const themeSelect = [...container.querySelectorAll('s-select')].find(
+      (el) => el.getAttribute('label') === 'Shopify theme',
+    );
+    expect(themeSelect?.getAttribute('value')).toBe('gid://shopify/OnlineStoreTheme/3');
+  });
+});
+
+describe('Settings', () => {
+  it('chooses one repository, with no branch choice and no separate repositories page', async () => {
+    const { container } = render(
+      <MemoryRouter initialEntries={['/settings']}>
+        <Settings />
+      </MemoryRouter>,
+    );
+    const wait = { timeout: 5000 };
+    expect(await screen.findByText('View on GitHub', {}, wait)).toBeInTheDocument();
+    expect(screen.getByText('Default branch main')).toBeInTheDocument();
+    const labels = [...container.querySelectorAll('s-select')].map((el) => el.getAttribute('label'));
+    expect(labels).toContain('Repository');
+    expect(labels).not.toContain('Branch');
+    expect(screen.queryByText('Browse repositories')).not.toBeInTheDocument();
   });
 });

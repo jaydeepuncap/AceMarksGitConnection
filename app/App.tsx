@@ -1,11 +1,8 @@
 import { useEffect } from 'react';
-import { Link, Route, Routes, useNavigate } from 'react-router-dom';
+import { Link, Navigate, Route, Routes, useNavigate } from 'react-router-dom';
 import { NavMenu } from '@shopify/app-bridge-react';
 import Dashboard from './routes/Dashboard';
 import Settings from './routes/Settings';
-import Repositories from './routes/Repositories';
-import RepositoryDetail from './routes/RepositoryDetail';
-import Themes from './routes/Themes';
 import ThemeMapping from './routes/ThemeMapping';
 import CommitsRedirect from './routes/CommitsRedirect';
 import MappingDetail from './routes/MappingDetail';
@@ -52,16 +49,14 @@ export default function App() {
         </Link>
         <Link to="/mappings">Theme mapping</Link>
         <Link to="/sync-history">Sync history</Link>
-        <Link to="/themes">Themes</Link>
-        <Link to="/repositories">Repositories</Link>
         <Link to="/settings">Settings</Link>
       </NavMenu>
       <Routes>
         <Route path="/" element={<Dashboard />} />
         <Route path="/settings" element={<Settings />} />
-        <Route path="/repositories" element={<Repositories />} />
-        <Route path="/repositories/:owner/:name" element={<RepositoryDetail />} />
-        <Route path="/themes" element={<Themes />} />
+        {/* The repository is chosen in Settings and themes are listed on Theme mapping; old links land there. */}
+        <Route path="/repositories/*" element={<Navigate to="/settings" replace />} />
+        <Route path="/themes" element={<Navigate to="/mappings" replace />} />
         <Route path="/mappings" element={<ThemeMapping />} />
         <Route path="/mappings/:id" element={<MappingDetail />} />
         <Route path="/commits" element={<CommitsRedirect />} />
