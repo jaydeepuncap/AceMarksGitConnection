@@ -6,9 +6,9 @@ import { ErrorBanner } from '../components/ErrorBanner';
 import { LoadingState } from '../components/LoadingState';
 import { api } from '../lib/api-client';
 import { showToast } from '../lib/app-bridge';
-import { firstLine, formatDate, SYNC_STATUS_BADGE, themeFileLabel } from '../lib/format';
+import { firstLine, formatDate, SYNC_STATUS_BADGE, syncTypeLabel, themeFileLabel } from '../lib/format';
 import { useApiQuery, useMutation } from '../lib/hooks';
-import type { SyncOperation, SyncPreview, SyncStatus } from '../lib/types';
+import type { SyncOperation, SyncPreview, SyncStatus, SyncStrategy } from '../lib/types';
 import type { Tone } from '../lib/format';
 
 const PER_PAGE = 20;
@@ -334,9 +334,9 @@ function SyncDetail({ id, onBack, onOpen }: { id: string; onBack: () => void; on
             </s-paragraph>
             <s-text color="subdued">{firstLine(data.commitMessage)}</s-text>
             <s-text>
-              {data.filesSucceeded} succeeded · {data.filesFailed} failed · {data.filesSkipped} skipped ·{' '}
-              {data.filesChanged} planned
+              {`${syncTypeLabel(data.strategy)} · ${data.filesSucceeded} succeeded · ${data.filesFailed} failed · ${data.filesSkipped - data.filesIgnored} skipped · ${data.filesIgnored} ignored · ${data.filesChanged} planned`}
             </s-text>
+            <s-text color="subdued">{`Job ID ${data.id}`}</s-text>
             <s-text color="subdued">
               Started {formatDate(data.startedAt ?? data.initiatedAt)} · Completed {formatDate(data.completedAt)}
             </s-text>
@@ -369,7 +369,9 @@ function SyncDetail({ id, onBack, onOpen }: { id: string; onBack: () => void; on
                 <s-table-cell>
                   <s-text color="subdued">
                     {(op.failure ? `${op.failure.reason} · ${op.failure.detail}` : null) ?? op.skipReason ?? (op.previousPath ? `renamed from ${op.previousPath}` : op.changeType)}
-                    {op.attempts > 1 ? ` · ${op.attempts} attempts` : ''}
+                    {op.sourceCommitSha ? ` · from ${op.sourceCommitSha.slice(0, 7)}` : ''}
+                    {op.attempts > 0 ? ` · ${op.attempts} attempt${op.attempts === 1 ? '' : 's'}` : ''}
+                    {op.status === 'failed' && op.lastAttemptAt ? ` · failed ${formatDate(op.lastAttemptAt)}` : ''}
                   </s-text>
                 </s-table-cell>
               </s-table-row>
@@ -407,13 +409,40 @@ function SyncDetail({ id, onBack, onOpen }: { id: string; onBack: () => void; on
   );
 }
 
+const ALL = 'all';
+const SYNC_TYPES: SyncStrategy[] = ['full_snapshot', 'commit_changes', 'selected_commits', 'since_last_sync'];
+
 function SyncList({ onOpen }: { onOpen: (id: string) => void }) {
   const [page, setPage] = useState(1);
   const [status, setStatus] = useState<SyncStatus | ''>('');
+  const [themeId, setThemeId] = useState('');
+  const [branch, setBranch] = useState('');
+  const [strategy, setStrategy] = useState<SyncStrategy | ''>('');
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const settings = useApiQuery(() => api.settings.get(), []);
+  const themes = useApiQuery(() => api.themes.list(), []);
+  const repository = settings.data?.settings.defaultRepository ?? '';
+  const branches = useApiQuery(() => api.github.branches({ repository, perPage: 100 }), [repository], !!repository);
   const history = useApiQuery(
-    () => api.sync.history({ page, perPage: PER_PAGE, status: status || undefined }),
-    [page, status],
+    () =>
+      api.sync.history({
+        page,
+        perPage: PER_PAGE,
+        status: status || undefined,
+        themeId: themeId || undefined,
+        branch: branch || undefined,
+        strategy: strategy || undefined,
+        from: from || undefined,
+        to: to || undefined,
+      }),
+    [page, status, themeId, branch, strategy, from, to],
   );
+  const filter = <T,>(set: (v: T) => void) => (value: T) => {
+    set(value);
+    setPage(1);
+  };
+  const filtered = !!(status || themeId || branch || strategy || from || to);
 
   return (
     <AppLayout
@@ -421,6 +450,82 @@ function SyncList({ onOpen }: { onOpen: (id: string) => void }) {
       secondaryActions={[{ content: 'Refresh', onAction: history.reload }]}
       banners={<ErrorBanner error={history.error} onRetry={history.reload} />}
     >
+      <s-section heading="Filters">
+        <s-grid gridTemplateColumns="repeat(auto-fit, minmax(170px, 1fr))" gap="base">
+          <s-select
+            label="Theme"
+            value={themeId || ALL}
+            onChange={(event) => filter(setThemeId)(event.currentTarget.value === ALL ? '' : event.currentTarget.value)}
+          >
+            <s-option value={ALL}>All themes</s-option>
+            {(themes.data ?? []).map((t) => (
+              <s-option key={t.id} value={t.id}>
+                {t.name}
+              </s-option>
+            ))}
+          </s-select>
+          <s-select
+            label="Branch"
+            value={branch || ALL}
+            onChange={(event) => filter(setBranch)(event.currentTarget.value === ALL ? '' : event.currentTarget.value)}
+          >
+            <s-option value={ALL}>All branches</s-option>
+            {(branches.data?.items ?? []).map((b) => (
+              <s-option key={b.name} value={b.name}>
+                {b.name}
+              </s-option>
+            ))}
+          </s-select>
+          <s-select
+            label="Sync type"
+            value={strategy || ALL}
+            onChange={(event) =>
+              filter(setStrategy)(event.currentTarget.value === ALL ? '' : (event.currentTarget.value as SyncStrategy))
+            }
+          >
+            <s-option value={ALL}>All types</s-option>
+            {SYNC_TYPES.map((t) => (
+              <s-option key={t} value={t}>
+                {syncTypeLabel(t)}
+              </s-option>
+            ))}
+          </s-select>
+          <s-select
+            label="Status"
+            value={status || ALL}
+            onChange={(event) =>
+              filter(setStatus)(event.currentTarget.value === ALL ? '' : (event.currentTarget.value as SyncStatus))
+            }
+          >
+            <s-option value={ALL}>All statuses</s-option>
+            {(Object.keys(SYNC_STATUS_BADGE) as SyncStatus[]).map((st) => (
+              <s-option key={st} value={st}>
+                {SYNC_STATUS_BADGE[st].label}
+              </s-option>
+            ))}
+          </s-select>
+          <s-date-field label="From" value={from} onChange={(event) => filter(setFrom)(event.currentTarget.value)} />
+          <s-date-field label="To" value={to} onChange={(event) => filter(setTo)(event.currentTarget.value)} />
+        </s-grid>
+        {filtered && (
+          <s-button
+            slot="secondary-actions"
+            variant="tertiary"
+            onClick={() => {
+              setStatus('');
+              setThemeId('');
+              setBranch('');
+              setStrategy('');
+              setFrom('');
+              setTo('');
+              setPage(1);
+            }}
+          >
+            Clear filters
+          </s-button>
+        )}
+      </s-section>
+
       <s-section padding="none" accessibilityLabel="Sync history">
         <s-table
           variant="auto"
@@ -431,67 +536,56 @@ function SyncList({ onOpen }: { onOpen: (id: string) => void }) {
           onPreviousPage={() => setPage((p) => Math.max(1, p - 1))}
           onNextPage={() => setPage((p) => p + 1)}
         >
-          <s-select
-            slot="filters"
-            label="Status"
-            value={status || 'all'}
-            onChange={(event) => {
-              const value = event.currentTarget.value;
-              setStatus(value === 'all' ? '' : (value as SyncStatus));
-              setPage(1);
-            }}
-          >
-            <s-option value="all">All statuses</s-option>
-            {(Object.keys(SYNC_STATUS_BADGE) as SyncStatus[]).map((s) => (
-              <s-option key={s} value={s}>
-                {SYNC_STATUS_BADGE[s].label}
-              </s-option>
-            ))}
-          </s-select>
           <s-table-header-row>
-            <s-table-header listSlot="primary">Commit</s-table-header>
-            <s-table-header listSlot="secondary">Repository → theme</s-table-header>
+            <s-table-header listSlot="primary">Commits</s-table-header>
+            <s-table-header listSlot="secondary">Repository · branch → theme</s-table-header>
+            <s-table-header listSlot="labeled">Type</s-table-header>
             <s-table-header listSlot="inline">Status</s-table-header>
-            <s-table-header format="numeric">Files</s-table-header>
+            <s-table-header>Files</s-table-header>
             <s-table-header listSlot="labeled">Started</s-table-header>
             <s-table-header listSlot="labeled">Completed</s-table-header>
             <s-table-header>Details</s-table-header>
           </s-table-header-row>
           <s-table-body>
-            {(history.data?.items ?? []).map((run) => (
-              <s-table-row key={run.id}>
-                <s-table-cell>
-                  <s-stack gap="none">
-                    <s-text type="strong">{run.commitSha.slice(0, 7)}</s-text>
-                    <s-text color="subdued">{firstLine(run.commitMessage)}</s-text>
-                    {run.errorDetails && <s-text tone="critical">{run.errorDetails.message}</s-text>}
-                  </s-stack>
-                </s-table-cell>
-                <s-table-cell>
-                  {run.repository} → {run.themeName}
-                  {run.themeRole === 'MAIN' ? ' (live)' : ''}
-                </s-table-cell>
-                <s-table-cell>
-                  <s-badge tone={SYNC_STATUS_BADGE[run.status].tone}>{SYNC_STATUS_BADGE[run.status].label}</s-badge>
-                </s-table-cell>
-                <s-table-cell>
-                  {run.filesSucceeded}/{run.filesChanged}
-                  {run.filesFailed > 0 ? ` (${run.filesFailed} failed)` : ''}
-                </s-table-cell>
-                <s-table-cell>{formatDate(run.startedAt ?? run.initiatedAt)}</s-table-cell>
-                <s-table-cell>{formatDate(run.completedAt)}</s-table-cell>
-                <s-table-cell>
-                  <s-button variant="tertiary" accessibilityLabel={`Open sync ${run.id}`} onClick={() => onOpen(run.id)}>
-                    {run.canRetry ? 'View / retry' : 'View'}
-                  </s-button>
-                </s-table-cell>
-              </s-table-row>
-            ))}
+            {(history.data?.items ?? []).map((run) => {
+              const shas = run.commitsIncluded.length > 1 ? run.commitsIncluded.map((c) => c.shortSha) : [run.commitSha.slice(0, 7)];
+              return (
+                <s-table-row key={run.id}>
+                  <s-table-cell>
+                    <s-stack gap="none">
+                      <s-text type="strong">{shas.length > 3 ? `${shas[0]} … ${shas[shas.length - 1]} (${shas.length})` : shas.join(', ')}</s-text>
+                      <s-text color="subdued">{firstLine(run.commitMessage)}</s-text>
+                      {run.errorDetails && <s-text tone="critical">{run.errorDetails.message}</s-text>}
+                      <s-text color="subdued">{`Job ${run.id.slice(0, 8)}`}</s-text>
+                    </s-stack>
+                  </s-table-cell>
+                  <s-table-cell>
+                    {`${run.repository} · ${run.branch ?? '—'} → ${run.themeName}${run.themeRole === 'MAIN' ? ' (live)' : ''}`}
+                  </s-table-cell>
+                  <s-table-cell>{syncTypeLabel(run.strategy)}</s-table-cell>
+                  <s-table-cell>
+                    <s-badge tone={SYNC_STATUS_BADGE[run.status].tone}>{SYNC_STATUS_BADGE[run.status].label}</s-badge>
+                  </s-table-cell>
+                  <s-table-cell>
+                    {`${run.filesSucceeded} ok · ${run.filesFailed} failed · ${run.filesSkipped - run.filesIgnored} skipped · ${run.filesIgnored} ignored`}
+                  </s-table-cell>
+                  <s-table-cell>{formatDate(run.startedAt ?? run.initiatedAt)}</s-table-cell>
+                  <s-table-cell>{formatDate(run.completedAt)}</s-table-cell>
+                  <s-table-cell>
+                    <s-button variant="tertiary" accessibilityLabel={`Open sync ${run.id}`} onClick={() => onOpen(run.id)}>
+                      {run.canRetry ? 'View / retry' : 'View'}
+                    </s-button>
+                  </s-table-cell>
+                </s-table-row>
+              );
+            })}
           </s-table-body>
         </s-table>
         {!history.loading && history.data?.items.length === 0 && (
           <s-box padding="base">
-            <s-paragraph color="subdued">No synchronizations yet. Preview a commit from the Commits page.</s-paragraph>
+            <s-paragraph color="subdued">
+              {filtered ? 'No synchronizations match these filters.' : 'No synchronizations yet. Start one from Theme mapping or Commit sync.'}
+            </s-paragraph>
           </s-box>
         )}
       </s-section>

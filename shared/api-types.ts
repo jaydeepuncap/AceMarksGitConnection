@@ -464,6 +464,10 @@ export interface SyncOperation {
   error: string | null;
   /** Set for failed files. */
   failure: FailureInfo | null;
+  /** When the file was last attempted (the failure time for failed files). */
+  lastAttemptAt: string | null;
+  /** Multiple commits: the commit this file was taken from. */
+  sourceCommitSha: string | null;
 }
 
 export interface SyncRunDetail extends SyncRun {

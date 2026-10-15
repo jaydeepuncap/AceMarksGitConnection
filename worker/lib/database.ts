@@ -343,9 +343,16 @@ export async function listSyncRuns(
     themeId?: string;
     /** Runs whose commit came from this branch (runs recorded without a branch are included). */
     branch?: string;
+    strategy?: SyncStrategy;
+    /** YYYY-MM-DD (UTC), inclusive. */
+    from?: string;
+    to?: string;
   },
 ): Promise<{ rows: SyncHistoryRow[]; hasNextPage: boolean }> {
   const filters = [eq(syncHistory.shopId, shopId)];
+  if (opts.strategy) filters.push(eq(syncHistory.strategy, opts.strategy));
+  if (opts.from) filters.push(sql`${syncHistory.initiatedAt} >= ${Date.parse(`${opts.from}T00:00:00Z`)}`);
+  if (opts.to) filters.push(sql`${syncHistory.initiatedAt} < ${Date.parse(`${opts.to}T00:00:00Z`) + 86_400_000}`);
   if (opts.themeId) filters.push(eq(syncHistory.themeId, opts.themeId));
   if (opts.branch) filters.push(sql`(${syncHistory.branch} = ${opts.branch} or ${syncHistory.branch} is null)`);
   if (opts.status) filters.push(eq(syncHistory.status, opts.status));
@@ -528,6 +535,8 @@ export function toSyncOperationDto(row: SyncOperationRow): SyncOperation {
     attempts: row.attempts,
     error: row.error,
     failure: row.status === 'failed' ? classifyFailure(row.error) : null,
+    lastAttemptAt: row.attempts > 0 ? row.updatedAt.toISOString() : null,
+    sourceCommitSha: row.sourceCommitSha,
   };
 }
 

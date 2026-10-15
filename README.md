@@ -143,7 +143,9 @@ The schema lives in `drizzle/schema.ts`:
 | `github_connections` | Per-shop GitHub credential (**encrypted** PAT), account, verified repository |
 | `app_settings` | Default repository, branch, theme, sync preferences (JSON) |
 | `sync_history` | One row per preview/sync: repo, exact commit SHA, theme, status, counters, error details, timestamps |
-| `sync_operations` | Durable per-file job state (`pending`/`succeeded`/`failed`/`skipped`, attempts, error) |
+| `sync_operations` | Durable per-file job state (`pending`/`succeeded`/`failed`/`skipped`, attempts, error, last attempt time, `source_commit_sha` for multi-commit syncs) |
+| `theme_branch_sync` | The commit each theme was last fully synced to, per branch |
+| `theme_mappings` | Repository branch ↔ Shopify theme. Partial unique indexes on active rows (`shop_id, repository, branch` and `shop_id, theme_id` where `removed_at is null`) allow one theme per branch and one branch per theme even under simultaneous requests; removed or changed mappings stay as an audit trail (`removed_at`, `removed_by`). |
 
 Every tenant table has a `shop_id` foreign key with `ON DELETE CASCADE`, plus indexes for the access paths (`shop_id, initiated_at`, `shop_id, status`, `sync_id, path` unique, …).
 
@@ -205,8 +207,17 @@ The sync history of the selected theme and branch is shown under the commit list
 
 ## Sync workflow
 
-1. Pick a **theme** (Themes page or Settings).
-2. Pick a **commit** (Commits page). The full 40-character SHA is the source of truth from here on.
+**Pages:** Settings (GitHub connection, repository and branch, ignore files) → **Theme mapping** (connect a branch to one theme, first Full sync, Last sync) → **Commit sync** (one or several commits) → **Sync history** (filters, file-by-file results, retry, restore).
+
+- **Ignore files** (Settings): add, edit and remove patterns — `config/settings_data.json`, `assets/development.js`, `templates/*.json`, `sections/development-section.liquid`, `locales/` (a trailing `/` or a bare folder name means everything inside it). "Check matching files" lists what each pattern matches on the branch (`POST /api/settings/ignore-preview`). Ignored files appear in every preview as *ignored* and are never uploaded, changed or deleted — also when the pattern is added after the preview.
+- **Mapping:** one theme per branch, one branch per theme, enforced by the API and the database. Previews, confirmations and retries only accept the theme mapped to the branch (`MAPPING_REQUIRED` / `MAPPING_CONFLICT`); the mapping, repository access and branch are checked again right before writing.
+- **Full sync** (first time): every theme file of the branch head is compared with the theme (create / update), ignored files are listed, and theme files that are not in Git are deleted **only** if "Delete theme files that are not in the repository" is chosen (never protected or ignored files). Files already identical in the theme (MD5) are not rewritten.
+- **Single commit:** the commit's changed files (added / modified / renamed / removed), content from that exact SHA.
+- **Multiple commits** (`strategy: "selected_commits"`, `commitShas`): all commits must be among the last 300 of the mapped branch; they are applied oldest → newest and, per file, the newest selected commit that touched it decides the result (content read from exactly that commit, deletion, or skip). For a continuous range this equals the net change of the range. Unselected commits in between that changed the same files are reported as **conflicts** in the review, because a file is always written as a whole.
+- **Last sync** shows only syncs with a recorded result (successful, partially successful or failed), never a queued job.
+
+1. Choose the **branch** (its mapped theme is used).
+2. Pick one or more **commits** (Commit sync page). The full 40-character SHA is the source of truth from here on.
 3. The app shows the commit's changed files with added/modified/renamed/removed status and the theme path each one maps to, or why it can't be synced.
 4. **Preview** (`POST /api/sync/preview`). The backend:
    - verifies the theme exists *in this shop* and is writable (not `LOCKED`, `DEMO`, `ARCHIVED` or processing);
@@ -224,7 +235,7 @@ The sync history of the selected theme and branch is shown under the commit list
    - Per-file `userErrors` mark only that file as failed. Throttling, 5xx and timeouts are retried up to 3 attempts. A missing permission or authorization stops the whole run.
 7. **Record.** Status ends as `succeeded`, `partially_failed` or `failed`, with per-file errors. **Retry** (`POST /api/sync/history/:id/retry`) resets only failed files. It's safe because every write is idempotent: the same blob from the same SHA, and deleting an already-missing file counts as success.
 
-**Deletions** are off by default. When you enable them, the app deletes only files the commit removed or renamed away, and only if they exist in the theme. It never deletes `layout/theme.liquid`, `config/settings_schema.json` or `config/settings_data.json`. `full_snapshot` never deletes anything.
+**Deletions** are off by default. When you enable them, the app deletes only files the selected commit(s) removed or renamed away — or, for a full sync, theme files that are not in the repository — and only if they exist in the theme. Every deletion is listed in the review first. It never deletes `layout/theme.liquid`, `config/settings_schema.json`, `config/settings_data.json`, ignored files or `assets/theme-sync.json`.
 
 **Background jobs.** The primary path is **Cloudflare Queues**. The consumer processes chunks and re-enqueues itself, with backoff on rate limits. Job state lives in D1, so redelivery is harmless. Without a queue binding (for example on the Workers Free plan), the app runs chunks in `ctx.waitUntil()` for about 25 seconds. If work remains, the next poll from the Sync History page resumes it.
 
@@ -430,11 +441,19 @@ Status codes: `400` validation, `401` session (with `X-Shopify-Retry-Invalid-Ses
 | `GET /api/github/branches` | `?repository=owner/name&page&perPage` | `Paginated<GithubBranch>` |
 | `GET /api/themes` | `?refresh=1` | `ShopifyTheme[]` (`id`, `name`, `role`, `processing`, `isLive`, `writable`) |
 | `GET /api/commits` | `?repository&branch&path&page&perPage` | `Paginated<CommitSummary>` |
+| `GET /api/commits/stats` | `?repository&shas=a,b,…` (≤30) | `{ [sha]: { files, truncated } }` (cached per SHA) |
 | `GET /api/commits/:sha` | `?repository` | `CommitDetail` (`filesCount`, `filesTruncated`) |
 | `GET /api/commits/:sha/files` | `?repository&page&perPage` (≤300) | `Paginated<CommitFile>` with `themePath`/`themePathError` |
-| `POST /api/sync/preview` | `{ commitSha, themeId, repository?, branch?, strategy?, allowDeletes?, includePaths? }` | `201 SyncPreview` |
+| `POST /api/settings/ignore-preview` | `{ patterns }` | which theme files on the branch each pattern matches |
+| `GET /api/mappings` | – | `{ items: ThemeMapping[] }` (active) |
+| `POST /api/mappings` | `{ repository?, branch, themeId }` | `201 ThemeMapping`; `409 MAPPING_CONFLICT` when the branch or theme is taken |
+| `PUT /api/mappings/:id` | `{ branch?, themeId?, confirm: true }` | `ThemeMapping` (old row kept as audit) |
+| `DELETE /api/mappings/:id` | `{ confirm: true }` | removed `ThemeMapping` |
+| `POST /api/sync/preview` | `{ commitSha, themeId, repository?, branch?, strategy?, commitShas?, allowDeletes?, includePaths? }` | `201 SyncPreview` (with `summary.ignored`, `conflicts`) |
 | `POST /api/sync` | `{ syncId, confirm: true, confirmLiveTheme?, confirmThemeName? }` | `202 SyncRun` |
-| `GET /api/sync/history` | `?page&perPage&status&includePreviews` | `Paginated<SyncRun>` |
+| `GET /api/sync/history` | `?page&perPage&status&themeId&branch&strategy&from&to&includePreviews` | `Paginated<SyncRun>` |
+| `GET /api/sync/last` | `?themeId&branch` | latest `SyncRun` with a recorded result, or `null` |
+| `POST /api/sync/history/:id/restore` | `{ confirmLiveTheme?, confirmThemeName? }` | `SyncRun` (incomplete updates only) |
 | `GET /api/sync/history/:id` | – | `SyncRunDetail` (run + operations) |
 | `POST /api/sync/history/:id/retry` | `{ confirmLiveTheme?, confirmThemeName? }` | `202 SyncRun` |
 

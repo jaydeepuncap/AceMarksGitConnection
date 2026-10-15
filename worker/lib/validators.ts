@@ -112,6 +112,12 @@ export const historyQuerySchema = paginationSchema.extend({
     .enum(['true', 'false', '1', '0'])
     .optional()
     .transform((v) => v === 'true' || v === '1'),
+  /** Sync type. */
+  strategy: z.enum(SYNC_STRATEGY_VALUES).optional(),
+  /** Started on or after this day (YYYY-MM-DD, UTC). */
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD').optional(),
+  /** Started on or before this day (YYYY-MM-DD, UTC, inclusive). */
+  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD').optional(),
 });
 
 export const uuidSchema = z.string().uuid('Invalid ID');

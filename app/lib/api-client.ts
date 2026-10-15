@@ -12,6 +12,7 @@ import type {
   ApiErrorBody,
   ApiErrorCode,
   IgnorePreviewResponse,
+  SyncStrategy,
   CommitStatsResponse,
   CreateThemeMappingRequest,
   ThemeMapping,
@@ -194,7 +195,18 @@ export const api = {
   sync: {
     preview: (body: SyncPreviewRequest) => apiRequest<SyncPreview>('POST', '/api/sync/preview', { body }),
     confirm: (body: ConfirmSyncRequest) => apiRequest<SyncRun>('POST', '/api/sync', { body }),
-    history: (query: { page?: number; perPage?: number; status?: SyncStatus; themeId?: string; branch?: string } = {}) =>
+    history: (
+      query: {
+        page?: number;
+        perPage?: number;
+        status?: SyncStatus;
+        themeId?: string;
+        branch?: string;
+        strategy?: SyncStrategy;
+        from?: string;
+        to?: string;
+      } = {},
+    ) =>
       apiRequest<Paginated<SyncRun>>('GET', '/api/sync/history', { query }),
     get: (id: string) => apiRequest<SyncRunDetail>('GET', `/api/sync/history/${encodeURIComponent(id)}`),
     retry: (id: string, body: RetrySyncRequest = {}) =>

@@ -415,6 +415,25 @@ describe('updating a theme, step by step', () => {
     });
   });
 
+  it('reports the last recorded sync and filters the history by type, status and date', async () => {
+    await setup();
+    expect((await api<SyncRun | null>('GET', `/api/sync/last?themeId=${encodeURIComponent(THEME_DEV.id)}`)).body.data).toBeNull();
+    await sync(C1, { strategy: 'commit_changes' });
+    await sync(C3, { strategy: 'full_snapshot' });
+
+    const last = (await api<SyncRun>('GET', `/api/sync/last?themeId=${encodeURIComponent(THEME_DEV.id)}&branch=main`)).body.data;
+    expect(last).toMatchObject({ commitSha: C3, strategy: 'full_snapshot', status: 'succeeded', branch: 'main' });
+    expect(last.completedAt).not.toBeNull();
+
+    const history = (q: string) => api<Paginated<SyncRun>>('GET', `/api/sync/history?${q}`).then((r) => r.body.data.items.map((i) => i.commitSha));
+    expect(await history('strategy=full_snapshot')).toEqual([C3]);
+    expect(await history('strategy=commit_changes&status=succeeded')).toEqual([C1]);
+    const today = new Date().toISOString().slice(0, 10);
+    expect(await history(`from=${today}&to=${today}`)).toHaveLength(2);
+    expect(await history('to=2000-01-01')).toEqual([]);
+    expect((await api('GET', '/api/sync/history?from=yesterday')).status).toBe(400);
+  });
+
   it('ignores a marker file from another repository', async () => {
     await setup();
     w.theme.set('assets/theme-sync.json', {

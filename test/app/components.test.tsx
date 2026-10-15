@@ -13,8 +13,9 @@ vi.mock('../../app/lib/api-client', async (importOriginal) => {
   return {
     ...actual,
     api: {
-      github: { repositories: vi.fn() },
+      github: { repositories: vi.fn(), branches: vi.fn().mockResolvedValue({ items: [], page: 1, perPage: 100, hasNextPage: false }) },
       settings: { get: vi.fn(), update: vi.fn() },
+      themes: { list: vi.fn().mockResolvedValue([]) },
       sync: { history: vi.fn(), get: vi.fn(), retry: vi.fn() },
     },
   };
@@ -91,12 +92,20 @@ describe('pages', () => {
           filesSucceeded: 2,
           filesFailed: 1,
           filesSkipped: 0,
+          filesIgnored: 0,
           errorDetails: { code: 'FILES_FAILED', message: '1 file(s) failed to sync' },
           attempt: 1,
           initiatedAt: '2026-01-01T00:00:00Z',
           startedAt: null,
           completedAt: null,
           canRetry: true,
+          baseSha: null,
+          commitsIncluded: [],
+          backedUp: 0,
+          allowDeletes: false,
+          canRestore: false,
+          restoredAt: null,
+          restoredFiles: 0,
         },
       ],
       page: 1,
@@ -107,7 +116,8 @@ describe('pages', () => {
     await waitFor(() => expect(screen.getByText('bbbbbbb')).toBeInTheDocument());
     expect(screen.getByText('Update header')).toBeInTheDocument();
     expect(screen.getAllByText('Partially failed').length).toBeGreaterThan(0);
-    expect(screen.getByText(/2\/3/)).toBeInTheDocument();
+    expect(screen.getByText('2 ok · 1 failed · 0 skipped · 0 ignored')).toBeInTheDocument();
+    expect(screen.getAllByText('Single commit').length).toBeGreaterThan(1); // type column + filter option
     expect(screen.getByText('View / retry')).toBeInTheDocument();
   });
 });

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { SyncPlanOperation, SyncPreview } from '../lib/types';
-import type { Tone } from '../lib/format';
+import { syncTypeLabel, type Tone } from '../lib/format';
 
 interface Props {
   open: boolean;
@@ -58,6 +58,7 @@ export function ConfirmSyncModal({ open, preview, submitting, error, onClose, on
   const [typedName, setTypedName] = useState('');
   const [showSkipped, setShowSkipped] = useState(false);
   const [acceptEdits, setAcceptEdits] = useState(false);
+  const [showAll, setShowAll] = useState(false);
 
   useEffect(() => {
     const modal = modalRef.current;
@@ -71,6 +72,7 @@ export function ConfirmSyncModal({ open, preview, submitting, error, onClose, on
       setAck(false);
       setTypedName('');
       setAcceptEdits(false);
+      setShowAll(false);
     }
   }, [open]);
 
@@ -89,6 +91,7 @@ export function ConfirmSyncModal({ open, preview, submitting, error, onClose, on
   const newFiles = ops.filter((op) => op.action === 'upsert' && !op.existsInTheme);
   const updatedFiles = ops.filter((op) => op.action === 'upsert' && op.existsInTheme);
   const removedFiles = ops.filter((op) => op.action === 'delete');
+  const ignoredFiles = ops.filter((op) => op.action === 'skip' && op.skipReason?.startsWith('Matches ignore pattern'));
 
   return (
     <s-modal
@@ -112,9 +115,16 @@ export function ConfirmSyncModal({ open, preview, submitting, error, onClose, on
               </s-paragraph>
             </s-banner>
           )}
-          <s-grid gridTemplateColumns="8rem 1fr" gap="small-200">
+          <s-grid gridTemplateColumns="9rem 1fr" gap="small-200">
+            <s-text color="subdued">Repository</s-text>
+            <s-text>{`${preview.repository} · ${preview.branch ?? '—'}`}</s-text>
             <s-text color="subdued">Theme</s-text>
-            <s-text type="strong">{preview.theme.name}</s-text>
+            <s-text>
+              <s-text type="strong">{preview.theme.name}</s-text>
+              {` · ID ${preview.theme.numericId}${preview.theme.isLive ? ' · live' : ''}`}
+            </s-text>
+            <s-text color="subdued">Sync type</s-text>
+            <s-text>{syncTypeLabel(preview.strategy)}</s-text>
             <s-text color="subdued">Current</s-text>
             <s-text>
               {preview.base ? (
@@ -173,9 +183,21 @@ export function ConfirmSyncModal({ open, preview, submitting, error, onClose, on
             </s-banner>
           )}
 
+          <s-text type="strong">
+            {`${writes} file(s) affected: ${preview.summary.creates} to create · ${preview.summary.updates} to update · ${preview.summary.deletes} to delete · ${preview.summary.skipped} skipped · ${preview.summary.ignored} ignored`}
+          </s-text>
+          {preview.conflicts.length > 0 && (
+            <s-banner tone="warning" heading={`${preview.conflicts.length} file(s) overlap with commits that are not selected`}>
+              {preview.conflicts.slice(0, 20).map((c) => (
+                <s-paragraph key={c}>{c}</s-paragraph>
+              ))}
+              {preview.conflicts.length > 20 && <s-paragraph>{`and ${preview.conflicts.length - 20} more`}</s-paragraph>}
+            </s-banner>
+          )}
           <FileGroup title="New files" tone="success" mark="+" ops={newFiles} />
           <FileGroup title="Updated files" tone="caution" mark="~" ops={updatedFiles} />
           <FileGroup title="Removed files" tone="critical" mark="−" ops={removedFiles} />
+          <FileGroup title="Ignored (never changed)" tone="neutral" mark="·" ops={ignoredFiles} />
 
           {preview.warnings
             .filter((w) => !w.startsWith('This is the LIVE theme'))
@@ -205,38 +227,47 @@ export function ConfirmSyncModal({ open, preview, submitting, error, onClose, on
             </s-banner>
           )}
 
-          <s-checkbox
-            label="Show skipped files"
-            checked={showSkipped}
-            onChange={(event) => setShowSkipped(event.currentTarget.checked)}
-          />
+          <s-stack direction="inline">
+            <s-button variant="tertiary" onClick={() => setShowAll((v) => !v)}>
+              {showAll ? 'Hide the file list' : `Review every file (${ops.length})`}
+            </s-button>
+          </s-stack>
+          {showAll && (
+            <s-stack gap="small-200">
+              <s-checkbox
+                label="Show skipped files"
+                checked={showSkipped}
+                onChange={(event) => setShowSkipped(event.currentTarget.checked)}
+              />
 
-          <s-table variant="auto">
-            <s-table-header-row>
-              <s-table-header listSlot="kicker">Action</s-table-header>
-              <s-table-header listSlot="primary">Theme file</s-table-header>
-              <s-table-header listSlot="secondary">Details</s-table-header>
-            </s-table-header-row>
-            <s-table-body>
-              {operations.map((op) => {
-                const badge = actionBadge(op);
-                return (
-                  <s-table-row key={op.path}>
-                    <s-table-cell>
-                      <s-badge tone={badge.tone}>{badge.label}</s-badge>
-                    </s-table-cell>
-                    <s-table-cell>{op.path}</s-table-cell>
-                    <s-table-cell>
-                      <s-text color="subdued">
-                        {op.skipReason ?? (op.previousPath ? `renamed from ${op.previousPath}` : op.changeType)}
-                        {fromCommits(op) ? ` · ${fromCommits(op)}` : ''}
-                      </s-text>
-                    </s-table-cell>
-                  </s-table-row>
-                );
-              })}
-            </s-table-body>
-          </s-table>
+              <s-table variant="auto">
+                <s-table-header-row>
+                  <s-table-header listSlot="kicker">Action</s-table-header>
+                  <s-table-header listSlot="primary">Theme file</s-table-header>
+                  <s-table-header listSlot="secondary">Details</s-table-header>
+                </s-table-header-row>
+                <s-table-body>
+                  {operations.map((op) => {
+                    const badge = actionBadge(op);
+                    return (
+                      <s-table-row key={op.path}>
+                        <s-table-cell>
+                          <s-badge tone={badge.tone}>{badge.label}</s-badge>
+                        </s-table-cell>
+                        <s-table-cell>{op.path}</s-table-cell>
+                        <s-table-cell>
+                          <s-text color="subdued">
+                            {op.skipReason ?? (op.previousPath ? `renamed from ${op.previousPath}` : op.changeType)}
+                            {fromCommits(op) ? ` · ${fromCommits(op)}` : ''}
+                          </s-text>
+                        </s-table-cell>
+                      </s-table-row>
+                    );
+                  })}
+                </s-table-body>
+              </s-table>
+            </s-stack>
+          )}
 
           {live && (
             <s-stack gap="small-200">
@@ -270,7 +301,7 @@ export function ConfirmSyncModal({ open, preview, submitting, error, onClose, on
           })
         }
       >
-        {live ? 'Confirm update to live theme' : 'Confirm Update'}
+        {live ? 'Confirm & Sync live theme' : 'Confirm & Sync'}
       </s-button>
       <s-button slot="secondary-actions" disabled={submitting} onClick={onClose}>
         Cancel
