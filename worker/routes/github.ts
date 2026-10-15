@@ -13,6 +13,7 @@
  *   GET    /api/github/repositories   ?page&perPage&q
  *   GET    /api/github/branches       ?repository=owner/name&page&perPage
  *   GET    /api/github/branch         ?repository=owner/name&name=main   one branch and its newest commit
+ *   GET    /api/github/repository     ?repository=owner/name             one repository (access verified)
  */
 import { Hono } from 'hono';
 import type {
@@ -38,6 +39,7 @@ import { GitHubClient } from '../lib/github-client';
 import { ApiError, ok } from '../lib/response';
 import {
   branchQuerySchema,
+  repositoryQuerySchema,
   branchesQuerySchema,
   createGithubConnectionSchema,
   parseOrThrow,
@@ -143,4 +145,10 @@ export const githubRoutes = new Hono<AppEnv>()
     const { client, connection } = await githubClient(c);
     const { owner, repo } = await resolveRepository(c, connection, query.repository);
     return ok<GithubBranch>(c, await client.getBranch(owner, repo, query.name));
+  })
+  .get('/repository', async (c) => {
+    const query = parseOrThrow(repositoryQuerySchema, c.req.query());
+    const { client } = await githubClient(c);
+    const { owner, repo } = splitRepository(query.repository);
+    return ok<GithubRepository>(c, await client.verifyRepositoryAccess(owner, repo));
   });

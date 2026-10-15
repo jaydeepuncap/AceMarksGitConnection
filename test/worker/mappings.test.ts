@@ -173,4 +173,12 @@ describe('branch to theme mappings', () => {
     expect(res.body.data).toMatchObject({ name: 'feature', commitSha: 'b'.repeat(40) });
     expect((await api('GET', '/api/github/branch?name=nope')).status).toBe(404);
   });
+
+  it('reads one repository, verifying the token can access it', async () => {
+    await setup();
+    const res = await api<{ fullName: string; defaultBranch: string }>('GET', '/api/github/repository?repository=acme/theme');
+    expect(res.status).toBe(200);
+    expect(res.body.data).toMatchObject({ fullName: 'acme/theme', defaultBranch: 'main' });
+    expect((await api('GET', '/api/github/repository?repository=not a repo')).status).toBe(400);
+  });
 });

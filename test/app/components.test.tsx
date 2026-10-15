@@ -16,6 +16,7 @@ vi.mock('../../app/lib/api-client', async (importOriginal) => {
       github: { repositories: vi.fn(), branches: vi.fn().mockResolvedValue({ items: [], page: 1, perPage: 100, hasNextPage: false }) },
       settings: { get: vi.fn(), update: vi.fn() },
       themes: { list: vi.fn().mockResolvedValue([]) },
+      mappings: { list: vi.fn().mockResolvedValue({ items: [] }) },
       sync: { history: vi.fn(), get: vi.fn(), retry: vi.fn() },
     },
   };

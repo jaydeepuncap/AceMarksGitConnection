@@ -4,6 +4,7 @@ import { NavMenu } from '@shopify/app-bridge-react';
 import Dashboard from './routes/Dashboard';
 import Settings from './routes/Settings';
 import Repositories from './routes/Repositories';
+import RepositoryDetail from './routes/RepositoryDetail';
 import Themes from './routes/Themes';
 import ThemeMapping from './routes/ThemeMapping';
 import CommitsRedirect from './routes/CommitsRedirect';
@@ -59,6 +60,7 @@ export default function App() {
         <Route path="/" element={<Dashboard />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="/repositories" element={<Repositories />} />
+        <Route path="/repositories/:owner/:name" element={<RepositoryDetail />} />
         <Route path="/themes" element={<Themes />} />
         <Route path="/mappings" element={<ThemeMapping />} />
         <Route path="/mappings/:id" element={<MappingDetail />} />

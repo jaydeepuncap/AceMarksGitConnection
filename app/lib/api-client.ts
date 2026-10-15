@@ -170,6 +170,7 @@ export const api = {
       apiRequest<Paginated<GithubRepository>>('GET', '/api/github/repositories', { query }),
     branches: (query: { repository?: string; page?: number; perPage?: number } = {}) =>
       apiRequest<Paginated<GithubBranch>>('GET', '/api/github/branches', { query }),
+    repository: (repository: string) => apiRequest<GithubRepository>('GET', '/api/github/repository', { query: { repository } }),
     branch: (name: string, repository?: string) =>
       apiRequest<GithubBranch>('GET', '/api/github/branch', { query: { name, repository } }),
   },

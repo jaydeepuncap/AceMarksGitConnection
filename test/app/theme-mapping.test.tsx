@@ -4,6 +4,7 @@ import { MemoryRouter } from 'react-router-dom';
 import type * as ApiClientModule from '../../app/lib/api-client';
 import { Route, Routes } from 'react-router-dom';
 import MappingDetail from '../../app/routes/MappingDetail';
+import RepositoryDetail from '../../app/routes/RepositoryDetail';
 import ThemeMapping from '../../app/routes/ThemeMapping';
 
 // vi.mock is hoisted above imports, so its fixtures must be hoisted too.
@@ -36,7 +37,10 @@ vi.mock('../../app/lib/api-client', async (importOriginal) => {
   return {
     ...actual,
     api: {
-      settings: { get: vi.fn().mockResolvedValue({ shop: {}, settings: { defaultRepository: 'acme/theme', defaultBranch: 'main' } }) },
+      settings: {
+        get: vi.fn().mockResolvedValue({ shop: {}, settings: { defaultRepository: 'acme/theme', defaultBranch: 'main' } }),
+        update: vi.fn(),
+      },
       github: {
         connection: vi.fn().mockResolvedValue({ connected: true, connection: null }),
         branches: vi.fn().mockResolvedValue({
@@ -50,6 +54,17 @@ vi.mock('../../app/lib/api-client', async (importOriginal) => {
           hasNextPage: false,
         }),
         branch: vi.fn(),
+        repository: vi.fn().mockResolvedValue({
+          id: 1,
+          fullName: 'acme/theme',
+          owner: 'acme',
+          name: 'theme',
+          private: true,
+          defaultBranch: 'main',
+          htmlUrl: 'https://github.com/acme/theme',
+          updatedAt: '2026-10-13T10:00:00Z',
+          permissions: { pull: true, push: false, admin: false },
+        }),
       },
       themes: { list: vi.fn().mockResolvedValue([theme('1', 'abc'), theme('2', 'xyz'), theme('3', 'spare')]) },
       mappings: {
@@ -125,5 +140,27 @@ describe('Mapping page', () => {
     await waitFor(() => expect(container.querySelector('s-banner[heading="1 update waiting"]')).not.toBeNull(), wait); // status banner
     expect(await screen.findByText('No syncs applied to this theme from this branch yet.', {}, wait)).toBeInTheDocument();
     expect(screen.getByText('Review full sync')).toBeInTheDocument();
+  });
+});
+
+describe('Repository page', () => {
+  it('shows every branch with its mapped theme and the themes each branch updates', async () => {
+    render(
+      <MemoryRouter initialEntries={['/repositories/acme/theme']}>
+        <Routes>
+          <Route path="/repositories/:owner/:name" element={<RepositoryDetail />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    const wait = { timeout: 5000 };
+    expect(await screen.findByText('acme/theme', {}, wait)).toBeInTheDocument();
+    expect(screen.getByText('Selected')).toBeInTheDocument();
+    expect(await screen.findByText('dev', {}, wait)).toBeInTheDocument();
+    // main → abc and staging → xyz are mapped; dev can be mapped to the free theme.
+    expect(screen.getAllByText('Open mapping').length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText('Map to a theme')).toBeInTheDocument();
+    expect(screen.getByText('Branch main')).toBeInTheDocument();
+    expect(screen.getByText('Branch staging')).toBeInTheDocument();
+    expect(screen.getByText('Free — not mapped')).toBeInTheDocument(); // "spare"
   });
 });
