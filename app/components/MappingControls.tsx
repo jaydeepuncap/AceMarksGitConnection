@@ -49,12 +49,17 @@ export function FullSyncControls({
   };
   return (
     <s-stack gap="base">
-      <s-paragraph>
-        {`Makes ${mapping.themeName} match the newest commit on ${mapping.branch}. Every theme file in the repository is compared with the theme, and you review what is created, updated and skipped before anything changes. Use it for the first sync or to start over; afterwards, syncing commits brings in only what is new. Ignored files are never touched.`}
-      </s-paragraph>
+      <s-paragraph>{`Makes ${mapping.themeName} match the newest commit on ${mapping.branch}.`}</s-paragraph>
+      <s-unordered-list>
+        <s-list-item>Use it for the first sync, or to start over. Afterwards, sync only new commits.</s-list-item>
+        <s-list-item>
+          Every theme file in the repository is compared with the theme; you review the changes first.
+        </s-list-item>
+        <s-list-item>Ignored files are never touched; files identical in the theme are not rewritten.</s-list-item>
+      </s-unordered-list>
       <s-checkbox
         label="Delete theme files that are not in the repository"
-        details="Off by default. When on, the review lists every file that would be deleted; protected and ignored files are never deleted."
+        details="Off by default. The review lists every file that would be deleted; protected and ignored files never are."
         checked={allowDeletes}
         onChange={(event) => setAllowDeletes(event.currentTarget.checked)}
       />

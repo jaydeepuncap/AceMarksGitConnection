@@ -230,23 +230,20 @@ export function CommitSyncPanel({
   };
 
   const reviewLabel = multiple ? `Review ${picked.length} commits` : 'Review sync';
+  const upToDate = !!lastSynced && commits.data?.waiting === 0 && !commits.data?.waitingMore;
 
   return (
     <s-stack gap="base">
       <ErrorBanner error={commits.error} onRetry={commits.reload} heading="Commits could not be loaded" />
       <ErrorBanner error={previewMutation.error} heading="Preview failed" onDismiss={previewMutation.clearError} />
 
-      <s-stack direction="inline" gap="small-300" alignItems="center">
-        <s-badge tone="info">1</s-badge>
-        <s-text>Select commits</s-text>
-        <s-icon type="chevron-right" />
-        <s-badge tone="info">2</s-badge>
-        <s-text>Review the files</s-text>
-        <s-icon type="chevron-right" />
-        <s-badge tone="info">3</s-badge>
-        <s-text>Confirm & sync</s-text>
-        <s-text color="subdued">· nothing changes in the theme until you confirm</s-text>
-      </s-stack>
+      {upToDate && picked.length === 0 && (
+        <s-banner tone="success" heading="All commits are in the theme">
+          <s-paragraph>
+            {`${mapping.themeName} already has every commit of ${mapping.branch}. Select an older commit only if you want to apply it again.`}
+          </s-paragraph>
+        </s-banner>
+      )}
 
       {multiple ? (
         <s-banner tone={gaps > 0 ? 'warning' : 'info'} heading={`${picked.length} commits will be combined`}>
@@ -270,34 +267,32 @@ export function CommitSyncPanel({
             ))}
           </s-stack>
         </s-banner>
-      ) : (
-        <s-choice-list
-          label="What to sync when one commit is selected"
-          values={[strategy]}
-          onChange={(event) => setStrategy((event.currentTarget.values[0] as SyncStrategy) ?? 'since_last_sync')}
-        >
-          <s-choice value="since_last_sync" selected={strategy === 'since_last_sync'}>
-            Everything up to the selected commit (recommended)
-            <s-text slot="details">
-              {lastSynced
-                ? `Brings in every commit after ${lastSynced.shortSha} up to the selected one, so nothing is skipped.`
-                : 'The theme was never synced from this branch: the complete theme at the selected commit is applied.'}
-            </s-text>
-          </s-choice>
-          <s-choice value="commit_changes" selected={strategy === 'commit_changes'}>
-            Only the selected commit
-            <s-text slot="details">
-              Applies just the files that commit changed; earlier commits that are not in the theme are left out.
-            </s-text>
-          </s-choice>
-        </s-choice-list>
-      )}
-      <s-checkbox
-        label="Also delete files that the commits removed or renamed"
-        details="Off by default. Every deletion is listed in the review first; protected and ignored files are never deleted."
-        checked={allowDeletes}
-        onChange={(event) => setAllowDeletes(event.currentTarget.checked)}
-      />
+      ) : null}
+      <s-grid gridTemplateColumns="repeat(auto-fit, minmax(260px, 1fr))" gap="base" alignItems="start">
+        {!multiple && (
+          <s-select
+            label="When you select one commit, sync"
+            value={strategy}
+            details={
+              strategy === 'commit_changes'
+                ? 'Only the files that commit changed; earlier commits not in the theme are left out.'
+                : lastSynced
+                  ? `Every commit after ${lastSynced.shortSha} up to the selected one, so nothing is skipped.`
+                  : 'Never synced from this branch: the complete theme at the selected commit.'
+            }
+            onChange={(event) => setStrategy(event.currentTarget.value as SyncStrategy)}
+          >
+            <s-option value="since_last_sync">Everything up to that commit (recommended)</s-option>
+            <s-option value="commit_changes">Only that commit</s-option>
+          </s-select>
+        )}
+        <s-checkbox
+          label="Also delete files the commits removed"
+          details="Off by default; every deletion is listed in the review first."
+          checked={allowDeletes}
+          onChange={(event) => setAllowDeletes(event.currentTarget.checked)}
+        />
+      </s-grid>
 
       {alreadyOn && lastSynced && (
         <s-banner tone="info" heading="Already up to date">
@@ -408,10 +403,21 @@ export function CommitSyncPanel({
       {!commits.loading && !commits.error && listed.length === 0 && (
         <s-paragraph color="subdued">{`${mapping.branch} has no commits.`}</s-paragraph>
       )}
-      <s-text color="subdued">
-        <s-badge tone="info">New</s-badge> not in the theme yet · <s-badge tone="success">Last synced</s-badge> the
-        commit the theme is on · <s-badge tone="neutral">Added</s-badge> already in the theme
-      </s-text>
+      <s-stack direction="inline" gap="base" alignItems="center">
+        <s-text color="subdued">Status:</s-text>
+        <s-stack direction="inline" gap="small-200" alignItems="center">
+          <s-badge tone="info">New</s-badge>
+          <s-text color="subdued">not in the theme yet</s-text>
+        </s-stack>
+        <s-stack direction="inline" gap="small-200" alignItems="center">
+          <s-badge tone="success">Last synced</s-badge>
+          <s-text color="subdued">the commit the theme is on</s-text>
+        </s-stack>
+        <s-stack direction="inline" gap="small-200" alignItems="center">
+          <s-badge tone="neutral">Added</s-badge>
+          <s-text color="subdued">already in the theme</s-text>
+        </s-stack>
+      </s-stack>
 
       {selectedSha && (
         <s-stack gap="small-200">

@@ -129,7 +129,7 @@ describe('Theme mapping page', () => {
 
 describe('Mapping page', () => {
   it('shows where the theme stands, its commits and applied syncs for the fixed branch and theme', async () => {
-    const { container } = render(
+    render(
       <MemoryRouter initialEntries={['/mappings/m1']}>
         <Routes>
           <Route path="/mappings/:id" element={<MappingDetail />} />
@@ -137,14 +137,20 @@ describe('Mapping page', () => {
       </MemoryRouter>,
     );
     const wait = { timeout: 5000 };
-    expect(await screen.findByText('eeeeeee Fix header', {}, wait)).toBeInTheDocument(); // "Theme is on"
+    // Summary card: where the theme stands and the one next step.
+    expect(await screen.findByText('eeeeeee · Fix header', {}, wait)).toBeInTheDocument();
+    expect(await screen.findByText('Review 1 update', {}, wait)).toBeInTheDocument();
+    expect(screen.getByText('1 commit')).toBeInTheDocument();
+    // Commits tab (default).
     expect(await screen.findByText('Add banner', {}, wait)).toBeInTheDocument();
     expect(screen.getAllByText('New').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Last synced').length).toBeGreaterThan(0);
     expect(screen.getByText('Select new (1)')).toBeInTheDocument();
-    await waitFor(() => expect(container.querySelector('s-banner[heading="1 update waiting"]')).not.toBeNull(), wait); // status banner
+    // History and Full sync tabs.
+    fireEvent.click(screen.getByText('History'));
     expect(await screen.findByText('No syncs applied to this theme from this branch yet.', {}, wait)).toBeInTheDocument();
-    expect(screen.getByText('Review full sync')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('Full sync'));
+    expect(await screen.findByText('Review full sync', {}, wait)).toBeInTheDocument();
   });
 });
 
