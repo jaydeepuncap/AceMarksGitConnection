@@ -683,3 +683,12 @@ export async function claimRestore(db: Database, shopId: string, syncId: string)
     .returning();
   return row;
 }
+
+/** Every branch's last synced commit for one theme, most recent first. */
+export async function listLastSyncedForTheme(db: Database, shopId: string, themeId: string): Promise<ThemeBranchSyncRow[]> {
+  return db
+    .select()
+    .from(themeBranchSync)
+    .where(and(eq(themeBranchSync.shopId, shopId), eq(themeBranchSync.themeId, themeId)))
+    .orderBy(desc(themeBranchSync.syncedAt));
+}

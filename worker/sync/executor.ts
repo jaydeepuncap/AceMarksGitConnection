@@ -18,6 +18,7 @@ import { gitBlobSha, bytesToBase64 } from '../lib/crypto';
 import {
   addBackedUp,
   countOperations,
+  listLastSyncedForTheme,
   saveLastSynced,
   findShopById,
   getDb,
@@ -42,6 +43,7 @@ import {
 } from '../lib/shopify-graphql';
 import { THEME_SYNC_MARKER_PATH } from '../../shared/theme-paths';
 import { checkThemeFile } from './code-check';
+import { buildThemeSyncMarker, fetchThemeSyncMarker, type ThemeSyncMarker } from './theme-state';
 import { splitRepository } from '../lib/validators';
 import { MAX_FILE_BYTES } from './planner';
 import type { SyncHistoryRow, SyncOperationRow } from '../../drizzle/schema';
@@ -301,7 +303,8 @@ export async function finalizeIfComplete(db: Database, shopId: string, syncId: s
 /**
  * After every file succeeded: the commit becomes the theme's last synced commit
  * for the run's branch, and assets/theme-sync.json is written into the theme as
- * the very last step (a duplicated theme keeps it). Never fails the run.
+ * the very last step with the last synced commit of every branch (a duplicated
+ * theme keeps it). Never fails the run.
  */
 async function recordLastSynced(db: Database, admin: ShopifyGraphqlClient, run: SyncHistoryRow, logger: Logger): Promise<void> {
   const syncedAt = new Date();
@@ -316,17 +319,26 @@ async function recordLastSynced(db: Database, admin: ShopifyGraphqlClient, run: 
         syncedAt,
       });
     }
-    const marker = {
-      app: 'Theme Sync',
-      lastSyncedUpdate: run.commitSha,
-      shortSha: run.commitSha.slice(0, 7),
-      description: (run.commitMessage ?? '').split('\n')[0] ?? '',
-      repository: run.repository,
-      branch: run.branch,
-      theme: run.themeName,
-      syncedOn: syncedAt.toISOString(),
-      syncId: run.id,
-    };
+    // The file keeps the last synced commit of every branch, not only this sync.
+    let previous: ThemeSyncMarker | null = null;
+    try {
+      previous = await fetchThemeSyncMarker(admin, run.themeId);
+    } catch (err) {
+      logger.warn('sync.marker_read_failed', { error: errorMessage(err) });
+    }
+    const marker = buildThemeSyncMarker({
+      previous,
+      rows: await listLastSyncedForTheme(db, run.shopId, run.themeId),
+      sync: {
+        commitSha: run.commitSha,
+        message: run.commitMessage,
+        repository: run.repository,
+        branch: run.branch,
+        themeName: run.themeName,
+        syncedOn: syncedAt.toISOString(),
+        syncId: run.id,
+      },
+    });
     await upsertThemeFiles(admin, run.themeId, [
       { filename: THEME_SYNC_MARKER_PATH, body: { type: 'TEXT', value: `${JSON.stringify(marker, null, 2)}\n` } },
     ]);

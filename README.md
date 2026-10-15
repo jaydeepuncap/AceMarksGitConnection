@@ -179,7 +179,20 @@ npm run db:migrate:remote    # production D1 (--env production)
 4. **Review** — Theme, Current (last synced commit), Updating to, Updates included, New / Updated / Removed files, check results; *Confirm Update*.
 5. **Confirm** — the theme's current version of each affected file is backed up (KV, 30 days) right before it changes; progress is shown file by file.
 6. **Result** — "Update complete · Files X of Y updated · <theme> is now on <commit>". Only when every file succeeded is the commit stored as the theme's **last synced commit for that branch** (`theme_branch_sync` table) and written to `assets/theme-sync.json` in the theme (last step).
-   A theme without a record — a **duplicate** of a synced theme, or one synced before records were kept — is identified from the latest successful sync of that theme or from its own `assets/theme-sync.json` (`lastSyncedUpdate`, `branch`, `repository`, `syncedOn`), which Shopify copies along when a theme is duplicated. Themes and Commits then show its last update and New / Last synced / Added statuses.
+   A theme without a record — a **duplicate** of a synced theme, or one synced before records were kept — is identified from the latest successful sync of that theme or from its own `assets/theme-sync.json`, which Shopify copies along when a theme is duplicated. The file holds the latest sync at the top and the last synced commit of **every branch** under `branches`:
+
+   ```json
+   {
+     "app": "Theme Sync",
+     "lastSyncedUpdate": "5e41c630…", "shortSha": "5e41c63", "branch": "UI-changes", "repository": "owner/theme",
+     "theme": "Updated copy of Dawn", "syncedOn": "2026-10-15T05:51:36.719Z", "syncId": "…",
+     "branches": {
+       "UI-changes": { "lastSyncedUpdate": "5e41c630…", "shortSha": "5e41c63", "description": "fix: …", "syncedOn": "…", "syncId": "…" },
+       "main":       { "lastSyncedUpdate": "f78eab3…",  "shortSha": "f78eab3", "description": "…",      "syncedOn": "…", "syncId": "…" }
+     }
+   }
+   ```
+ Themes and Commits then show its last update and New / Last synced / Added statuses.
 7. **If an update does not fully complete** — the result says "Update incomplete · X of Y files updated", lists each failed file with a plain reason (*Temporary Shopify issue — can be retried*, *Code error — needs a fix from your developer*, *The repository changed — run the full update again*) and shows which commit the theme remains on. Options:
    - **Retry Failed Files** — only the failed files are tried again (disabled when every failure is a code error).
    - **Run Full Update Again** — a fresh preview of the same update with new checks.

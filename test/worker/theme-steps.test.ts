@@ -283,6 +283,39 @@ describe('updating a theme, step by step', () => {
     expect(list.items.map((i) => i.syncStatus)).toEqual(['new', 'new', 'last_synced']);
   });
 
+  it('keeps the last synced commit of every branch in assets/theme-sync.json, also for duplicates', async () => {
+    await setup();
+    await sync(C1, { strategy: 'commit_changes' }); // main
+    await sync(C2, { strategy: 'commit_changes', branch: 'UI-changes' });
+    const marker = JSON.parse(w.theme.get('assets/theme-sync.json')!.value);
+    expect(marker).toMatchObject({ lastSyncedUpdate: C2, branch: 'UI-changes' }); // the latest sync on top
+    expect(Object.keys(marker.branches)).toEqual(['UI-changes', 'main']); // most recent first
+    expect(marker.branches).toMatchObject({
+      'UI-changes': { lastSyncedUpdate: C2, shortSha: '2222222', description: 'Update product template' },
+      main: { lastSyncedUpdate: C1, shortSha: '1111111', description: 'Add custom CSS' },
+    });
+
+    // THEME_LIVE serves the same files (a duplicate): both branches are recognised.
+    const onMain = (await api<CommitsResponse>('GET', `/api/commits?branch=main&themeId=${encodeURIComponent(THEME_LIVE.id)}`)).body.data;
+    expect(onMain.lastSynced).toMatchObject({ sha: C1, branch: 'main' });
+    const onFeature = (await api<CommitsResponse>('GET', `/api/commits?branch=UI-changes&themeId=${encodeURIComponent(THEME_LIVE.id)}`)).body.data;
+    expect(onFeature.lastSynced).toMatchObject({ sha: C2, branch: 'UI-changes' });
+  });
+
+  it('reads markers written before per-branch entries existed', async () => {
+    await setup();
+    w.theme.set('assets/theme-sync.json', {
+      value: JSON.stringify({ app: 'Theme Sync', lastSyncedUpdate: C2, branch: 'main', repository: 'acme/theme', syncedOn: '2026-10-01T00:00:00Z' }),
+      updatedAt: '2026-10-01T00:00:00Z',
+    });
+    const list = (await api<CommitsResponse>('GET', `/api/commits?branch=main&themeId=${encodeURIComponent(THEME_DEV.id)}`)).body.data;
+    expect(list.lastSynced).toMatchObject({ sha: C2 });
+    await sync(C3, { strategy: 'commit_changes' });
+    const marker = JSON.parse(w.theme.get('assets/theme-sync.json')!.value);
+    expect(Object.keys(marker.branches)).toEqual(['main']);
+    expect(marker.branches.main).toMatchObject({ lastSyncedUpdate: C3 });
+  });
+
   it('ignores a marker file from another repository', async () => {
     await setup();
     w.theme.set('assets/theme-sync.json', {
