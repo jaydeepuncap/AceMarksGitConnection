@@ -202,8 +202,6 @@ export default function Commits() {
   useEffect(() => {
     if (!defaults) return;
     setBranch((b) => b || defaults.defaultBranch || '');
-    setStrategy(defaults.syncPreferences.strategy === 'selected_commits' ? 'since_last_sync' : defaults.syncPreferences.strategy);
-    setAllowDeletes(defaults.syncPreferences.allowDeletes);
   }, [defaults]);
 
   const repository = defaults?.defaultRepository ?? '';
@@ -348,11 +346,19 @@ export default function Commits() {
               }}
             >
               <s-option value={DEFAULT_BRANCH}>Select a branch</s-option>
-              {(branches.data?.items ?? []).map((b) => (
-                <s-option key={b.name} value={b.name}>
-                  {b.name}
-                </s-option>
-              ))}
+              {(branches.data?.items ?? []).map((b) => {
+                const m = mappings.data?.items.find(
+                  (x) => x.repository.toLowerCase() === repository.toLowerCase() && x.branch === b.name,
+                );
+                return (
+                  <s-option key={b.name} value={b.name}>
+                    {m ? `${b.name} → ${m.themeName}` : `${b.name} (not mapped)`}
+                  </s-option>
+                );
+              })}
+              {branch && !(branches.data?.items ?? []).some((b) => b.name === branch) && (
+                <s-option value={branch}>{branch}</s-option>
+              )}
             </s-select>
             <s-stack gap="small-200">
               <s-text type="strong">Mapped theme</s-text>
@@ -382,7 +388,6 @@ export default function Commits() {
             ) : (
               <s-select
                 label="Push"
-                details="Default from Settings → Sync preferences"
                 value={strategy}
                 onChange={(event) => setStrategy(event.currentTarget.value as SyncStrategy)}
               >

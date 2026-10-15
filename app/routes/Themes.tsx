@@ -2,9 +2,8 @@ import { AppLayout } from '../components/AppLayout';
 import { ErrorBanner } from '../components/ErrorBanner';
 import { LoadingState } from '../components/LoadingState';
 import { api } from '../lib/api-client';
-import { showToast } from '../lib/app-bridge';
 import { firstLine, formatDate, THEME_ROLE_BADGE } from '../lib/format';
-import { useApiQuery, useMutation, useNavigateHandler } from '../lib/hooks';
+import { useApiQuery, useNavigateHandler } from '../lib/hooks';
 
 export default function Themes() {
   const go = useNavigateHandler();
@@ -12,30 +11,20 @@ export default function Themes() {
   const lastSynced = useApiQuery(() => api.themes.lastSynced(), []);
   const mappings = useApiQuery(() => api.mappings.list(), []);
   const settings = useApiQuery(() => api.settings.get(), []);
-  const select = useMutation(api.settings.update);
 
   if (themes.loading && !themes.data) return <LoadingState title="Themes" />;
 
-  const current = settings.data?.settings.defaultThemeId;
   const items = themes.data ?? [];
 
-  const choose = async (id: string, name: string) => {
-    const result = await select.run({ defaultThemeId: id });
-    if (result) {
-      settings.setData(result);
-      showToast(`Target theme set to ${name}`);
-    }
-  };
 
   return (
     <AppLayout
       title="Themes"
-      subtitle="Pick the theme that syncs write to by default"
+      subtitle="Every theme in the store, the branch it is mapped to and its last update"
       secondaryActions={[{ content: 'Refresh', onAction: () => themes.reload() }]}
       banners={
         <>
           <ErrorBanner error={themes.error} onRetry={themes.reload} />
-          <ErrorBanner error={select.error} heading="Theme could not be selected" onDismiss={select.clearError} />
           {settings.data && !settings.data.shop.canWriteThemes && (
             <s-banner tone="warning" heading="Theme write access not granted">
               <s-paragraph>
@@ -69,7 +58,6 @@ export default function Themes() {
                       <s-stack gap="none">
                         <s-stack direction="inline" gap="small-200" alignItems="center">
                           <s-text type="strong">{theme.name}</s-text>
-                          {current === theme.id && <s-badge tone="success">Default target</s-badge>}
                           {theme.processing && <s-badge tone="caution">Processing</s-badge>}
                           {theme.processingFailed && <s-badge tone="critical">Processing failed</s-badge>}
                         </s-stack>
@@ -106,15 +94,6 @@ export default function Themes() {
                     </s-table-cell>
                     <s-table-cell>
                       <s-stack direction="inline" gap="small-200">
-                        <s-button
-                          disabled={!theme.writable || current === theme.id}
-                          loading={select.pending}
-                          tone={theme.isLive ? 'critical' : 'auto'}
-                          accessibilityLabel={`Use ${theme.name} as target theme`}
-                          onClick={() => choose(theme.id, theme.name)}
-                        >
-                          {theme.isLive ? 'Target live theme' : 'Use as target'}
-                        </s-button>
                         {mappings.data?.items.some((x) => x.themeId === theme.id) ? (
                           <s-button
                             variant="tertiary"

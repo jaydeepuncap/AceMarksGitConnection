@@ -152,4 +152,25 @@ describe('branch to theme mappings', () => {
     expect(confirm.body.error.code).toBe('GITHUB_NOT_FOUND');
     expect(world.upserts).toHaveLength(0);
   });
+
+  it('keeps several branches mapped to their own themes (main → abc, staging → xyz)', async () => {
+    await setup();
+    expect((await map('main', THEME_DEV.id)).status).toBe(201);
+    expect((await map('feature', THEME_LIVE.id)).status).toBe(201);
+    const items = (await api<ThemeMappingsResponse>('GET', '/api/mappings')).body.data.items;
+    expect(items.map((m) => `${m.branch}→${m.themeName}`)).toEqual(['feature→Live theme', 'main→Dev copy']);
+    // Each branch previews against its own theme.
+    const dev = await api<SyncPreview>('POST', '/api/sync/preview', { commitSha: SHA_B, themeId: THEME_DEV.id, strategy: 'commit_changes' });
+    expect(dev.body.data.branch).toBe('main');
+    const live = await api<SyncPreview>('POST', '/api/sync/preview', { commitSha: SHA_B, themeId: THEME_LIVE.id, strategy: 'commit_changes' });
+    expect(live.body.data.branch).toBe('feature');
+  });
+
+  it('reads one branch and its newest commit directly', async () => {
+    await setup();
+    const res = await api<{ name: string; commitSha: string }>('GET', '/api/github/branch?name=feature');
+    expect(res.status).toBe(200);
+    expect(res.body.data).toMatchObject({ name: 'feature', commitSha: 'b'.repeat(40) });
+    expect((await api('GET', '/api/github/branch?name=nope')).status).toBe(404);
+  });
 });

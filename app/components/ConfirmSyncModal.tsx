@@ -63,8 +63,8 @@ export function ConfirmSyncModal({ open, preview, submitting, error, onClose, on
   useEffect(() => {
     const modal = modalRef.current;
     if (!modal) return;
-    if (open) modal.showOverlay();
-    else modal.hideOverlay();
+    if (open) modal.showOverlay?.();
+    else modal.hideOverlay?.();
   }, [open, preview]);
 
   useEffect(() => {

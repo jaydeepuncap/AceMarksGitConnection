@@ -9,14 +9,15 @@ import { useApiQuery, useNavigateHandler } from '../lib/hooks';
 export default function Dashboard() {
   const go = useNavigateHandler();
   const load = useCallback(
-    () => Promise.all([api.settings.get(), api.github.connection(), api.sync.history({ perPage: 5 })]),
+    () => Promise.all([api.settings.get(), api.github.connection(), api.sync.history({ perPage: 5 }), api.mappings.list()]),
     [],
   );
   const { data, error, loading, reload } = useApiQuery(load, []);
 
   if (loading && !data) return <LoadingState title="Dashboard" />;
 
-  const [settingsRes, github, history] = data ?? [null, null, null];
+  const [settingsRes, github, history, mappingsRes] = data ?? [null, null, null, null];
+  const mappings = mappingsRes?.items ?? [];
   const shop = settingsRes?.shop;
   const settings = settingsRes?.settings;
 
@@ -71,7 +72,7 @@ export default function Dashboard() {
         <s-section heading="Repository">
           <s-stack gap="small-200">
             <s-text type="strong">{settings?.defaultRepository ?? 'No repository selected'}</s-text>
-            <s-text color="subdued">Default branch: {settings?.defaultBranch ?? '—'}</s-text>
+            <s-text color="subdued">Branch: {settings?.defaultBranch ?? '—'}</s-text>
             <s-stack direction="inline">
               <s-button onClick={go('/repositories')} disabled={!github?.connected}>
                 Choose repository
@@ -80,20 +81,22 @@ export default function Dashboard() {
           </s-stack>
         </s-section>
 
-        <s-section heading="Target theme">
+        <s-section heading="Theme mappings">
           <s-stack gap="small-200">
-            <s-text type="strong">{settings?.defaultThemeName ?? 'No theme selected'}</s-text>
-            <s-text color="subdued">
-              Push:{' '}
-              {settings?.syncPreferences.strategy === 'full_snapshot'
-                ? 'Full snapshot'
-                : settings?.syncPreferences.strategy === 'commit_changes'
-                  ? 'Only the selected commit'
-                  : 'From the last sync to the selected commit'}
-              {' · '}Deletions {settings?.syncPreferences.allowDeletes ? 'allowed' : 'disabled'}
-            </s-text>
+            {mappings.length === 0 ? (
+              <s-text color="subdued">No branch is mapped to a theme yet.</s-text>
+            ) : (
+              mappings.slice(0, 4).map((m) => (
+                <s-text key={m.id}>
+                  <s-text type="strong">{m.branch}</s-text> → {m.themeName}
+                </s-text>
+              ))
+            )}
+            {mappings.length > 4 && <s-text color="subdued">{`and ${mappings.length - 4} more`}</s-text>}
             <s-stack direction="inline">
-              <s-button onClick={go('/themes')}>Choose theme</s-button>
+              <s-button onClick={go('/mappings')} disabled={!github?.connected}>
+                {mappings.length === 0 ? 'Map a branch to a theme' : 'Manage mappings'}
+              </s-button>
             </s-stack>
           </s-stack>
         </s-section>

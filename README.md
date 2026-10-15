@@ -172,8 +172,8 @@ npm run db:migrate:remote    # production D1 (--env production)
 
 ## Updating a theme, step by step
 
-1. **Choose a theme** — *Themes* shows every theme with its **last update** (last synced commit, branch, date); *Select →* opens Commits for that theme.
-2. **Choose an update** — *Commits* (branch + target theme) labels every commit **New** (waiting), **Last synced** or **Added** (already in the theme) and shows "N updates waiting". What *Sync* pushes is set in **Settings → Sync preferences → When you click Sync, push** (and can be changed per sync on the Commits page):
+1. **Choose a theme** — *Theme mapping* connects each branch to its own theme (e.g. `main → Live theme`, `staging → Staging copy`; one theme per branch, one branch per theme) and offers the first **Full sync**; *Themes* shows every theme with its mapped branch and **last update** (last synced commit, branch, date); *Select →* opens Commits for that theme.
+2. **Choose an update** — *Commit sync* (branch → its mapped theme) labels every commit **New** (waiting), **Last synced** or **Added** (already in the theme) and shows "N updates waiting". With one commit selected, **Push** chooses what is sent (default: from the last sync); with several selected they are combined:
    - **From the last sync to the selected commit** (default) — the selected commit together with every earlier commit on the branch that is not in the theme yet, in one step. The preview lists every file with the commit(s) it comes from (e.g. `snippets/size-chart.liquid · from 50924bd`). A theme that was never synced gets the complete theme at the selected commit.
    - **Only the selected commit** — just the files that commit changed; the preview warns how many earlier un-added commits are left out.
    - **Full snapshot** — every theme file as it is at the selected commit (never deletes).

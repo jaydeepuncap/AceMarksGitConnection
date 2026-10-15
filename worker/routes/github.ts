@@ -12,6 +12,7 @@
  *   DELETE /api/github/connection
  *   GET    /api/github/repositories   ?page&perPage&q
  *   GET    /api/github/branches       ?repository=owner/name&page&perPage
+ *   GET    /api/github/branch         ?repository=owner/name&name=main   one branch and its newest commit
  */
 import { Hono } from 'hono';
 import type {
@@ -36,6 +37,7 @@ import {
 import { GitHubClient } from '../lib/github-client';
 import { ApiError, ok } from '../lib/response';
 import {
+  branchQuerySchema,
   branchesQuerySchema,
   createGithubConnectionSchema,
   parseOrThrow,
@@ -135,4 +137,10 @@ export const githubRoutes = new Hono<AppEnv>()
     const { owner, repo } = await resolveRepository(c, connection, query.repository);
     const result = await client.listBranches(owner, repo, query.page, query.perPage);
     return ok<Paginated<GithubBranch>>(c, { ...result, page: query.page, perPage: query.perPage });
+  })
+  .get('/branch', async (c) => {
+    const query = parseOrThrow(branchQuerySchema, c.req.query());
+    const { client, connection } = await githubClient(c);
+    const { owner, repo } = await resolveRepository(c, connection, query.repository);
+    return ok<GithubBranch>(c, await client.getBranch(owner, repo, query.name));
   });

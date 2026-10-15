@@ -85,6 +85,13 @@ export const branchesQuerySchema = paginationSchema.extend({
   repository: repositorySchema.optional(),
 });
 
+export const branchQuerySchema = z
+  .object({
+    repository: repositorySchema.optional(),
+    name: branchSchema,
+  })
+  .strict();
+
 export const commitsQuerySchema = paginationSchema.extend({
   repository: repositorySchema.optional(),
   branch: branchSchema.optional(),

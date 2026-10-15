@@ -7,7 +7,7 @@ import { api } from '../lib/api-client';
 import { showToast } from '../lib/app-bridge';
 import { formatDate } from '../lib/format';
 import { useApiQuery, useMutation, useNavigateHandler } from '../lib/hooks';
-import type { SyncStrategy, UpdateSettingsRequest } from '../lib/types';
+import type { UpdateSettingsRequest } from '../lib/types';
 import { ignorePatternError } from '../../shared/theme-paths';
 import {
   validateGithubToken,
@@ -159,15 +159,11 @@ function DisconnectModal({
 export default function Settings() {
   const go = useNavigateHandler();
   const settingsQuery = useApiQuery(() => api.settings.get(), []);
-  const themesQuery = useApiQuery(() => api.themes.list(), []);
   const githubQuery = useApiQuery(() => api.github.connection(), []);
   const save = useMutation(api.settings.update);
 
   const [repository, setRepository] = useState('');
   const [branch, setBranch] = useState('');
-  const [themeId, setThemeId] = useState('');
-  const [strategy, setStrategy] = useState<SyncStrategy>('since_last_sync');
-  const [allowDeletes, setAllowDeletes] = useState(false);
   const [themeRoot, setThemeRoot] = useState('');
   const [ignorePatterns, setIgnorePatterns] = useState<string[]>([]);
 
@@ -176,9 +172,6 @@ export default function Settings() {
     if (!settings) return;
     setRepository(settings.defaultRepository ?? '');
     setBranch(settings.defaultBranch ?? '');
-    setThemeId(settings.defaultThemeId ?? '');
-    setStrategy(settings.syncPreferences.strategy);
-    setAllowDeletes(settings.syncPreferences.allowDeletes);
     setThemeRoot(settings.syncPreferences.themeRoot);
     setIgnorePatterns(settings.syncPreferences.ignorePatterns);
   }, [settings]);
@@ -201,24 +194,22 @@ export default function Settings() {
   const onSave = useCallback(async () => {
     if (invalid) return;
     const body: UpdateSettingsRequest = {
-      syncPreferences: { strategy, allowDeletes, themeRoot, ignorePatterns: ignorePatterns.map((p) => p.trim()) },
+      syncPreferences: { themeRoot, ignorePatterns: ignorePatterns.map((p) => p.trim()) },
     };
     if (repository.trim() !== (settings?.defaultRepository ?? '') || branch !== (settings?.defaultBranch ?? '')) {
       body.defaultRepository = repository.trim() || null;
       body.defaultBranch = repository.trim() ? branch || null : null;
     }
-    if (themeId !== (settings?.defaultThemeId ?? '')) body.defaultThemeId = themeId || null;
     const result = await save.run(body);
     if (result) {
       settingsQuery.setData(result);
       showToast('Settings saved');
     }
-  }, [invalid, strategy, allowDeletes, themeRoot, ignorePatterns, repository, branch, themeId, settings, save, settingsQuery]);
+  }, [invalid, themeRoot, ignorePatterns, repository, branch, settings, save, settingsQuery]);
 
   if (settingsQuery.loading && !settingsQuery.data) return <LoadingState title="Settings" />;
 
   const branches = branchesQuery.data?.items ?? [];
-  const selectedTheme = themesQuery.data?.find((t) => t.id === themeId);
 
   return (
     <AppLayout
@@ -242,129 +233,71 @@ export default function Settings() {
         <s-button slot="secondary-actions" variant="tertiary" disabled={!connected} onClick={go('/repositories')}>
           Browse repositories
         </s-button>
-        <s-grid gridTemplateColumns="repeat(auto-fit, minmax(240px, 1fr))" gap="base">
-          <s-select
-            label="Repository"
-            value={repository || NONE}
-            disabled={!connected || reposQuery.loading}
-            details={
-              reposQuery.error
-                ? reposQuery.error.message
-                : 'Repositories the connected token can read. Access is verified again when you save.'
-            }
-            error={repoError ?? undefined}
-            onChange={(event) => {
-              const value = event.currentTarget.value === NONE ? '' : event.currentTarget.value;
-              setRepository(value);
-              setBranch('');
-            }}
-          >
-            <s-option value={NONE}>No repository</s-option>
-            {repos.map((r) => (
-              <s-option key={r.fullName} value={r.fullName}>
-                {`${r.fullName}${r.private ? ' (private)' : ''}`}
-              </s-option>
-            ))}
-            {repository && !repos.some((r) => r.fullName === repository) && (
-              <s-option value={repository}>{repository}</s-option>
-            )}
-          </s-select>
-          <s-select
-            label="Default branch"
-            value={branch || NONE}
-            disabled={!repoValid || branchesQuery.loading}
-            details={branchesQuery.error ? branchesQuery.error.message : undefined}
-            onChange={(event) => setBranch(event.currentTarget.value === NONE ? '' : event.currentTarget.value)}
-          >
-            <s-option value={NONE}>Repository default branch</s-option>
-            {branches.map((b) => (
-              <s-option key={b.name} value={b.name}>
-                {b.name}
-              </s-option>
-            ))}
-            {branch && !branches.some((b) => b.name === branch) && <s-option value={branch}>{branch}</s-option>}
-          </s-select>
-        </s-grid>
-        {settings?.defaultRepository && (
-          <s-box padding="small" background="subdued" borderRadius="base">
-            <s-stack direction="inline" gap="small-200" alignItems="center">
-              <s-badge tone={connected ? 'success' : 'caution'}>{connected ? 'Connected' : 'GitHub not connected'}</s-badge>
-              <s-text>
-                Owner <s-text type="strong">{settings.defaultRepository.split('/')[0]}</s-text> · repository{' '}
-                <s-text type="strong">{settings.defaultRepository.split('/')[1]}</s-text> · branch{' '}
-                <s-text type="strong">{settings.defaultBranch ?? 'repository default'}</s-text>
-              </s-text>
-            </s-stack>
-          </s-box>
-        )}
-      </s-section>
-
-      <s-section heading="Default Shopify theme">
         <s-stack gap="base">
-          <ErrorBanner error={themesQuery.error} onRetry={themesQuery.reload} heading="Themes could not be loaded" />
-          <s-select
-            label="Target theme"
-            value={themeId || NONE}
-            onChange={(event) => setThemeId(event.currentTarget.value === NONE ? '' : event.currentTarget.value)}
-          >
-            <s-option value={NONE}>No default theme</s-option>
-            {(themesQuery.data ?? []).map((t) => (
-              <s-option key={t.id} value={t.id} disabled={!t.writable}>
-                {`${t.name}${t.isLive ? ' (live)' : ''}${t.writable ? '' : ' — read-only'}`}
-              </s-option>
-            ))}
-          </s-select>
-          {selectedTheme?.isLive && (
-            <s-banner tone="warning">
-              <s-paragraph>This is the live theme. Every sync to it will require an extra confirmation.</s-paragraph>
-            </s-banner>
-          )}
-        </s-stack>
-      </s-section>
-
-      <s-section heading="Sync preferences">
-        <s-stack gap="base">
-          <s-choice-list
-            label="When you click Sync, push"
-            values={[strategy]}
-            onChange={(event) => setStrategy((event.currentTarget.values[0] as SyncStrategy) ?? 'since_last_sync')}
-          >
-            <s-choice value="since_last_sync" selected={strategy === 'since_last_sync'}>
-              From the last sync to the selected commit (recommended)
-              <s-text slot="details">
-                Pushes the selected commit together with every earlier commit on the branch that is not in the theme yet.
-                The preview lists every file and the commit it comes from. A theme that was never synced gets the
-                complete theme at the selected commit.
-              </s-text>
-            </s-choice>
-            <s-choice value="commit_changes" selected={strategy === 'commit_changes'}>
-              Only the selected commit
-              <s-text slot="details">
-                Pushes only the files changed in the selected commit. Earlier commits that are not in the theme yet are
-                left out.
-              </s-text>
-            </s-choice>
-            <s-choice value="full_snapshot" selected={strategy === 'full_snapshot'}>
-              Full snapshot
-              <s-text slot="details">
-                Write every theme file as it exists at the selected commit. Never deletes files.
-              </s-text>
-            </s-choice>
-          </s-choice-list>
-          <s-checkbox
-            label="Allow deletions"
-            details="Delete theme files that the pushed commits removed or renamed. Protected files (layout/theme.liquid, config/*) are never deleted."
-            checked={allowDeletes}
-            onChange={(event) => setAllowDeletes(event.currentTarget.checked)}
-          />
+          <s-grid gridTemplateColumns="repeat(auto-fit, minmax(240px, 1fr))" gap="base">
+            <s-select
+              label="Repository"
+              value={repository || NONE}
+              disabled={!connected || reposQuery.loading}
+              details={
+                reposQuery.error
+                  ? reposQuery.error.message
+                  : 'Repositories the connected token can read. Access is verified again when you save.'
+              }
+              error={repoError ?? undefined}
+              onChange={(event) => {
+                const value = event.currentTarget.value === NONE ? '' : event.currentTarget.value;
+                setRepository(value);
+                setBranch('');
+              }}
+            >
+              <s-option value={NONE}>No repository</s-option>
+              {repos.map((r) => (
+                <s-option key={r.fullName} value={r.fullName}>
+                  {`${r.fullName}${r.private ? ' (private)' : ''}`}
+                </s-option>
+              ))}
+              {repository && !repos.some((r) => r.fullName === repository) && (
+                <s-option value={repository}>{repository}</s-option>
+              )}
+            </s-select>
+            <s-select
+              label="Branch"
+              value={branch || NONE}
+              disabled={!repoValid || branchesQuery.loading}
+              details={branchesQuery.error ? branchesQuery.error.message : undefined}
+              onChange={(event) => setBranch(event.currentTarget.value === NONE ? '' : event.currentTarget.value)}
+            >
+              <s-option value={NONE}>Repository default branch</s-option>
+              {branches.map((b) => (
+                <s-option key={b.name} value={b.name}>
+                  {b.name}
+                </s-option>
+              ))}
+              {branch && !branches.some((b) => b.name === branch) && <s-option value={branch}>{branch}</s-option>}
+            </s-select>
+          </s-grid>
           <s-text-field
             label="Theme root folder"
             placeholder="e.g. theme (leave empty if the theme is at the repository root)"
+            details="Only needed when the theme files (assets/, sections/, …) live in a subfolder of the repository."
             value={themeRoot}
             autocomplete="off"
             error={rootError ?? undefined}
             onInput={(event) => setThemeRoot(event.currentTarget.value)}
           />
+          {settings?.defaultRepository && (
+            <s-box padding="small" background="subdued" borderRadius="base">
+              <s-stack direction="inline" gap="small-200" alignItems="center">
+                <s-badge tone={connected ? 'success' : 'caution'}>{connected ? 'Connected' : 'GitHub not connected'}</s-badge>
+                <s-text>
+                  Owner <s-text type="strong">{settings.defaultRepository.split('/')[0]}</s-text> · repository{' '}
+                  <s-text type="strong">{settings.defaultRepository.split('/')[1]}</s-text> · branch{' '}
+                  <s-text type="strong">{settings.defaultBranch ?? 'repository default'}</s-text>
+                </s-text>
+              </s-stack>
+            </s-box>
+          )}
         </s-stack>
       </s-section>
 
