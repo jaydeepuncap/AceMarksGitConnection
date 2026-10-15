@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  describeIgnorePattern,
+  ignorePatternError,
   isIgnored,
   matchesGlob,
   normalizeThemeRoot,
@@ -68,5 +70,24 @@ describe('ignore globs', () => {
     expect(matchesGlob('templates/customers/a.json', 'templates/**')).toBe(true);
     expect(matchesGlob('templates/customers/a.json', '**/a.json')).toBe(true);
     expect(isIgnored('locales/en.json', ['', 'locales/*'])).toBe('locales/*');
+  });
+
+  it('treats "folder/" and a bare folder name as everything inside it', () => {
+    expect(matchesGlob('locales/en.default.json', 'locales/')).toBe(true);
+    expect(matchesGlob('locales/en.default.json', 'locales')).toBe(true);
+    expect(matchesGlob('localesx/en.json', 'locales')).toBe(false);
+    expect(matchesGlob('sections/development-section.liquid', 'sections/development-section.liquid')).toBe(true);
+    expect(matchesGlob('templates/product.json', 'templates/*.json')).toBe(true);
+    expect(matchesGlob('templates/customers/account.json', 'templates/*.json')).toBe(false);
+  });
+
+  it('validates and explains patterns', () => {
+    expect(ignorePatternError('assets/development.js')).toBeNull();
+    expect(ignorePatternError('/assets/a.js')).toMatch(/relative/);
+    expect(ignorePatternError('assets/../x')).toMatch(/not allowed/);
+    expect(ignorePatternError('  ')).toMatch(/Enter/);
+    expect(describeIgnorePattern('locales/')).toBe('Everything inside the locales/ folder');
+    expect(describeIgnorePattern('config/settings_data.json')).toBe('Only the file config/settings_data.json');
+    expect(describeIgnorePattern('templates/*.json')).toBe('Files named like "*.json" directly in templates/');
   });
 });

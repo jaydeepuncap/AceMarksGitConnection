@@ -455,3 +455,25 @@ export interface HealthResponse {
   status: 'ok';
   time: string;
 }
+
+export interface IgnorePreviewRequest {
+  patterns: string[];
+}
+
+export interface IgnorePatternMatch {
+  pattern: string;
+  description: string;
+  /** Theme files on the branch that the pattern matches. */
+  matches: number;
+  examples: string[];
+}
+
+export interface IgnorePreviewResponse {
+  repository: string;
+  branch: string;
+  /** Theme files on the branch (after the theme root). */
+  themeFiles: number;
+  /** Files excluded by at least one pattern. */
+  ignoredFiles: number;
+  patterns: IgnorePatternMatch[];
+}

@@ -4,7 +4,7 @@
  */
 import { z } from 'zod';
 import { SYNC_STRATEGY_VALUES } from '../../shared/api-types';
-import { normalizeThemeRoot, validateThemePath } from '../../shared/theme-paths';
+import { ignorePatternError, MAX_IGNORE_PATTERNS, normalizeThemeRoot, validateThemePath } from '../../shared/theme-paths';
 import { badRequest } from './response';
 
 // ---------------------------------------------------------------------------
@@ -122,9 +122,10 @@ export const uuidSchema = z.string().uuid('Invalid ID');
 const ignorePatternSchema = z
   .string()
   .trim()
-  .min(1)
-  .max(200)
-  .refine((v) => !v.includes('..') && !v.startsWith('/'), 'Invalid ignore pattern');
+  .superRefine((v, ctx) => {
+    const error = ignorePatternError(v);
+    if (error) ctx.addIssue({ code: 'custom', message: `Ignore pattern "${v}": ${error}` });
+  });
 
 export const syncPreferencesPatchSchema = z
   .object({
@@ -142,8 +143,17 @@ export const syncPreferencesPatchSchema = z
         return r.root;
       })
       .optional(),
-    ignorePatterns: z.array(ignorePatternSchema).max(50).optional(),
+    ignorePatterns: z
+      .array(ignorePatternSchema)
+      .max(MAX_IGNORE_PATTERNS)
+      // Duplicates are dropped; the order the merchant entered is kept.
+      .transform((patterns) => [...new Set(patterns)])
+      .optional(),
   })
+  .strict();
+
+export const ignorePreviewSchema = z
+  .object({ patterns: z.array(ignorePatternSchema).max(MAX_IGNORE_PATTERNS) })
   .strict();
 
 export const updateSettingsSchema = z

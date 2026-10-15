@@ -11,6 +11,7 @@
 import type {
   ApiErrorBody,
   ApiErrorCode,
+  IgnorePreviewResponse,
   ApiResponse,
   AppSettings,
   CommitDetail,
@@ -151,6 +152,8 @@ export const api = {
   settings: {
     get: () => apiRequest<SettingsResponse>('GET', '/api/settings'),
     update: (body: UpdateSettingsRequest) => apiRequest<SettingsResponse>('PUT', '/api/settings', { body }),
+    ignorePreview: (patterns: string[]) =>
+      apiRequest<IgnorePreviewResponse>('POST', '/api/settings/ignore-preview', { body: { patterns } }),
   },
   github: {
     connection: () => apiRequest<GithubConnectionResponse>('GET', '/api/github/connection'),

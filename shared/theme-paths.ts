@@ -117,8 +117,12 @@ export function themePathToRepoPath(themePath: string, themeRoot: string): strin
 /**
  * Minimal glob matcher for ignore patterns: `*` matches within a path segment,
  * `**` matches across segments, `?` matches one character. Everything else is literal.
+ * A pattern ending in `/` (e.g. `locales/`) matches everything inside that folder,
+ * and a pattern without wildcards also matches a folder of that name (`locales`).
  */
 export function matchesGlob(path: string, pattern: string): boolean {
+  if (pattern.endsWith('/')) return path.startsWith(pattern);
+  if (!/[*?]/.test(pattern)) return path === pattern || path.startsWith(`${pattern}/`);
   let regex = '^';
   for (let i = 0; i < pattern.length; i++) {
     const ch = pattern[i]!;
@@ -153,4 +157,34 @@ export function isIgnored(path: string, patterns: readonly string[]): string | n
     if (pattern.trim() !== '' && matchesGlob(path, pattern.trim())) return pattern;
   }
   return null;
+}
+
+export const MAX_IGNORE_PATTERNS = 100;
+
+/** Why an ignore pattern cannot be used, or null when it is valid. */
+export function ignorePatternError(input: string): string | null {
+  const pattern = input.trim();
+  if (pattern === '') return 'Enter a file, folder or pattern';
+  if (pattern.length > 200) return 'Use at most 200 characters';
+  if (pattern.startsWith('/')) return 'Use a path relative to the theme, e.g. "assets/development.js"';
+  if (pattern.split('/').some((segment) => segment === '..' || segment === '.')) return '"." and ".." are not allowed';
+  if (pattern.includes('\\')) return 'Use "/" between folders';
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001f\u007f]/.test(pattern)) return 'The pattern contains control characters';
+  return null;
+}
+
+/** Plain-language description of what an ignore pattern matches. */
+export function describeIgnorePattern(input: string): string {
+  const pattern = input.trim();
+  if (pattern.endsWith('/')) return `Everything inside the ${pattern} folder`;
+  if (!/[*?]/.test(pattern)) {
+    return pattern.includes('.') ? `Only the file ${pattern}` : `The ${pattern} file or everything inside the ${pattern}/ folder`;
+  }
+  if (pattern.endsWith('/**')) return `Everything inside ${pattern.slice(0, -2)} and its subfolders`;
+  const slash = pattern.lastIndexOf('/');
+  const folder = slash >= 0 ? pattern.slice(0, slash + 1) : '';
+  const name = pattern.slice(slash + 1);
+  const where = folder.includes('*') ? `in folders matching ${folder}` : folder ? `directly in ${folder}` : 'at the theme root';
+  return `Files named like "${name}" ${where}`;
 }
