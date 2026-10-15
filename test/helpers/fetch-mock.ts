@@ -44,6 +44,10 @@ export function installFetchMock() {
     on(handler: Handler) {
       handlers.push(handler);
     },
+    /** Registers a handler that runs before all others (e.g. to make an endpoint fail). */
+    first(handler: Handler) {
+      handlers.unshift(handler);
+    },
     /** GraphQL calls to the Shopify Admin API, with parsed query/variables. */
     graphqlCalls() {
       return calls

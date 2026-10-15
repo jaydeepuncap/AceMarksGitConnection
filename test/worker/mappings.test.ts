@@ -18,9 +18,10 @@ describe('branch to theme mappings', () => {
   let shopId: string;
   afterEach(() => vi.unstubAllGlobals());
 
+  let world: ReturnType<typeof installWorld>;
   async function setup() {
     t = createTestEnv();
-    installWorld();
+    world = installWorld();
     shopId = (await seedShop(t.env, SHOP)).id;
   }
   const api = async <T>(method: string, path: string, body?: unknown) => {
@@ -131,5 +132,24 @@ describe('branch to theme mappings', () => {
     const res = await api('DELETE', `/api/mappings/${body.data.id}`, { confirm: true });
     expect(res.status).toBe(409);
     expect(res.body.error.message).toMatch(/running/);
+  });
+
+  it('reports repository access problems and writes nothing when access is lost before confirming', async () => {
+    await setup();
+    let denied = false;
+    world.mock.first((req) =>
+      denied && new URL(req.url).pathname === '/repos/acme/theme'
+        ? new Response(JSON.stringify({ message: 'Not Found' }), { status: 404, headers: { 'content-type': 'application/json' } })
+        : undefined,
+    );
+    await map('main', THEME_DEV.id);
+    const preview = await api<SyncPreview>('POST', '/api/sync/preview', { commitSha: SHA_B, themeId: THEME_DEV.id, strategy: 'commit_changes' });
+    expect(preview.status).toBe(201);
+
+    denied = true; // the token lost access to the repository
+    expect((await map('feature', THEME_LIVE.id)).body.error.code).toBe('GITHUB_NOT_FOUND');
+    const confirm = await api('POST', '/api/sync', { syncId: preview.body.data.syncId, confirm: true });
+    expect(confirm.body.error.code).toBe('GITHUB_NOT_FOUND');
+    expect(world.upserts).toHaveLength(0);
   });
 });
