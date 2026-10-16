@@ -27,12 +27,17 @@ export default function Themes() {
   const onCommit = useApiQuery(() => api.themes.lastSynced(), []);
   const mappings = useApiQuery(() => api.mappings.list(), []);
   const settings = useApiQuery(() => api.settings.get(), []);
+  const github = useApiQuery(() => api.github.connection(), []);
 
   if (themes.loading && !themes.data) return <LoadingState title="Themes" />;
 
   const items = themes.data ?? [];
   const repository = settings.data?.settings.defaultRepository?.toLowerCase() ?? '';
   const sameRepo = (m: ThemeMapping) => m.repository.toLowerCase() === repository;
+  // Without GitHub (or without a repository) no theme receives a branch: mappings are kept but paused.
+  const disconnected = !!github.data && !github.data.connected;
+  const noRepository = !!settings.data && !repository;
+  const linked = !disconnected && !noRepository;
 
   return (
     <AppLayout
@@ -41,12 +46,27 @@ export default function Themes() {
       secondaryActions={[
         {
           content: 'Refresh',
-          onAction: () => (themes.reload(), onCommit.reload(), mappings.reload()),
+          onAction: () => (themes.reload(), onCommit.reload(), mappings.reload(), github.reload()),
         },
       ]}
       banners={
         <>
           <ErrorBanner error={themes.error} onRetry={themes.reload} />
+          {!linked && (
+            <Banner
+              tone="warning"
+              heading={disconnected ? 'GitHub is not connected' : 'No repository selected'}
+              secondaryActions={[
+                { label: disconnected ? 'Connect GitHub' : 'Choose repository', onClick: go('/settings') },
+              ]}
+            >
+              <Paragraph>
+                {disconnected
+                  ? 'No theme receives a branch until GitHub is connected again. Your mappings are kept and resume when you reconnect.'
+                  : 'Choose the repository to sync from in Settings, then map its branches to themes.'}
+              </Paragraph>
+            </Banner>
+          )}
           {settings.data && !settings.data.shop.canWriteThemes && (
             <Banner tone="warning" heading="Theme write access not granted">
               <Paragraph>
@@ -92,7 +112,9 @@ export default function Themes() {
                     <Badge tone={role.tone}>{role.label}</Badge>
                   </IndexTableCell>
                   <IndexTableCell>
-                    {m ? (
+                    {!linked ? (
+                      <Text color="subdued">{disconnected ? 'GitHub not connected' : 'No repository'}</Text>
+                    ) : m ? (
                       <Stack direction="inline" gap="small-100" alignItems="center">
                         <Icon type="git-branch" />
                         <Text>{sameRepo(m) ? m.branch : `${m.repository} · ${m.branch}`}</Text>
@@ -112,7 +134,9 @@ export default function Themes() {
                     )}
                   </IndexTableCell>
                   <IndexTableCell>
-                    {m && sameRepo(m) ? (
+                    {!linked ? (
+                      <Text color="subdued">—</Text>
+                    ) : m && sameRepo(m) ? (
                       <Button variant="tertiary" onClick={go(`/mappings/${m.id}`)}>
                         Open mapping
                       </Button>

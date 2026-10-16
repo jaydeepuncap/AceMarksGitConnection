@@ -411,6 +411,31 @@ describe('Themes page', () => {
   });
 });
 
+describe('Themes page without GitHub', () => {
+  it('shows no branch as connected and offers to reconnect', async () => {
+    const { api } = await import('../../app/lib/api-client');
+    (api.github.connection as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      connected: false,
+      connection: null,
+    });
+    const { container } = render(
+      <MemoryRouter initialEntries={['/themes']}>
+        <Themes />
+      </MemoryRouter>,
+    );
+    const wait = { timeout: 5000 };
+    await waitFor(
+      () => expect(container.querySelector('s-banner[heading="GitHub is not connected"]')).not.toBeNull(),
+      wait,
+    );
+    expect(screen.getAllByText('GitHub not connected')).toHaveLength(3);
+    expect(screen.queryByText('Open mapping')).not.toBeInTheDocument();
+    expect(screen.queryByText('Map a branch')).not.toBeInTheDocument();
+    expect(screen.queryByText('main')).not.toBeInTheDocument();
+    expect(screen.getByText('Connect GitHub')).toBeInTheDocument();
+  });
+});
+
 describe('Settings', () => {
   it('chooses one repository, with no branch choice and no separate repositories page', async () => {
     const { container } = render(

@@ -32,6 +32,7 @@ export default function MappingDetail() {
   const navigate = useNavigate();
   const mappings = useApiQuery(() => api.mappings.list(), []);
   const themes = useApiQuery(() => api.themes.list(), []);
+  const github = useApiQuery(() => api.github.connection(), []);
   const mapping = mappings.data?.items.find((m) => m.id === id) ?? null;
 
   const [tab, setTab] = useState<Tab>('commits');
@@ -177,6 +178,17 @@ export default function MappingDetail() {
       banners={
         <>
           <ErrorBanner error={themes.error} heading="Themes could not be loaded" onRetry={themes.reload} />
+          {github.data && !github.data.connected && (
+            <Banner
+              tone="warning"
+              heading="GitHub is not connected"
+              secondaryActions={[{ label: 'Connect GitHub', onClick: () => navigate('/settings') }]}
+            >
+              <Paragraph>
+                {`${mapping.branch} → ${mapping.themeName} is paused: commits cannot be read or synced until GitHub is connected again. The mapping and its history are kept.`}
+              </Paragraph>
+            </Banner>
+          )}
           <ErrorBanner
             error={syncAll.error}
             heading="The updates could not be prepared"
@@ -248,7 +260,7 @@ export default function MappingDetail() {
                 <Text tone="caution">This is your live theme: syncs change the storefront, and you confirm twice.</Text>
               )}
             </Stack>
-            {nextStep}
+            {github.data && !github.data.connected ? null : nextStep}
           </Stack>
         </CardSection>
       </Card>

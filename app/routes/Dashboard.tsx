@@ -100,7 +100,13 @@ export default function Dashboard() {
 
         <Section heading="Theme mappings">
           <Stack gap="small-200">
-            {mappings.length === 0 ? (
+            {github && !github.connected ? (
+              <Text color="subdued">
+                {mappings.length === 0
+                  ? 'Connect GitHub to map branches to themes.'
+                  : `${mappings.length} mapping(s) paused until GitHub is connected again.`}
+              </Text>
+            ) : mappings.length === 0 ? (
               <Text color="subdued">No branch is mapped to a theme yet.</Text>
             ) : (
               mappings.slice(0, 4).map((m) => (
