@@ -7,7 +7,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { GithubConnectionResponse, SettingsResponse, ThemeMappingsResponse } from '../../shared/api-types';
 import { app } from '../../worker/index';
-import { createMapping, getDb, upsertSettings } from '../../worker/lib/database';
+import {
+  createMapping,
+  getDb,
+  getGithubConnection,
+  upsertGithubConnection,
+  upsertSettings,
+} from '../../worker/lib/database';
 import { createTestEnv, sessionToken, type TestContext } from '../helpers/env';
 import { json } from '../helpers/fetch-mock';
 import { seedShop, THEME_DEV, THEME_LIVE } from '../helpers/fixtures';
@@ -79,6 +85,17 @@ describe('GitHub account and repository ownership of mappings', () => {
   };
   const connect = () =>
     api<GithubConnectionResponse>('POST', '/api/github/connection', { token: 'github_pat_' + 'x'.repeat(40) });
+  // The seeded connection's stored values, to re-save it under another login.
+  const connectionValues = async () => {
+    const {
+      id: _id,
+      shopId: _shop,
+      createdAt: _c,
+      updatedAt: _u,
+      ...rest
+    } = (await getGithubConnection(getDb(t.env.DB), shopId))!;
+    return rest;
+  };
   const mappings = async () => (await api<ThemeMappingsResponse>('GET', '/api/mappings')).body.data.items;
   const repository = async () =>
     (await api<SettingsResponse>('GET', '/api/settings')).body.data.settings.defaultRepository;
@@ -104,6 +121,34 @@ describe('GitHub account and repository ownership of mappings', () => {
     expect(await mappings()).toHaveLength(0);
     // Connecting the same new account again changes nothing.
     expect((await connect()).body.data.reset).toBeUndefined();
+  });
+
+  it("clears an already connected account's foreign repository and mappings on the next page load", async () => {
+    await setup();
+    // Saved before the account was recorded, while another account (bristm) is connected now.
+    const db = getDb(t.env.DB);
+    await upsertSettings(db, shopId, { githubAccount: null });
+    await upsertGithubConnection(db, shopId, { ...(await connectionValues()), accountLogin: 'bristm' });
+    expect(await repository()).toBeNull();
+    expect(await mappings()).toHaveLength(0);
+    const connection = await api<GithubConnectionResponse>('GET', '/api/github/connection');
+    expect(connection.body.data.connection?.accountLogin).toBe('bristm');
+  });
+
+  it("keeps an unrecorded repository that is the connected account's own", async () => {
+    await setup();
+    const db = getDb(t.env.DB);
+    await upsertSettings(db, shopId, { githubAccount: null });
+    await upsertGithubConnection(db, shopId, { ...(await connectionValues()), accountLogin: 'acme' });
+    expect(await repository()).toBe('acme/theme');
+    expect(await mappings()).toHaveLength(2);
+  });
+
+  it('clears the repository and mappings when the recorded account differs from the connected one', async () => {
+    await setup();
+    await upsertGithubConnection(getDb(t.env.DB), shopId, { ...(await connectionValues()), accountLogin: 'bristm' });
+    expect(await mappings()).toHaveLength(0);
+    expect(await repository()).toBeNull();
   });
 
   it('removes the mappings of the previous repository when another repository is chosen', async () => {

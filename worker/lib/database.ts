@@ -822,6 +822,28 @@ export async function removeMappingsExcept(
   return rows.length;
 }
 
+/**
+ * Keeps the selected repository and the mappings with the GitHub account that set them up. When the
+ * connected account is not the recorded one, the repository selection is cleared and the mappings are
+ * removed (sync history kept). Settings saved before the account was recorded are kept only when the
+ * repository is the account's own (owner = login). No-op without a GitHub connection (mappings are paused).
+ */
+export async function reconcileGithubAccount(db: Database, shopId: string): Promise<void> {
+  const connection = await getGithubConnection(db, shopId);
+  if (!connection) return;
+  const login = connection.accountLogin;
+  const recorded = await getSettingsGithubAccount(db, shopId);
+  if (recorded && recorded.toLowerCase() === login.toLowerCase()) return;
+  const settings = await getSettings(db, shopId);
+  const owner = settings.defaultRepository?.split('/')[0]?.toLowerCase() ?? null;
+  if (!recorded && (!settings.defaultRepository || owner === login.toLowerCase())) {
+    await upsertSettings(db, shopId, { githubAccount: login });
+    return;
+  }
+  await removeMappingsExcept(db, shopId, null, `github:${login}`);
+  await upsertSettings(db, shopId, { defaultRepository: null, defaultBranch: null, githubAccount: login });
+}
+
 export async function removeMapping(
   db: Database,
   shopId: string,

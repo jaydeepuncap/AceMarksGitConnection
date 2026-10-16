@@ -32,6 +32,7 @@ import {
   getGithubConnection,
   getSettings,
   getSettingsGithubAccount,
+  reconcileGithubAccount,
   removeMappingsExcept,
   toGithubConnectionDto,
   upsertGithubConnection,
@@ -52,6 +53,7 @@ import {
 
 export const githubRoutes = new Hono<AppEnv>()
   .get('/connection', async (c) => {
+    await reconcileGithubAccount(getDb(c.env.DB), c.get('auth').shop.id);
     const connection = await getGithubConnection(getDb(c.env.DB), c.get('auth').shop.id);
     return ok<GithubConnectionResponse>(c, {
       connected: !!connection,

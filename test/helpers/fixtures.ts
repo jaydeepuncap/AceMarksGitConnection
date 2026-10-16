@@ -26,7 +26,7 @@ export async function seedShop(env: Env, shopDomain: string, opts: { github?: bo
       tokenExpiresAt: null,
       lastVerifiedAt: new Date(),
     });
-    await upsertSettings(db, shop.id, { defaultRepository: 'acme/theme', defaultBranch: 'main' });
+    await upsertSettings(db, shop.id, { defaultRepository: 'acme/theme', defaultBranch: 'main', githubAccount: 'octocat' });
   }
   return shop;
 }

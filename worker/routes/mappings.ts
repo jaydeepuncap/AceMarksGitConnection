@@ -23,6 +23,7 @@ import {
   getDb,
   isUniqueViolation,
   listActiveMappings,
+  reconcileGithubAccount,
   removeMapping,
   replaceMapping,
   toThemeMappingDto,
@@ -96,6 +97,7 @@ async function activeById(db: Database, shopId: string, id: string): Promise<The
 
 export const mappingsRoutes = new Hono<AppEnv>()
   .get('/', async (c) => {
+    await reconcileGithubAccount(getDb(c.env.DB), c.get('auth').shop.id);
     const rows = await listActiveMappings(getDb(c.env.DB), c.get('auth').shop.id);
     return ok<ThemeMappingsResponse>(c, { items: rows.map(toThemeMappingDto) });
   })

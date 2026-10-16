@@ -12,6 +12,7 @@ import { adminClient, githubClient, resolveRepository } from '../lib/clients';
 import {
   getDb,
   getSettings,
+  reconcileGithubAccount,
   removeMappingsExcept,
   updateGithubConnectionRepository,
   upsertSettings,
@@ -37,6 +38,7 @@ export function toShopInfo(shop: Shop): ShopInfo {
 export const settingsRoutes = new Hono<AppEnv>()
   .get('/', async (c) => {
     const { shop } = c.get('auth');
+    await reconcileGithubAccount(getDb(c.env.DB), shop.id);
     const settings = await getSettings(getDb(c.env.DB), shop.id);
     return ok<SettingsResponse>(c, { shop: toShopInfo(shop), settings });
   })
