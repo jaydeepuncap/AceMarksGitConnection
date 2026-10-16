@@ -101,6 +101,14 @@ describe('Dashboard', () => {
     expect(await screen.findByText('Get set up', {}, wait)).toBeInTheDocument();
     expect(screen.getByText('3 of 4 done')).toBeInTheDocument();
     expect(container.querySelector('s-banner[heading="GitHub is not connected"]')).not.toBeNull();
+    // The mapping is listed as paused: no status card, no sync action, no repository action.
+    expect(screen.getByText('Paused', { selector: 's-badge[icon="pause-circle"]' })).toBeInTheDocument();
+    expect(container.querySelector('s-clickable[accessibilityLabel="Open main → Dawn"]')).toBeNull();
+    expect(screen.queryByText('Start full sync')).not.toBeInTheDocument();
+    expect(screen.queryByText('Not synced yet')).not.toBeInTheDocument();
+    expect(screen.queryByText('Change')).not.toBeInTheDocument();
+    expect(screen.queryByText('Manage')).not.toBeInTheDocument();
+    expect(screen.getByText('Not reachable until GitHub is connected')).toBeInTheDocument();
     // The next step's button is the primary one.
     const connect = [...container.querySelectorAll('s-button')].filter((b) => b.textContent === 'Connect GitHub');
     expect(connect.some((b) => b.getAttribute('variant') === 'primary')).toBe(true);

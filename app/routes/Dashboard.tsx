@@ -3,10 +3,11 @@ import { AppLayout } from '../components/AppLayout';
 import { ErrorBanner } from '../components/ErrorBanner';
 import { LoadingState } from '../components/LoadingState';
 import { MappingCard } from '../components/MappingCard';
-import { Card, CardSection, StatTile } from '../components/Common';
+import { BranchThemeTitle, Card, CardSection, StatTile } from '../components/Common';
 import {
   Badge,
   Banner,
+  Box,
   Button,
   Grid,
   Heading,
@@ -233,7 +234,7 @@ export default function Dashboard() {
 
       <Grid gridTemplateColumns="repeat(auto-fit, minmax(340px, 1fr))" gap="base" alignItems="start">
         <Section heading="Your mappings">
-          {mappings.length > 0 && (
+          {mappings.length > 0 && connected && (
             <Button slot="secondary-actions" variant="tertiary" onClick={go('/mappings')}>
               Manage
             </Button>
@@ -250,6 +251,21 @@ export default function Dashboard() {
                   Add mapping
                 </Button>
               </Stack>
+            </Stack>
+          ) : !connected ? (
+            // Without GitHub nothing about the mappings can be read: list them as paused, no status or actions.
+            <Stack gap="small-200">
+              {mappings.map((m) => (
+                <Box key={m.id} padding="base" border="base" borderRadius="base">
+                  <Stack direction="inline" gap="small-200" alignItems="center" justifyContent="space-between">
+                    <BranchThemeTitle branch={m.branch} themeName={m.themeName} />
+                    <Badge tone="caution" icon="pause-circle">
+                      Paused
+                    </Badge>
+                  </Stack>
+                </Box>
+              ))}
+              <Text color="subdued">Connect GitHub to see where each theme stands and to sync again.</Text>
             </Stack>
           ) : (
             <Stack gap="base">
@@ -289,14 +305,25 @@ export default function Dashboard() {
               title="GitHub"
               detail={github?.connection ? `Signed in as ${github.connection.accountLogin}` : 'No token added yet'}
               badge={connected ? { label: 'Connected', tone: 'success' } : { label: 'Not connected', tone: 'caution' }}
-              action={connected ? undefined : { label: 'Connect', onClick: go('/settings') }}
             />
             <ConnectionRow
               icon="git-repository"
               title={repository ?? 'Repository'}
-              detail={repository ? `${mappings.length} branch(es) mapped to themes` : 'Not chosen yet'}
-              badge={repository ? { label: 'Selected', tone: 'info' } : { label: 'None', tone: 'neutral' }}
-              action={{ label: repository ? 'Change' : 'Choose', onClick: go('/settings') }}
+              detail={
+                !repository
+                  ? 'Not chosen yet'
+                  : connected
+                    ? `${mappings.length} branch(es) mapped to themes`
+                    : 'Not reachable until GitHub is connected'
+              }
+              badge={
+                !repository
+                  ? { label: 'None', tone: 'neutral' }
+                  : connected
+                    ? { label: 'Selected', tone: 'info' }
+                    : { label: 'Paused', tone: 'caution' }
+              }
+              action={connected ? { label: repository ? 'Change' : 'Choose', onClick: go('/settings') } : undefined}
             />
           </Stack>
         </Section>
