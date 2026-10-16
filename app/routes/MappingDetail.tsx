@@ -70,7 +70,8 @@ export default function MappingDetail() {
     });
   });
 
-  if (mappings.loading && !mappings.data) return <LoadingState title="Theme mapping" />;
+  // Also wait while the list reloads, so a just-changed mapping is not reported missing.
+  if (mappings.loading && (!mappings.data || !mapping)) return <LoadingState title="Theme mapping" />;
 
   if (!mapping) {
     return (
@@ -284,7 +285,16 @@ export default function MappingDetail() {
         themeOptions={themeOptionsFor(mapping, themes.data ?? [], mappings.data?.items ?? [])}
         action={dialog}
         onClose={() => setDialog(null)}
-        onChanged={(changed) => (setDialog(null), navigate(`/mappings/${changed.id}`, { replace: true }))}
+        onChanged={(changed) => {
+          // Changing the theme replaces the mapping (new id): put it in the list before opening it,
+          // then reload so the list matches the server.
+          setDialog(null);
+          if (mappings.data) {
+            mappings.setData({ ...mappings.data, items: [...mappings.data.items.filter((m) => m.id !== id), changed] });
+          }
+          navigate(`/mappings/${changed.id}`, { replace: true });
+          mappings.reload();
+        }}
         onRemoved={() => navigate('/mappings')}
       />
 

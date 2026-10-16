@@ -270,6 +270,47 @@ describe('Mapping page', () => {
   });
 });
 
+describe('Changing the theme on the mapping page', () => {
+  it('opens the replacement mapping instead of "Mapping not found"', async () => {
+    const { api } = await import('../../app/lib/api-client');
+    const changed = mapping('m9', 'main', '3', 'spare');
+    (api.mappings.update as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce(changed);
+    const { container } = render(
+      <MemoryRouter initialEntries={['/mappings/m1']}>
+        <Routes>
+          <Route path="/mappings/:id" element={<MappingDetail />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    const wait = { timeout: 5000 };
+    await screen.findByText('Add banner', {}, wait);
+    // The server now lists the replacement mapping.
+    (api.mappings.list as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      items: [changed, mapping('m2', 'staging', '2', 'xyz')],
+    });
+    const select = [...container.querySelectorAll('s-select')].find(
+      (el) => el.getAttribute('label') === 'New theme',
+    ) as (HTMLElement & { value: string }) | undefined;
+    expect(select).toBeDefined();
+    select!.value = 'gid://shopify/OnlineStoreTheme/3';
+    fireEvent(select!, new Event('change', { bubbles: true }));
+    fireEvent.click(await screen.findByText('Sync to spare', {}, wait));
+    await waitFor(
+      () =>
+        expect(api.mappings.update).toHaveBeenCalledWith(
+          'm1',
+          expect.objectContaining({ themeId: 'gid://shopify/OnlineStoreTheme/3' }),
+        ),
+      wait,
+    );
+    expect(await screen.findAllByText('spare', {}, wait)).not.toHaveLength(0);
+    // Give the reload time to finish: the page must still show the mapping.
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.queryByText('This mapping no longer exists')).not.toBeInTheDocument();
+    expect(container.querySelector('s-section[heading="This mapping no longer exists"]')).toBeNull();
+  });
+});
+
 describe('Commit selection on the mapping page', () => {
   it('syncs everything up to a new commit and re-applies only the files of a commit already in the theme', async () => {
     const { api } = await import('../../app/lib/api-client');
