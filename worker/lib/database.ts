@@ -209,11 +209,18 @@ export async function getSettings(db: Database, shopId: string): Promise<AppSett
   return toSettingsDto(row);
 }
 
+/** The GitHub login the repository and mappings belong to, or null when not recorded. */
+export async function getSettingsGithubAccount(db: Database, shopId: string): Promise<string | null> {
+  const row = await db.query.appSettings.findFirst({ where: eq(appSettings.shopId, shopId) });
+  return row?.githubAccount ?? null;
+}
+
 export interface SettingsWrite {
   defaultRepository?: string | null;
   defaultBranch?: string | null;
   defaultThemeId?: string | null;
   defaultThemeName?: string | null;
+  githubAccount?: string | null;
   syncPreferences?: SyncPreferences;
 }
 
@@ -792,6 +799,29 @@ export async function replaceMapping(
 }
 
 /** Retires an active mapping (kept for the audit trail). */
+/**
+ * Removes every active mapping except those of `keepRepository` (all of them when null), keeping the rows
+ * and the themes' last synced commits so mapping them again continues where it left off. Returns the count.
+ */
+export async function removeMappingsExcept(
+  db: Database,
+  shopId: string,
+  keepRepository: string | null,
+  removedBy: string | null,
+): Promise<number> {
+  const now = new Date();
+  const rows = await db
+    .update(themeMappings)
+    .set({ removedAt: now, removedBy, updatedAt: now })
+    .where(
+      keepRepository
+        ? and(activeMapping(shopId), sql`lower(${themeMappings.repository}) <> lower(${keepRepository})`)
+        : activeMapping(shopId),
+    )
+    .returning({ id: themeMappings.id });
+  return rows.length;
+}
+
 export async function removeMapping(
   db: Database,
   shopId: string,

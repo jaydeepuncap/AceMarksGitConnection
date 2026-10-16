@@ -7,7 +7,7 @@ import { api } from '../lib/api-client';
 import { showToast } from '../lib/app-bridge';
 import { formatDate } from '../lib/format';
 import { useApiQuery, useMutation } from '../lib/hooks';
-import type { UpdateSettingsRequest } from '../lib/types';
+import type { GithubConnectionResponse, UpdateSettingsRequest } from '../lib/types';
 import { ignorePatternError } from '../../shared/theme-paths';
 import { validateGithubToken, validateRepository } from '../lib/validation';
 import {
@@ -38,6 +38,8 @@ function GithubConnectionSection({ onChanged }: { onChanged: () => void }) {
   const [touched, setTouched] = useState(false);
   const connect = useMutation(api.github.connect);
   const disconnect = useMutation(api.github.disconnect);
+  // Set when another account was connected and the previous account's repository and mappings were cleared.
+  const [reset, setReset] = useState<GithubConnectionResponse['reset'] | null>(null);
 
   const tokenError = touched ? validateGithubToken(token) : null;
   const repoError = touched && repository.trim() ? validateRepository(repository) : null;
@@ -50,7 +52,8 @@ function GithubConnectionSection({ onChanged }: { onChanged: () => void }) {
       setToken(''); // never keep the token in UI state longer than needed
       setTouched(false);
       connection.setData(result);
-      showToast('GitHub connected');
+      setReset(result.reset ?? null);
+      showToast(`GitHub connected as ${result.connection?.accountLogin ?? 'new account'}`);
       onChanged();
     }
   };
@@ -76,6 +79,13 @@ function GithubConnectionSection({ onChanged }: { onChanged: () => void }) {
       )}
       <Stack gap="base">
         <ErrorBanner error={connection.error ?? connect.error ?? disconnect.error} onDismiss={connect.clearError} />
+        {reset && (
+          <Banner tone="info" heading="Started fresh for the new account" dismissible onDismiss={() => setReset(null)}>
+            <Paragraph>
+              {`${reset.previousAccount ? `The repository and mappings set up with ${reset.previousAccount}` : 'The previous repository and mappings'}${reset.repository ? ` (${reset.repository}` : ''}${reset.repository ? `, ${reset.mappingsRemoved} mapping(s))` : ` (${reset.mappingsRemoved} mapping(s))`} were cleared. Sync history is kept. Choose this account's repository below, then map its branches to themes.`}
+            </Paragraph>
+          </Banner>
+        )}
 
         {info && (
           <Stack gap="small-200">
@@ -191,7 +201,13 @@ export default function Settings() {
   const repoError = repository.trim() ? validateRepository(repository) : null;
   const ignoreInvalid = ignorePatterns.some((p, i) => !!ignorePatternError(p) || ignorePatterns.indexOf(p) !== i);
   const invalid = !!(repoError || ignoreInvalid);
-  const reposQuery = useApiQuery(() => api.github.repositories({ perPage: 100 }), [connected], connected);
+  // Reload the list whenever the connected account or token changes, not only on connect/disconnect.
+  const connectionKey = `${githubQuery.data?.connection?.accountLogin ?? ''}:${githubQuery.data?.connection?.lastVerifiedAt ?? ''}`;
+  const reposQuery = useApiQuery(
+    () => api.github.repositories({ perPage: 100 }),
+    [connected, connectionKey],
+    connected,
+  );
   const repos = reposQuery.data?.items ?? [];
 
   const onSave = useCallback(async () => {
@@ -263,7 +279,7 @@ export default function Settings() {
           {repository.trim() !== savedRepository && savedRepository && (
             <Banner tone="warning" heading="Changing the repository">
               <Paragraph>
-                {`Mappings of ${savedRepository} stay as they are but cannot sync until you switch back. Their themes stay mapped, so remove those mappings first if you want to map the themes to the new repository.`}
+                {`The app syncs from one repository, so the mappings of ${savedRepository} are removed when you save. Their sync history is kept, and mapping a theme again later continues where it left off.`}
               </Paragraph>
             </Banner>
           )}

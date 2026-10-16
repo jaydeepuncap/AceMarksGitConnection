@@ -138,6 +138,8 @@ export const appSettings = sqliteTable(
     /** Shopify GID, e.g. gid://shopify/OnlineStoreTheme/123 */
     defaultThemeId: text('default_theme_id'),
     defaultThemeName: text('default_theme_name'),
+    /** GitHub login the repository and mappings were set up with (reset when another account connects). */
+    githubAccount: text('github_account'),
     /** JSON-encoded SyncPreferences (shared/api-types.ts). */
     syncPreferences: text('sync_preferences', { mode: 'json' }).notNull().default(sql`'{}'`),
     createdAt: createdAt(),

@@ -9,7 +9,14 @@ import { describeIgnorePattern, isIgnored, matchesGlob, repoPathToThemePath, val
 import type { AppEnv } from '../env';
 import { cached } from '../lib/cache';
 import { adminClient, githubClient, resolveRepository } from '../lib/clients';
-import { getDb, getSettings, updateGithubConnectionRepository, upsertSettings, type SettingsWrite } from '../lib/database';
+import {
+  getDb,
+  getSettings,
+  removeMappingsExcept,
+  updateGithubConnectionRepository,
+  upsertSettings,
+  type SettingsWrite,
+} from '../lib/database';
 import { ok, ApiError } from '../lib/response';
 import { parseScopes, scopeGrants } from '../lib/sessions';
 import { getTheme } from '../lib/shopify-graphql';
@@ -44,7 +51,7 @@ export const settingsRoutes = new Hono<AppEnv>()
     const repository = body.defaultRepository === undefined ? current.defaultRepository : body.defaultRepository;
     if (body.defaultRepository !== undefined || body.defaultBranch !== undefined) {
       if (repository) {
-        const { client } = await githubClient(c);
+        const { client, connection } = await githubClient(c);
         const { owner, repo } = splitRepository(repository);
         const info = await client.verifyRepositoryAccess(owner, repo);
         const branch =
@@ -61,9 +68,16 @@ export const settingsRoutes = new Hono<AppEnv>()
         });
         patch.defaultRepository = info.fullName;
         patch.defaultBranch = branch ?? info.defaultBranch;
+        patch.githubAccount = connection.accountLogin;
       } else {
         patch.defaultRepository = null;
         patch.defaultBranch = null;
+      }
+      // The app syncs from one repository: mappings of any other repository are removed (their sync
+      // history and the themes' last synced commits are kept).
+      if ((patch.defaultRepository ?? '').toLowerCase() !== (current.defaultRepository ?? '').toLowerCase()) {
+        const removed = await removeMappingsExcept(db, shop.id, patch.defaultRepository ?? null, 'settings:repository');
+        if (removed) c.get('logger').info('mappings.removed_for_repository_change', { removed });
       }
     }
 

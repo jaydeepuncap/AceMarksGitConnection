@@ -153,6 +153,11 @@ export interface GithubConnectionInfo {
 export interface GithubConnectionResponse {
   connected: boolean;
   connection: GithubConnectionInfo | null;
+  /**
+   * Set when a different GitHub account was connected: the previous account's repository selection and
+   * mappings were cleared (sync history is kept).
+   */
+  reset?: { previousAccount: string | null; repository: string | null; mappingsRemoved: number };
 }
 
 export interface CreateGithubConnectionRequest {
