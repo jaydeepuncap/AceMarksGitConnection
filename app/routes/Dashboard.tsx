@@ -206,13 +206,17 @@ export default function Dashboard() {
       )}
 
       <Grid gridTemplateColumns="repeat(auto-fit, minmax(200px, 1fr))" gap="base">
-        <StatTile label="Theme mappings" hint={connected ? 'branches syncing to themes' : 'paused'}>
-          <Heading>{String(mappings.length)}</Heading>
+        <StatTile label="Theme mappings" icon="git-branch" hint={connected ? 'branches syncing to themes' : 'paused'}>
+          <Text type="strong">{String(mappings.length)}</Text>
         </StatTile>
-        <StatTile label="Store themes" hint={`${themes.filter((t) => t.writable).length} can be synced`}>
-          <Heading>{String(themes.length)}</Heading>
+        <StatTile label="Store themes" icon="theme" hint={`${themes.filter((t) => t.writable).length} can be synced`}>
+          <Text type="strong">{String(themes.length)}</Text>
         </StatTile>
-        <StatTile label="Last sync" hint={lastRun ? formatDate(lastRun.completedAt ?? lastRun.initiatedAt) : undefined}>
+        <StatTile
+          label="Last sync"
+          icon="clock"
+          hint={lastRun ? formatDate(lastRun.completedAt ?? lastRun.initiatedAt) : undefined}
+        >
           {lastRun ? (
             <Stack direction="inline">
               <Badge tone={SYNC_STATUS_BADGE[lastRun.status].tone}>{SYNC_STATUS_BADGE[lastRun.status].label}</Badge>
@@ -221,13 +225,13 @@ export default function Dashboard() {
             <Text color="subdued">No sync yet</Text>
           )}
         </StatTile>
-        <StatTile label="Needs attention" hint={`of the last ${RECENT} syncs`}>
+        <StatTile label="Needs attention" icon="alert-circle" hint={`of the last ${RECENT} syncs`}>
           <Stack direction="inline" gap="small-200" alignItems="center">
             <Icon
               type={needsAttention ? 'alert-triangle' : 'check-circle'}
               tone={needsAttention ? 'critical' : 'success'}
             />
-            <Heading>{String(needsAttention)}</Heading>
+            <Text type="strong">{String(needsAttention)}</Text>
           </Stack>
         </StatTile>
       </Grid>

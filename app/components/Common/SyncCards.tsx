@@ -63,12 +63,25 @@ export function CardSection({ children, subdued = false }: { children: ReactNode
   );
 }
 
-/** A labelled figure: "Updates waiting — 3". */
-export function StatTile({ label, children, hint }: { label: string; children: ReactNode; hint?: string }) {
+/** A titled figure: an icon and heading ("Theme mappings"), the value, then a short hint. */
+export function StatTile({
+  label,
+  icon,
+  children,
+  hint,
+}: {
+  label: string;
+  icon?: string;
+  children: ReactNode;
+  hint?: string;
+}) {
   return (
-    <Box padding="base" border="base" borderRadius="base" background="base">
+    <Box padding="base" border="base" borderRadius="large" background="base" blockSize="100%">
       <Stack gap="small-200">
-        <Text color="subdued">{label}</Text>
+        <Stack direction="inline" gap="small-200" alignItems="center">
+          {icon && <Icon type={icon} tone="info" />}
+          <Heading>{label}</Heading>
+        </Stack>
         {children}
         {hint && <Text color="subdued">{hint}</Text>}
       </Stack>
