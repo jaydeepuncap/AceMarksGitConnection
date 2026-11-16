@@ -138,6 +138,8 @@ export const appSettings = sqliteTable(
     /** Shopify GID, e.g. gid://shopify/OnlineStoreTheme/123 */
     defaultThemeId: text('default_theme_id'),
     defaultThemeName: text('default_theme_name'),
+    /** GitHub login the repository and mappings were set up with (reset when another account connects). */
+    githubAccount: text('github_account'),
     /** JSON-encoded SyncPreferences (shared/api-types.ts). */
     syncPreferences: text('sync_preferences', { mode: 'json' }).notNull().default(sql`'{}'`),
     createdAt: createdAt(),
@@ -161,7 +163,7 @@ export const SYNC_STATUSES = [
 ] as const;
 export type SyncStatus = (typeof SYNC_STATUSES)[number];
 
-export const SYNC_STRATEGIES = ['commit_changes', 'full_snapshot'] as const;
+export const SYNC_STRATEGIES = ['commit_changes', 'full_snapshot', 'since_last_sync', 'selected_commits'] as const;
 export type SyncStrategy = (typeof SYNC_STRATEGIES)[number];
 
 export const syncHistory = sqliteTable(
@@ -245,12 +247,74 @@ export const syncOperations = sqliteTable(
     skipReason: text('skip_reason'),
     attempts: integer('attempts').notNull().default(0),
     error: text('error'),
+    /**
+     * Commit the content comes from when it differs from the run's commit
+     * (multi-commit syncs: the newest selected commit that changed the file).
+     */
+    sourceCommitSha: text('source_commit_sha'),
     updatedAt: updatedAt(),
   },
   (t) => [
     uniqueIndex('sync_operations_sync_path_unique').on(t.syncId, t.path),
     index('sync_operations_sync_status_idx').on(t.syncId, t.status),
     index('sync_operations_shop_idx').on(t.shopId),
+  ],
+);
+
+// ---------------------------------------------------------------------------
+// theme_branch_sync — the last commit fully synced to a theme from a branch.
+// Saved only when every file of a sync succeeded; mirrored into the theme as
+// assets/theme-sync.json.
+// ---------------------------------------------------------------------------
+export const themeBranchSync = sqliteTable(
+  'theme_branch_sync',
+  {
+    id: id(),
+    shopId: text('shop_id')
+      .notNull()
+      .references(() => shops.id, { onDelete: 'cascade' }),
+    themeId: text('theme_id').notNull(),
+    branch: text('branch').notNull(),
+    commitSha: text('commit_sha').notNull(),
+    commitMessage: text('commit_message'),
+    syncId: text('sync_id'),
+    syncedAt: integer('synced_at', { mode: 'timestamp_ms' }).notNull(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex('theme_branch_sync_unique').on(t.shopId, t.themeId, t.branch)],
+);
+
+// ---------------------------------------------------------------------------
+// theme_mappings — which repository branch a Shopify theme is connected to.
+// One active mapping per branch and per theme (partial unique indexes on rows
+// that are not removed); removed mappings stay as an audit trail.
+// ---------------------------------------------------------------------------
+export const themeMappings = sqliteTable(
+  'theme_mappings',
+  {
+    id: id(),
+    shopId: text('shop_id')
+      .notNull()
+      .references(() => shops.id, { onDelete: 'cascade' }),
+    /** `owner/name` as GitHub reports it. */
+    repository: text('repository').notNull(),
+    branch: text('branch').notNull(),
+    themeId: text('theme_id').notNull(),
+    themeName: text('theme_name').notNull(),
+    createdBy: text('created_by'),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+    removedAt: integer('removed_at', { mode: 'timestamp_ms' }),
+    removedBy: text('removed_by'),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex('theme_mappings_active_branch_unique')
+      .on(t.shopId, t.repository, t.branch)
+      .where(sql`removed_at is null`),
+    uniqueIndex('theme_mappings_active_theme_unique').on(t.shopId, t.themeId).where(sql`removed_at is null`),
+    index('theme_mappings_shop_idx').on(t.shopId),
   ],
 );
 
@@ -292,3 +356,5 @@ export type GithubConnection = typeof githubConnections.$inferSelect;
 export type AppSettingsRow = typeof appSettings.$inferSelect;
 export type SyncHistoryRow = typeof syncHistory.$inferSelect;
 export type SyncOperationRow = typeof syncOperations.$inferSelect;
+export type ThemeBranchSyncRow = typeof themeBranchSync.$inferSelect;
+export type ThemeMappingRow = typeof themeMappings.$inferSelect;

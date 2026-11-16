@@ -28,6 +28,11 @@ export default tseslint.config(
     },
   },
   {
+    // The shared component library (ui/ wrappers and Common/) types its loosely typed parts as `any` on purpose.
+    files: ['app/components/ui/**', 'app/components/Common/**'],
+    rules: { '@typescript-eslint/no-explicit-any': 'off' },
+  },
+  {
     files: ['worker/**/*.ts'],
     languageOptions: { globals: globals.serviceworker },
     rules: {

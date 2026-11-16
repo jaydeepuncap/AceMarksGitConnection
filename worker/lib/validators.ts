@@ -4,7 +4,7 @@
  */
 import { z } from 'zod';
 import { SYNC_STRATEGY_VALUES } from '../../shared/api-types';
-import { normalizeThemeRoot, validateThemePath } from '../../shared/theme-paths';
+import { ignorePatternError, MAX_IGNORE_PATTERNS, normalizeThemeRoot, validateThemePath } from '../../shared/theme-paths';
 import { badRequest } from './response';
 
 // ---------------------------------------------------------------------------
@@ -85,9 +85,20 @@ export const branchesQuerySchema = paginationSchema.extend({
   repository: repositorySchema.optional(),
 });
 
+export const repositoryQuerySchema = z.object({ repository: repositorySchema }).strict();
+
+export const branchQuerySchema = z
+  .object({
+    repository: repositorySchema.optional(),
+    name: branchSchema,
+  })
+  .strict();
+
 export const commitsQuerySchema = paginationSchema.extend({
   repository: repositorySchema.optional(),
   branch: branchSchema.optional(),
+  /** Mark each commit New / Last synced / Added for this theme. */
+  themeId: themeIdSchema.optional(),
   path: z.string().trim().max(255).optional(),
 });
 
@@ -101,6 +112,8 @@ export const commitFilesQuerySchema = paginationSchema.extend({
 });
 
 export const historyQuerySchema = paginationSchema.extend({
+  themeId: themeIdSchema.optional(),
+  branch: branchSchema.optional(),
   status: z
     .enum(['previewed', 'queued', 'running', 'succeeded', 'partially_failed', 'failed', 'cancelled', 'expired'])
     .optional(),
@@ -108,6 +121,12 @@ export const historyQuerySchema = paginationSchema.extend({
     .enum(['true', 'false', '1', '0'])
     .optional()
     .transform((v) => v === 'true' || v === '1'),
+  /** Sync type. */
+  strategy: z.enum(SYNC_STRATEGY_VALUES).optional(),
+  /** Started on or after this day (YYYY-MM-DD, UTC). */
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD').optional(),
+  /** Started on or before this day (YYYY-MM-DD, UTC, inclusive). */
+  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD').optional(),
 });
 
 export const uuidSchema = z.string().uuid('Invalid ID');
@@ -118,9 +137,10 @@ export const uuidSchema = z.string().uuid('Invalid ID');
 const ignorePatternSchema = z
   .string()
   .trim()
-  .min(1)
-  .max(200)
-  .refine((v) => !v.includes('..') && !v.startsWith('/'), 'Invalid ignore pattern');
+  .superRefine((v, ctx) => {
+    const error = ignorePatternError(v);
+    if (error) ctx.addIssue({ code: 'custom', message: `Ignore pattern "${v}": ${error}` });
+  });
 
 export const syncPreferencesPatchSchema = z
   .object({
@@ -138,8 +158,17 @@ export const syncPreferencesPatchSchema = z
         return r.root;
       })
       .optional(),
-    ignorePatterns: z.array(ignorePatternSchema).max(50).optional(),
+    ignorePatterns: z
+      .array(ignorePatternSchema)
+      .max(MAX_IGNORE_PATTERNS)
+      // Duplicates are dropped; the order the merchant entered is kept.
+      .transform((patterns) => [...new Set(patterns)])
+      .optional(),
   })
+  .strict();
+
+export const ignorePreviewSchema = z
+  .object({ patterns: z.array(ignorePatternSchema).max(MAX_IGNORE_PATTERNS) })
   .strict();
 
 export const updateSettingsSchema = z
@@ -163,6 +192,9 @@ export const createGithubConnectionSchema = z
   })
   .strict();
 
+/** Most commits a multi-commit sync can combine. */
+export const MAX_SELECTED_COMMITS = 50;
+
 export const syncPreviewSchema = z
   .object({
     repository: repositorySchema.optional(),
@@ -170,10 +202,19 @@ export const syncPreviewSchema = z
     commitSha: commitShaSchema,
     themeId: themeIdSchema,
     strategy: z.enum(SYNC_STRATEGY_VALUES).optional(),
+    commitShas: z.array(commitShaSchema).min(2).max(MAX_SELECTED_COMMITS).optional(),
     allowDeletes: z.boolean().optional(),
     includePaths: z.array(themePathSchema).max(3000).optional(),
   })
-  .strict();
+  .strict()
+  .refine((v) => (v.strategy === 'selected_commits') === (v.commitShas !== undefined), {
+    message: 'Select at least two commits for strategy "selected_commits" (and only for it)',
+    path: ['commitShas'],
+  })
+  .refine((v) => !v.commitShas || v.commitShas.includes(v.commitSha), {
+    message: 'commitSha must be one of the selected commits (the newest)',
+    path: ['commitSha'],
+  });
 
 export const confirmSyncSchema = z
   .object({
@@ -181,6 +222,7 @@ export const confirmSyncSchema = z
     confirm: z.literal(true, { message: 'Explicit confirmation (confirm: true) is required' }),
     confirmLiveTheme: z.boolean().optional(),
     confirmThemeName: z.string().max(200).optional(),
+    acceptDirectEdits: z.boolean().optional(),
   })
   .strict();
 
@@ -222,3 +264,39 @@ export async function readJsonBody(request: Request, maxBytes = 256 * 1024): Pro
     throw badRequest('Request body is not valid JSON');
   }
 }
+
+export const createMappingSchema = z
+  .object({
+    repository: repositorySchema.optional(),
+    branch: branchSchema,
+    themeId: themeIdSchema,
+  })
+  .strict();
+
+export const updateMappingSchema = z
+  .object({
+    branch: branchSchema.optional(),
+    themeId: themeIdSchema.optional(),
+    confirm: z.literal(true),
+  })
+  .strict()
+  .refine((v) => v.branch !== undefined || v.themeId !== undefined, 'Give a new branch or theme');
+
+export const removeMappingSchema = z.object({ confirm: z.literal(true) }).strict();
+
+export const lastSyncQuerySchema = z
+  .object({
+    themeId: themeIdSchema,
+    branch: branchSchema.optional(),
+  })
+  .strict();
+
+export const commitStatsQuerySchema = z
+  .object({
+    repository: repositorySchema.optional(),
+    shas: z
+      .string()
+      .transform((v) => v.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean))
+      .pipe(z.array(commitShaSchema).min(1).max(30)),
+  })
+  .strict();

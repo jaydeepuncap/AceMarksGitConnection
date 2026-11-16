@@ -62,7 +62,9 @@ describe('database helpers', () => {
       syncPreferences: { ...defaults.syncPreferences, allowDeletes: true },
     });
     expect(updated).toMatchObject({ defaultBranch: 'dev', syncPreferences: { allowDeletes: true } });
-    expect(normalizePreferences({ strategy: 'bogus' }).strategy).toBe('commit_changes');
+    expect(defaults.syncPreferences.strategy).toBe('since_last_sync');
+    expect(normalizePreferences({ strategy: 'bogus' }).strategy).toBe('since_last_sync');
+    expect(normalizePreferences({ strategy: 'commit_changes' }).strategy).toBe('commit_changes');
   });
 
   it('deleting a shop cascades to its data', async () => {

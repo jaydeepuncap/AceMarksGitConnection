@@ -16,7 +16,12 @@ import type { Env } from '../env';
 import { createAdminClientForShop, createGithubClientForShop } from '../lib/clients';
 import { gitBlobSha, bytesToBase64 } from '../lib/crypto';
 import {
+  addBackedUp,
+  addIgnored,
   countOperations,
+  getSettings,
+  listLastSyncedForTheme,
+  saveLastSynced,
   findShopById,
   getDb,
   getSyncRun,
@@ -35,11 +40,17 @@ import {
   upsertThemeFiles,
   waitForJob,
   type ShopifyGraphqlClient,
+  getThemeFileBodies,
+  getThemeFilesMetadata,
   type ThemeFileBody,
 } from '../lib/shopify-graphql';
+import { THEME_SYNC_MARKER_PATH } from '../../shared/theme-paths';
+import { checkThemeFile } from './code-check';
+import { buildThemeSyncMarker, fetchThemeSyncMarker, type ThemeSyncMarker } from './theme-state';
 import { splitRepository } from '../lib/validators';
-import { MAX_FILE_BYTES } from './planner';
-import type { SyncOperationRow } from '../../drizzle/schema';
+import { IGNORED_REASON, MAX_FILE_BYTES, md5Matches } from './planner';
+import { isIgnored } from '../../shared/theme-paths';
+import type { SyncHistoryRow, SyncOperationRow } from '../../drizzle/schema';
 
 const MAX_OPERATION_ATTEMPTS = 3;
 const MAX_UPSERT_PAYLOAD_BYTES = 4 * 1024 * 1024;
@@ -101,6 +112,12 @@ async function fetchVerifiedContent(
   if (bytes.byteLength > MAX_FILE_BYTES) {
     throw new ApiError(422, 'VALIDATION_ERROR', `File is ${bytes.byteLength} bytes; the sync limit is ${MAX_FILE_BYTES}`);
   }
+  // Step 3 again for every file: code with errors never reaches Shopify.
+  const issues = checkThemeFile(op.path, bytes);
+  if (issues.length > 0) {
+    const first = issues[0]!;
+    throw new ApiError(422, 'CODE_ERRORS', `Code error${first.line ? ` on line ${first.line}` : ''}: ${first.message}`);
+  }
   if (op.blobSha) {
     const actual = await gitBlobSha(bytes);
     if (actual !== op.blobSha) {
@@ -114,18 +131,47 @@ async function fetchVerifiedContent(
   return bytes;
 }
 
+export const BACKUP_TTL_SECONDS = 30 * 24 * 60 * 60;
+export const backupKey = (shopId: string, syncId: string, path: string) => `backup:${shopId}:${syncId}:${path}`;
+
+/**
+ * Saves the theme's current version of `paths` before they change (or records
+ * that a file did not exist). A retry never overwrites an existing backup, so
+ * the backup always holds the theme as it was before this sync.
+ */
+async function backupFiles(
+  ctx: { db: Database; shopId: string; admin: ShopifyGraphqlClient; kv: KVNamespace; fetchImpl?: typeof fetch },
+  run: { id: string; themeId: string },
+  paths: string[],
+): Promise<void> {
+  const missing: string[] = [];
+  for (const path of paths) {
+    if ((await ctx.kv.get(backupKey(ctx.shopId, run.id, path))) === null) missing.push(path);
+  }
+  if (missing.length === 0) return;
+  const bodies = await getThemeFileBodies(ctx.admin, run.themeId, missing, ctx.fetchImpl);
+  for (const path of missing) {
+    const body = bodies.get(path);
+    await ctx.kv.put(backupKey(ctx.shopId, run.id, path), JSON.stringify(body ? { path, ...body } : { path, absent: true }), {
+      expirationTtl: BACKUP_TTL_SECONDS,
+    });
+  }
+  await addBackedUp(ctx.db, ctx.shopId, run.id, missing.length);
+}
+
 async function processUpserts(
-  ctx: { db: Database; shopId: string; github: GitHubClient; admin: ShopifyGraphqlClient; logger: Logger },
-  run: { repository: string; commitSha: string; themeId: string },
+  ctx: { db: Database; shopId: string; github: GitHubClient; admin: ShopifyGraphqlClient; logger: Logger; kv: KVNamespace; fetchImpl?: typeof fetch },
+  run: { id: string; repository: string; commitSha: string; themeId: string },
   ops: SyncOperationRow[],
 ): Promise<void> {
   const { db, shopId, github, admin, logger } = ctx;
-  const ready: { op: SyncOperationRow; body: ThemeFileBody; bytes: number }[] = [];
+  const ready: { op: SyncOperationRow; body: ThemeFileBody; bytes: number; bytesRaw: Uint8Array }[] = [];
 
   for (const op of ops) {
     try {
-      const bytes = await fetchVerifiedContent(github, run.repository, run.commitSha, op);
-      ready.push({ op, body: encodeBody(bytes), bytes: bytes.byteLength });
+      // Multi-commit syncs take each file from the commit that last changed it.
+      const bytes = await fetchVerifiedContent(github, run.repository, op.sourceCommitSha ?? run.commitSha, op);
+      ready.push({ op, body: encodeBody(bytes), bytes: bytes.byteLength, bytesRaw: bytes });
     } catch (err) {
       // Rate limits abort the chunk so the dispatcher can back off; nothing was written.
       if (err instanceof ApiError && err.code === 'GITHUB_RATE_LIMITED') throw err;
@@ -150,9 +196,30 @@ async function processUpserts(
   }
   if (current.length > 0) batches.push(current);
 
-  for (const batch of batches) {
-    const batchOps = batch.map((b) => b.op);
+  for (const fullBatch of batches) {
+    let batch = fullBatch;
+    let batchOps = batch.map((b) => b.op);
     try {
+      // Files whose content is already identical in the theme (checked against
+      // the theme as it is now) are not written again.
+      const current = await getThemeFilesMetadata(admin, run.themeId, batchOps.map((o) => o.path));
+      const identical = batch.filter((b) => {
+        const checksum = current.get(b.op.path)?.checksumMd5;
+        return !!checksum && md5Matches(b.bytesRaw, checksum);
+      });
+      if (identical.length > 0) {
+        await updateOperations(db, shopId, identical.map((b) => b.op.id), {
+          status: 'skipped',
+          skipReason: 'Already identical in the theme',
+          error: null,
+          incrementAttempts: true,
+        });
+        batch = batch.filter((b) => !identical.includes(b));
+        batchOps = batch.map((b) => b.op);
+        if (batch.length === 0) continue;
+      }
+      // Step 5: the theme's current version of these files is saved first.
+      await backupFiles(ctx, run, batchOps.map((o) => o.path));
       const result = await upsertThemeFiles(
         admin,
         run.themeId,
@@ -199,12 +266,14 @@ async function processUpserts(
 }
 
 async function processDeletes(
-  ctx: { db: Database; shopId: string; admin: ShopifyGraphqlClient; logger: Logger },
-  themeId: string,
+  ctx: { db: Database; shopId: string; admin: ShopifyGraphqlClient; logger: Logger; kv: KVNamespace; fetchImpl?: typeof fetch },
+  run: { id: string; themeId: string },
   ops: SyncOperationRow[],
 ): Promise<void> {
   const { db, shopId, admin, logger } = ctx;
+  const themeId = run.themeId;
   try {
+    await backupFiles(ctx, run, ops.map((o) => o.path));
     const result = await deleteThemeFiles(admin, themeId, ops.map((o) => o.path));
     const byName = new Map(ops.map((o) => [o.path, o]));
     await updateOperations(
@@ -232,6 +301,16 @@ async function processDeletes(
   }
 }
 
+/** Updates the run's file counters while it is running (the status is not changed). */
+async function saveProgress(db: Database, shopId: string, syncId: string): Promise<void> {
+  const counts = await countOperations(db, shopId, syncId);
+  await transitionSyncRun(db, shopId, syncId, ['running'], 'running', {
+    filesSucceeded: counts.succeeded,
+    filesFailed: counts.failed,
+    filesSkipped: counts.skipped,
+  });
+}
+
 /** Recomputes counters and, when nothing is pending, the final status. */
 export async function finalizeIfComplete(db: Database, shopId: string, syncId: string): Promise<SyncStatus | null> {
   const counts = await countOperations(db, shopId, syncId);
@@ -253,6 +332,53 @@ export async function finalizeIfComplete(db: Database, shopId: string, syncId: s
       counts.failed > 0 ? { code: 'FILES_FAILED', message: `${counts.failed} file(s) failed to sync` } : null,
   });
   return status;
+}
+
+/**
+ * After every file succeeded: the commit becomes the theme's last synced commit
+ * for the run's branch, and assets/theme-sync.json is written into the theme as
+ * the very last step with the last synced commit of every branch (a duplicated
+ * theme keeps it). Never fails the run.
+ */
+async function recordLastSynced(db: Database, admin: ShopifyGraphqlClient, run: SyncHistoryRow, logger: Logger): Promise<void> {
+  const syncedAt = new Date();
+  try {
+    if (run.branch) {
+      await saveLastSynced(db, run.shopId, {
+        themeId: run.themeId,
+        branch: run.branch,
+        commitSha: run.commitSha,
+        commitMessage: run.commitMessage,
+        syncId: run.id,
+        syncedAt,
+      });
+    }
+    // The file keeps the last synced commit of every branch, not only this sync.
+    let previous: ThemeSyncMarker | null = null;
+    try {
+      previous = await fetchThemeSyncMarker(admin, run.themeId);
+    } catch (err) {
+      logger.warn('sync.marker_read_failed', { error: errorMessage(err) });
+    }
+    const marker = buildThemeSyncMarker({
+      previous,
+      rows: await listLastSyncedForTheme(db, run.shopId, run.themeId),
+      sync: {
+        commitSha: run.commitSha,
+        message: run.commitMessage,
+        repository: run.repository,
+        branch: run.branch,
+        themeName: run.themeName,
+        syncedOn: syncedAt.toISOString(),
+        syncId: run.id,
+      },
+    });
+    await upsertThemeFiles(admin, run.themeId, [
+      { filename: THEME_SYNC_MARKER_PATH, body: { type: 'TEXT', value: `${JSON.stringify(marker, null, 2)}\n` } },
+    ]);
+  } catch (err) {
+    logger.warn('sync.last_synced_record_failed', { error: errorMessage(err) });
+  }
 }
 
 async function failRun(db: Database, shopId: string, syncId: string, code: string, message: string) {
@@ -322,15 +448,29 @@ export async function processSyncChunk(
     return { done: true };
   }
 
-  const ctx = { db, shopId, github, admin, logger };
+  const ctx = { db, shopId, github, admin, logger, kv: env.KV, fetchImpl: options.fetchImpl };
+  const ignorePatterns = (await getSettings(db, shopId)).syncPreferences.ignorePatterns;
   try {
     while (Date.now() < options.deadline) {
-      const pending = await listPendingOperations(db, shopId, syncId, THEME_WRITE_BATCH_LIMIT);
-      if (pending.length === 0) break;
+      const listed = await listPendingOperations(db, shopId, syncId, THEME_WRITE_BATCH_LIMIT);
+      if (listed.length === 0) break;
+      // Ignored files are never modified, even when the pattern was added after the preview.
+      const nowIgnored = listed.filter((op) => isIgnored(op.path, ignorePatterns));
+      for (const op of nowIgnored) {
+        await updateOperations(db, shopId, [op.id], {
+          status: 'skipped',
+          skipReason: `${IGNORED_REASON} "${isIgnored(op.path, ignorePatterns)}" (added after the preview)`,
+          error: null,
+        });
+      }
+      await addIgnored(db, shopId, syncId, nowIgnored.length);
+      const pending = listed.filter((op) => !nowIgnored.includes(op));
       const deletes = pending.filter((op) => op.action === 'delete');
       const upserts = pending.filter((op) => op.action === 'upsert');
       if (upserts.length > 0) await processUpserts(ctx, run, upserts);
-      if (deletes.length > 0) await processDeletes(ctx, run.themeId, deletes);
+      if (deletes.length > 0) await processDeletes(ctx, run, deletes);
+      // Progress after every batch, so the result page counts files as they are updated.
+      await saveProgress(db, shopId, syncId);
     }
   } catch (err) {
     if (err instanceof ApiError && err.code === 'GITHUB_RATE_LIMITED') {
@@ -346,5 +486,6 @@ export async function processSyncChunk(
 
   const status = await finalizeIfComplete(db, shopId, syncId);
   if (status) logger.info('sync.completed', { status });
+  if (status === 'succeeded') await recordLastSynced(db, admin, run, logger);
   return { done: status !== null };
 }

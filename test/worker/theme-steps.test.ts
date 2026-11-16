@@ -1,0 +1,480 @@
+/**
+ * "4. Updating your theme, step by step" (client guide):
+ *   1 choose a theme (last update per theme)   2 choose an update (New / Last synced / Added)
+ *   3 automatic checks                          4 review (current, updating to, updates included)
+ *   5 confirm → backup, then update             6 result + last synced commit per theme and branch
+ */
+import { createHash } from 'node:crypto';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { CommitsResponse, LastSynced, Paginated, SyncPreview, SyncRun, SyncRunDetail, ThemeMapping, ThemeMappingsResponse } from '../../shared/api-types';
+import { app } from '../../worker/index';
+import { createLogger } from '../../worker/lib/logger';
+import { handleSyncMessage } from '../../worker/sync/dispatch';
+import { createTestEnv, sessionToken, type TestContext } from '../helpers/env';
+import { githubRepoHandler, graphqlHandler, installFetchMock, json } from '../helpers/fetch-mock';
+import { seedMapping, seedShop, THEME_DEV, THEME_LIVE } from '../helpers/fixtures';
+
+const SHOP = 'alpha.myshopify.com';
+const C1 = '1'.repeat(40);
+const C2 = '2'.repeat(40);
+const C3 = '3'.repeat(40);
+const blobSha = (s: string) => createHash('sha1').update(`blob ${Buffer.byteLength(s)}\0`).update(s).digest('hex');
+const md5 = (s: string) => createHash('md5').update(s).digest('hex');
+
+type Files = Record<string, string>;
+const F1: Files = {
+  'layout/theme.liquid': '<html>{{ content_for_layout }}</html>',
+  'sections/cart.liquid': '{% if cart %}<ul></ul>{% endif %}',
+  'assets/cart.css': '.cart{color:red}',
+  'snippets/old-cart.liquid': '<div>old</div>',
+};
+const F2: Files = { ...F1, 'snippets/size-chart.liquid': '<table></table>' };
+const F3: Files = { ...F2, 'sections/cart.liquid': '{% for i in cart.items %}{% render "cart-item" %}{% endfor %}', 'snippets/cart-item.liquid': '<li></li>' };
+delete F3['snippets/old-cart.liquid'];
+
+function world() {
+  const history = [
+    { sha: C1, message: 'Add custom CSS', files: F1 },
+    { sha: C2, message: 'Update product template', files: F2 },
+    { sha: C3, message: 'Update cart functionality', files: F3 },
+  ];
+  const theme = new Map<string, { value: string; updatedAt: string }>(
+    Object.entries(F1).map(([k, v]) => [k, { value: v, updatedAt: '2026-10-01T00:00:00Z' }]),
+  );
+  const upserts: string[][] = [];
+  const mock = installFetchMock();
+  const raw = (c: (typeof history)[number]) => ({
+    sha: c.sha,
+    html_url: '',
+    commit: { message: c.message, author: { name: 'Dev', date: '2026-10-04T00:00:00Z' }, committer: null, tree: { sha: `tree-${c.sha}` } },
+    author: { login: 'dev', avatar_url: '' },
+    parents: history.indexOf(c) > 0 ? [{ sha: history[history.indexOf(c) - 1]!.sha }] : [],
+  });
+  mock.on((req) => {
+    const url = new URL(req.url);
+    if (url.hostname !== 'api.github.com') return undefined;
+    const p = url.pathname;
+    if (p === '/repos/acme/theme/commits') {
+      const ref = url.searchParams.get('sha') ?? 'main';
+      const end = ref === 'main' ? history.length : history.findIndex((c) => c.sha === ref) + 1;
+      return json(history.slice(0, end).reverse().map(raw));
+    }
+    let m = /^\/repos\/acme\/theme\/commits\/(\w{40})$/.exec(p);
+    if (m) {
+      const c = history.find((h) => h.sha === m![1])!;
+      const parent = history[history.indexOf(c) - 1]?.files ?? {};
+      const files = [
+        ...Object.entries(c.files)
+          .filter(([k, v]) => parent[k] !== v)
+          .map(([k, v]) => ({ filename: k, status: parent[k] === undefined ? 'added' : 'modified', sha: blobSha(v), additions: 1, deletions: 0, changes: 1 })),
+        ...Object.keys(parent)
+          .filter((k) => !(k in c.files))
+          .map((k) => ({ filename: k, status: 'removed', sha: null, additions: 0, deletions: 1, changes: 1 })),
+      ];
+      return json({ ...raw(c), files });
+    }
+    m = /^\/repos\/acme\/theme\/git\/trees\/tree-(\w{40})$/.exec(p);
+    if (m) {
+      const c = history.find((h) => h.sha === m![1])!;
+      return json({ tree: Object.entries(c.files).map(([path, v]) => ({ path, mode: '100644', type: 'blob', sha: blobSha(v), size: v.length })), truncated: false });
+    }
+    m = /^\/repos\/acme\/theme\/git\/blobs\/(\w{40})$/.exec(p);
+    if (m) {
+      const content = history.flatMap((h) => Object.values(h.files)).find((v) => blobSha(v) === m![1])!;
+      return json({ content: Buffer.from(content).toString('base64'), encoding: 'base64' });
+    }
+    m = /^\/repos\/acme\/theme\/contents\/(.+)$/.exec(p);
+    if (m) {
+      const content = history.find((h) => h.sha === url.searchParams.get('ref'))?.files[decodeURIComponent(m[1]!)];
+      return content === undefined ? json({ message: 'Not Found' }, { status: 404 }) : new Response(content);
+    }
+    return undefined;
+  });
+  const node = (n: string) => ({ filename: n, size: String(theme.get(n)!.value.length), checksumMd5: md5(theme.get(n)!.value), updatedAt: theme.get(n)!.updatedAt });
+  mock.on(
+    graphqlHandler({
+      AceTheme: (v) => ({ theme: [THEME_DEV, THEME_LIVE].find((t) => t.id === v.id) ?? null }),
+      AceThemes: () => ({ themes: { nodes: [THEME_DEV, THEME_LIVE], pageInfo: { hasNextPage: false, endCursor: null } } }),
+      AceThemeFiles: (v) => ({
+        theme: {
+          id: v.id,
+          files: { nodes: ((v.filenames as string[] | null) ?? [...theme.keys()]).filter((n) => theme.has(n)).map(node), pageInfo: { hasNextPage: false, endCursor: null } },
+        },
+      }),
+      AceThemeFileBodies: (v) => ({
+        theme: { id: v.id, files: { nodes: (v.filenames as string[]).filter((n) => theme.has(n)).map((n) => ({ filename: n, body: { content: theme.get(n)!.value } })) } },
+      }),
+      AceThemeFilesUpsert: (v) => {
+        const files = v.files as { filename: string; body: { value: string } }[];
+        upserts.push(files.map((f) => f.filename));
+        for (const f of files) theme.set(f.filename, { value: f.body.value, updatedAt: '2026-10-10T00:00:00Z' });
+        return { themeFilesUpsert: { upsertedThemeFiles: files.map((f) => ({ filename: f.filename })), job: null, userErrors: [] } };
+      },
+      AceThemeFilesDelete: (v) => {
+        const files = v.files as string[];
+        for (const f of files) theme.delete(f);
+        return { themeFilesDelete: { deletedThemeFiles: files.map((filename) => ({ filename })), userErrors: [] } };
+      },
+    }),
+  );
+  mock.on(githubRepoHandler());
+  return { theme, upserts, history, mock };
+}
+
+describe('updating a theme, step by step', () => {
+  let t: TestContext;
+  let w: ReturnType<typeof world>;
+  afterEach(() => vi.unstubAllGlobals());
+
+  async function setup() {
+    t = createTestEnv();
+    w = world();
+    const shop = await seedShop(t.env, SHOP);
+    await seedMapping(t.env, shop.id, THEME_DEV, 'main');
+  }
+  const api = async <T>(method: string, path: string, body?: unknown) => {
+    const res = await app.request(
+      path,
+      { method, headers: { Authorization: `Bearer ${await sessionToken(SHOP)}`, 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) },
+      t.env,
+      t.ctx,
+    );
+    return { status: res.status, body: (await res.json()) as { data: T; error: { code: string } } };
+  };
+  async function drain() {
+    const logger = createLogger('error');
+    while (t.queue.sent.length) {
+      const msg = t.queue.sent.shift()!;
+      if ((await handleSyncMessage(t.env, msg.body, logger)) !== null) t.queue.sent.push(msg);
+    }
+  }
+  async function sync(sha: string, extra: Record<string, unknown> = {}, confirm: Record<string, unknown> = {}) {
+    const preview = await api<SyncPreview>('POST', '/api/sync/preview', { commitSha: sha, themeId: THEME_DEV.id, branch: 'main', ...extra });
+    expect(preview.status).toBe(201);
+    const run = await api<SyncRun>('POST', '/api/sync', { syncId: preview.body.data.syncId, confirm: true, ...confirm });
+    await drain();
+    return { preview: preview.body.data, run: run.body.data, confirmStatus: run.status };
+  }
+
+  it('records the last synced commit per theme and branch, and labels commits New / Last synced / Added', async () => {
+    await setup();
+    await sync(C1, { strategy: 'commit_changes' });
+    const last = (await api<Record<string, LastSynced>>('GET', '/api/themes/last-synced')).body.data;
+    expect(last[THEME_DEV.id]).toMatchObject({ sha: C1, branch: 'main', message: 'Add custom CSS' });
+    expect(JSON.parse(w.theme.get('assets/theme-sync.json')!.value)).toMatchObject({ lastSyncedUpdate: C1, branch: 'main' });
+
+    const list = (await api<CommitsResponse>('GET', `/api/commits?branch=main&themeId=${encodeURIComponent(THEME_DEV.id)}`)).body.data;
+    expect(list).toMatchObject({ waiting: 2, lastSynced: { sha: C1 } });
+    expect(list.items.map((i) => [i.shortSha, i.syncStatus])).toEqual([
+      ['3333333', 'new'],
+      ['2222222', 'new'],
+      ['1111111', 'last_synced'],
+    ]);
+  });
+
+  it('catches up: the newest update brings every waiting update; review lists them; backup then update', async () => {
+    await setup();
+    await sync(C1, { strategy: 'commit_changes' });
+    const { preview } = await sync(C3, { strategy: 'since_last_sync', allowDeletes: true });
+    expect(preview.base).toMatchObject({ sha: C1, message: 'Add custom CSS' });
+    expect(preview.commitsIncluded.map((c) => c.sha)).toEqual([C2, C3]);
+    expect(preview.checks).toMatchObject({ code: { status: 'passed' }, directEdits: { status: 'passed' } });
+    expect(preview.summary).toMatchObject({ creates: 2, updates: 1, deletes: 1 });
+
+    expect(w.theme.get('sections/cart.liquid')!.value).toBe(F3['sections/cart.liquid']);
+    expect(w.theme.has('snippets/old-cart.liquid')).toBe(false);
+    expect(w.upserts.at(-1)).toEqual(['assets/theme-sync.json']); // written last
+    // Backup of the theme's version saved before the change.
+    const backup = JSON.parse((await t.kv.get([...t.kv.store.keys()].find((k) => k.includes(preview.syncId) && k.endsWith('sections/cart.liquid'))!))!);
+    expect(backup).toMatchObject({ type: 'TEXT', value: F1['sections/cart.liquid'] });
+
+    const detail = (await api<SyncRunDetail>('GET', `/api/sync/history/${preview.syncId}`)).body.data;
+    expect(detail).toMatchObject({ status: 'succeeded', baseSha: C1, backedUp: 4 });
+    const list = (await api<CommitsResponse>('GET', `/api/commits?branch=main&themeId=${encodeURIComponent(THEME_DEV.id)}`)).body.data;
+    expect(list.items.map((i) => i.syncStatus)).toEqual(['last_synced', 'added', 'added']);
+  });
+
+  it('warns about files edited directly in Shopify and asks before replacing them', async () => {
+    await setup();
+    await sync(C1, { strategy: 'commit_changes' });
+    w.theme.set('sections/cart.liquid', { value: '<edited in shopify>', updatedAt: '2026-10-05T09:00:00Z' });
+    const preview = (await api<SyncPreview>('POST', '/api/sync/preview', { commitSha: C3, themeId: THEME_DEV.id, branch: 'main', strategy: 'since_last_sync' })).body.data;
+    expect(preview.checks.directEdits).toMatchObject({ status: 'warning', files: [{ path: 'sections/cart.liquid', updatedAt: '2026-10-05T09:00:00Z' }] });
+    const refused = await api('POST', '/api/sync', { syncId: preview.syncId, confirm: true });
+    expect(refused.body.error.code).toBe('DIRECT_EDITS_FOUND');
+    expect((await api('POST', '/api/sync', { syncId: preview.syncId, confirm: true, acceptDirectEdits: true })).status).toBe(202);
+  });
+
+  it('blocks code errors before they reach Shopify', async () => {
+    await setup();
+    w.history.push({ sha: '4'.repeat(40), message: 'Broken', files: { ...F3, 'sections/cart.liquid': '{% if cart %}' } });
+    const preview = (await api<SyncPreview>('POST', '/api/sync/preview', { commitSha: '4'.repeat(40), themeId: THEME_DEV.id, branch: 'main', strategy: 'commit_changes' })).body.data;
+    expect(preview.checks.code).toMatchObject({ status: 'failed', issues: [{ path: 'sections/cart.liquid' }] });
+    const res = await api('POST', '/api/sync', { syncId: preview.syncId, confirm: true });
+    expect(res.body.error.code).toBe('CODE_ERRORS');
+    expect(w.upserts).toHaveLength(0);
+  });
+
+  it('shows the sync history of the selected theme and branch', async () => {
+    await setup();
+    await sync(C1, { strategy: 'commit_changes' });
+    const onMain = (await api<Paginated<SyncRun>>('GET', `/api/sync/history?themeId=111&branch=main`)).body.data;
+    expect(onMain.items.map((r) => r.commitSha)).toEqual([C1]);
+    expect((await api<Paginated<SyncRun>>('GET', `/api/sync/history?themeId=111&branch=feature`)).body.data.items).toEqual([]);
+    expect((await api<Paginated<SyncRun>>('GET', `/api/sync/history?themeId=222`)).body.data.items).toEqual([]);
+  });
+  it('"from the last sync" pushes the earlier un-added commits too, and the preview says which commit each file comes from', async () => {
+    await setup();
+    await sync(C1, { strategy: 'commit_changes' });
+    const { preview } = await sync(C3); // the default push setting
+    expect(preview.strategy).toBe('since_last_sync');
+    expect(preview.commitsIncluded.map((c) => c.sha)).toEqual([C2, C3]);
+    const from = Object.fromEntries(preview.operations.map((op) => [op.path, op.commits]));
+    expect(from).toMatchObject({
+      'snippets/size-chart.liquid': ['2222222'], // only changed in the earlier commit
+      'sections/cart.liquid': ['3333333'],
+      'snippets/cart-item.liquid': ['3333333'],
+    });
+    expect(w.theme.get('snippets/size-chart.liquid')!.value).toBe(F2['snippets/size-chart.liquid']);
+    expect(w.theme.get('sections/cart.liquid')!.value).toBe(F3['sections/cart.liquid']);
+    const list = (await api<CommitsResponse>('GET', `/api/commits?branch=main&themeId=${encodeURIComponent(THEME_DEV.id)}`)).body.data;
+    expect(list.items.map((i) => i.syncStatus)).toEqual(['last_synced', 'added', 'added']);
+  });
+
+  it('"only the selected commit" pushes just that commit and says what is left out', async () => {
+    await setup();
+    await sync(C1, { strategy: 'commit_changes' });
+    const { preview } = await sync(C3, { strategy: 'commit_changes' });
+    expect(preview.strategy).toBe('commit_changes');
+    expect(preview.warnings.join(' ')).toContain('Only the selected commit is pushed: 1 earlier update(s) on main');
+    expect(preview.operations.every((op) => op.commits?.[0] === '3333333')).toBe(true);
+    expect(w.theme.has('snippets/size-chart.liquid')).toBe(false); // C2 left out
+  });
+
+  it('uses the push setting from Settings', async () => {
+    await setup();
+    await sync(C1, { strategy: 'commit_changes' });
+    await api('PUT', '/api/settings', { syncPreferences: { strategy: 'commit_changes' } });
+    const preview = (await api<SyncPreview>('POST', '/api/sync/preview', { commitSha: C3, themeId: THEME_DEV.id, branch: 'main' })).body.data;
+    expect(preview.strategy).toBe('commit_changes');
+  });
+
+  it('recovers the last synced commit from earlier successful syncs', async () => {
+    await setup();
+    await sync(C1, { strategy: 'commit_changes' });
+    // A sync from before the last synced commit was recorded, and no marker file.
+    await t.env.DB.prepare('DELETE FROM theme_branch_sync').run();
+    w.theme.delete('assets/theme-sync.json');
+    const list = (await api<CommitsResponse>('GET', `/api/commits?branch=main&themeId=${encodeURIComponent(THEME_DEV.id)}`)).body.data;
+    expect(list).toMatchObject({ waiting: 2, lastSynced: { sha: C1 } });
+    expect(list.items.map((i) => i.syncStatus)).toEqual(['new', 'new', 'last_synced']);
+    const { preview } = await sync(C3, { strategy: 'since_last_sync' });
+    expect(preview.commitsIncluded.map((c) => c.sha)).toEqual([C2, C3]);
+  });
+
+  it('identifies a duplicated theme by its assets/theme-sync.json', async () => {
+    await setup();
+    await sync(C1, { strategy: 'commit_changes' });
+    // The test store serves the same files for every theme: THEME_LIVE acts as a duplicate of THEME_DEV.
+    const marker = JSON.parse(w.theme.get('assets/theme-sync.json')!.value);
+    expect(marker).toMatchObject({ lastSyncedUpdate: C1, shortSha: '1111111', branch: 'main', repository: 'acme/theme' });
+    const last = (await api<Record<string, LastSynced>>('GET', '/api/themes/last-synced')).body.data;
+    expect(last[THEME_LIVE.id]).toMatchObject({ sha: C1, branch: 'main', message: 'Add custom CSS', syncId: null, syncedAt: marker.syncedOn });
+    const list = (await api<CommitsResponse>('GET', `/api/commits?branch=main&themeId=${encodeURIComponent(THEME_LIVE.id)}`)).body.data;
+    expect(list).toMatchObject({ waiting: 2, lastSynced: { sha: C1 } });
+    expect(list.items.map((i) => i.syncStatus)).toEqual(['new', 'new', 'last_synced']);
+  });
+
+  it('keeps the last synced commit of every branch in assets/theme-sync.json, also for duplicates', async () => {
+    await setup();
+    await sync(C1, { strategy: 'commit_changes' }); // main
+    // Re-map the theme to another branch (Theme mapping page), then sync from it.
+    const mapping = (await api<ThemeMappingsResponse>('GET', '/api/mappings')).body.data.items[0]!;
+    expect((await api('PUT', `/api/mappings/${mapping.id}`, { branch: 'UI-changes', confirm: true })).status).toBe(200);
+    await sync(C2, { strategy: 'commit_changes', branch: 'UI-changes' });
+    const marker = JSON.parse(w.theme.get('assets/theme-sync.json')!.value);
+    expect(marker).toMatchObject({ lastSyncedUpdate: C2, branch: 'UI-changes' }); // the latest sync on top
+    expect(Object.keys(marker.branches)).toEqual(['UI-changes', 'main']); // most recent first
+    expect(marker.branches).toMatchObject({
+      'UI-changes': { lastSyncedUpdate: C2, shortSha: '2222222', description: 'Update product template' },
+      main: { lastSyncedUpdate: C1, shortSha: '1111111', description: 'Add custom CSS' },
+    });
+
+    // THEME_LIVE serves the same files (a duplicate): both branches are recognised.
+    const onMain = (await api<CommitsResponse>('GET', `/api/commits?branch=main&themeId=${encodeURIComponent(THEME_LIVE.id)}`)).body.data;
+    expect(onMain.lastSynced).toMatchObject({ sha: C1, branch: 'main' });
+    const onFeature = (await api<CommitsResponse>('GET', `/api/commits?branch=UI-changes&themeId=${encodeURIComponent(THEME_LIVE.id)}`)).body.data;
+    expect(onFeature.lastSynced).toMatchObject({ sha: C2, branch: 'UI-changes' });
+  });
+
+  it('reads markers written before per-branch entries existed', async () => {
+    await setup();
+    w.theme.set('assets/theme-sync.json', {
+      value: JSON.stringify({ app: 'Theme Sync', lastSyncedUpdate: C2, branch: 'main', repository: 'acme/theme', syncedOn: '2026-10-01T00:00:00Z' }),
+      updatedAt: '2026-10-01T00:00:00Z',
+    });
+    const list = (await api<CommitsResponse>('GET', `/api/commits?branch=main&themeId=${encodeURIComponent(THEME_DEV.id)}`)).body.data;
+    expect(list.lastSynced).toMatchObject({ sha: C2 });
+    await sync(C3, { strategy: 'commit_changes' });
+    const marker = JSON.parse(w.theme.get('assets/theme-sync.json')!.value);
+    expect(Object.keys(marker.branches)).toEqual(['main']);
+    expect(marker.branches.main).toMatchObject({ lastSyncedUpdate: C3 });
+  });
+
+  it('tells, without an error, that the theme is already on the selected commit', async () => {
+    await setup();
+    await sync(C1, { strategy: 'commit_changes' });
+    const res = await api('POST', '/api/sync/preview', { commitSha: C1, themeId: THEME_DEV.id, branch: 'main', strategy: 'since_last_sync' });
+    expect(res.status).toBe(409);
+    expect(res.body.error.code).toBe('ALREADY_SYNCED');
+    // "Only the selected commit" can still push it again.
+    expect((await api('POST', '/api/sync/preview', { commitSha: C1, themeId: THEME_DEV.id, branch: 'main', strategy: 'commit_changes' })).status).toBe(201);
+  });
+
+  describe('multiple commits', () => {
+    const multi = (commitShas: string[], extra: Record<string, unknown> = {}) =>
+      api<SyncPreview>('POST', '/api/sync/preview', {
+        themeId: THEME_DEV.id,
+        branch: 'main',
+        strategy: 'selected_commits',
+        commitShas,
+        commitSha: commitShas.includes(C3) ? C3 : commitShas.includes(C2) ? C2 : commitShas[0],
+        ...extra,
+      });
+
+    it('combines a continuous range in branch order, each file from the commit that last changed it', async () => {
+      await setup();
+      await sync(C1, { strategy: 'commit_changes' });
+      const res = await multi([C3, C2], { allowDeletes: true }); // any order
+      expect(res.status).toBe(201);
+      const preview = res.body.data;
+      expect(preview.strategy).toBe('selected_commits');
+      expect(preview.commitsIncluded.map((c) => c.sha)).toEqual([C2, C3]);
+      expect(preview.conflicts).toEqual([]);
+      const byPath = Object.fromEntries(preview.operations.map((o) => [o.path, o]));
+      expect(byPath['snippets/size-chart.liquid']).toMatchObject({ action: 'upsert', sourceCommitSha: C2, commits: ['2222222'] });
+      expect(byPath['sections/cart.liquid']).toMatchObject({ action: 'upsert', sourceCommitSha: C3 });
+      expect(byPath['snippets/old-cart.liquid']).toMatchObject({ action: 'delete' });
+
+      await api('POST', '/api/sync', { syncId: preview.syncId, confirm: true });
+      await drain();
+      expect(w.theme.get('snippets/size-chart.liquid')!.value).toBe(F2['snippets/size-chart.liquid']);
+      expect(w.theme.get('sections/cart.liquid')!.value).toBe(F3['sections/cart.liquid']);
+      expect(w.theme.has('snippets/old-cart.liquid')).toBe(false);
+      // Every selected commit is marked as added.
+      const list = (await api<CommitsResponse>('GET', `/api/commits?branch=main&themeId=${encodeURIComponent(THEME_DEV.id)}`)).body.data;
+      expect(list.items.map((i) => i.syncStatus)).toEqual(['last_synced', 'added', 'added']);
+    });
+
+    it('takes content from the exact selected commits even when the branch moved on', async () => {
+      await setup();
+      // Branch head is C3; only C1 and C2 are selected.
+      const res = await multi([C1, C2]);
+      expect(res.status).toBe(201);
+      await api('POST', '/api/sync', { syncId: res.body.data.syncId, confirm: true });
+      await drain();
+      expect(w.theme.get('snippets/size-chart.liquid')!.value).toBe(F2['snippets/size-chart.liquid']);
+      // C3 changed sections/cart.liquid but was not selected: the theme keeps the C1 version.
+      expect(w.theme.get('sections/cart.liquid')!.value).toBe(F1['sections/cart.liquid']);
+      const refs = w.mock.calls
+        .filter((r) => r.url.includes('/contents/snippets/size-chart.liquid'))
+        .map((r) => new URL(r.url).searchParams.get('ref'));
+      // Code check (preview) and write both read the file at exactly C2, never the branch head.
+      expect(refs.length).toBeGreaterThan(0);
+      expect(new Set(refs)).toEqual(new Set([C2]));
+    });
+
+    it('explains files that overlap with an unselected commit in between', async () => {
+      await setup();
+      const C4 = '4'.repeat(40);
+      w.history.push({ sha: C4, message: 'Tweak cart again', files: { ...F3, 'sections/cart.liquid': '{% comment %}v4{% endcomment %}' } });
+      const res = await api<SyncPreview>('POST', '/api/sync/preview', {
+        themeId: THEME_DEV.id,
+        branch: 'main',
+        strategy: 'selected_commits',
+        commitShas: [C2, C4],
+        commitSha: C4,
+      });
+      expect(res.status).toBe(201);
+      expect(res.body.data.conflicts).toEqual([
+        'sections/cart.liquid: the version from 4444444 also contains the change from 3333333 "Update cart functionality", which is not selected.',
+      ]);
+      expect(res.body.data.warnings.join(' ')).toMatch(/overlap with commits that are not selected/);
+      // C3 added cart-item.liquid but C3 is not selected: it is not part of the plan.
+      expect(res.body.data.operations.map((o) => o.path)).not.toContain('snippets/cart-item.liquid');
+    });
+
+    it('rejects commits outside the branch and inconsistent requests', async () => {
+      await setup();
+      const outside = await multi([C2, 'f'.repeat(40)], { commitSha: C2 });
+      expect(outside.status).toBe(422);
+      expect(outside.body.error).toMatchObject({ code: 'VALIDATION_ERROR' });
+      // commitSha must be the newest selected commit; strategy and commitShas go together.
+      expect((await multi([C2, C3], { commitSha: C2 })).status).toBe(400);
+      expect((await api('POST', '/api/sync/preview', { themeId: THEME_DEV.id, commitSha: C3, strategy: 'selected_commits' })).status).toBe(400);
+    });
+  });
+
+  it('reports the last recorded sync and filters the history by type, status and date', async () => {
+    await setup();
+    expect((await api<SyncRun | null>('GET', `/api/sync/last?themeId=${encodeURIComponent(THEME_DEV.id)}`)).body.data).toBeNull();
+    await sync(C1, { strategy: 'commit_changes' });
+    await sync(C3, { strategy: 'full_snapshot' });
+
+    const last = (await api<SyncRun>('GET', `/api/sync/last?themeId=${encodeURIComponent(THEME_DEV.id)}&branch=main`)).body.data;
+    expect(last).toMatchObject({ commitSha: C3, strategy: 'full_snapshot', status: 'succeeded', branch: 'main' });
+    expect(last.completedAt).not.toBeNull();
+
+    const history = (q: string) => api<Paginated<SyncRun>>('GET', `/api/sync/history?${q}`).then((r) => r.body.data.items.map((i) => i.commitSha));
+    expect(await history('strategy=full_snapshot')).toEqual([C3]);
+    expect(await history('strategy=commit_changes&status=succeeded')).toEqual([C1]);
+    const today = new Date().toISOString().slice(0, 10);
+    expect(await history(`from=${today}&to=${today}`)).toHaveLength(2);
+    expect(await history('to=2000-01-01')).toEqual([]);
+    expect((await api('GET', '/api/sync/history?from=yesterday')).status).toBe(400);
+  });
+
+  it('a theme mapped to a branch again continues from its own last sync (no full sync needed)', async () => {
+    await setup();
+    // main → "abc" (THEME_DEV): sync C1.
+    await sync(C1, { strategy: 'commit_changes' });
+    const mappingId = (await api<ThemeMappingsResponse>('GET', '/api/mappings')).body.data.items[0]!.id;
+
+    // main → "xyz" (THEME_LIVE): sync C2 there.
+    const toXyz = await api<ThemeMapping>('PUT', `/api/mappings/${mappingId}`, { themeId: THEME_LIVE.id, confirm: true });
+    expect(toXyz.status).toBe(200);
+    const xyzPreview = (await api<SyncPreview>('POST', '/api/sync/preview', { commitSha: C2, themeId: THEME_LIVE.id, strategy: 'commit_changes' })).body.data;
+    await api('POST', '/api/sync', { syncId: xyzPreview.syncId, confirm: true, confirmLiveTheme: true, confirmThemeName: THEME_LIVE.name });
+    await drain();
+
+    // main → "abc" again.
+    expect((await api('PUT', `/api/mappings/${toXyz.body.data.id}`, { themeId: THEME_DEV.id, confirm: true })).status).toBe(200);
+
+    // abc still knows where it stands: last synced C1; C2 went to xyz only, so it is New for abc.
+    const list = (await api<CommitsResponse>('GET', `/api/commits?branch=main&themeId=${encodeURIComponent(THEME_DEV.id)}`)).body.data;
+    expect(list).toMatchObject({ lastSynced: { sha: C1 }, waiting: 2 });
+    expect(list.items.map((i) => [i.shortSha, i.syncStatus])).toEqual([
+      ['3333333', 'new'],
+      ['2222222', 'new'],
+      ['1111111', 'last_synced'],
+    ]);
+    const last = (await api<SyncRun>('GET', `/api/sync/last?themeId=${encodeURIComponent(THEME_DEV.id)}&branch=main`)).body.data;
+    expect(last).toMatchObject({ commitSha: C1, themeId: THEME_DEV.id });
+
+    // "From the last sync" catches abc up from C1 — C2 and C3 — without a full sync.
+    const next = (await api<SyncPreview>('POST', '/api/sync/preview', { commitSha: C3, themeId: THEME_DEV.id, strategy: 'since_last_sync' })).body.data;
+    expect(next.strategy).toBe('since_last_sync');
+    expect(next.base).toMatchObject({ sha: C1 });
+    expect(next.commitsIncluded.map((c) => c.sha)).toEqual([C2, C3]);
+  });
+
+  it('ignores a marker file from another repository', async () => {
+    await setup();
+    w.theme.set('assets/theme-sync.json', {
+      value: JSON.stringify({ lastSyncedUpdate: C2, branch: 'main', repository: 'other/repo', syncedOn: '2026-10-01T00:00:00Z' }),
+      updatedAt: '2026-10-01T00:00:00Z',
+    });
+    const list = (await api<CommitsResponse>('GET', `/api/commits?branch=main&themeId=${encodeURIComponent(THEME_DEV.id)}`)).body.data;
+    expect(list.lastSynced).toBeNull();
+  });
+});

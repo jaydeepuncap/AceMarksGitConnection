@@ -28,7 +28,14 @@ export type ApiErrorCode =
   | 'THEME_NOT_WRITABLE'
   | 'PREVIEW_EXPIRED'
   | 'LIVE_THEME_CONFIRMATION_REQUIRED'
+  | 'CODE_ERRORS'
+  | 'DIRECT_EDITS_FOUND'
+  | 'ALREADY_SYNCED'
+  | 'MAPPING_REQUIRED'
+  | 'MAPPING_CONFLICT'
   | 'UPSTREAM_TIMEOUT'
+  | 'SERVER_MISCONFIGURED'
+  | 'DATABASE_NOT_MIGRATED'
   | 'INTERNAL_ERROR';
 
 export interface ApiSuccess<T> {
@@ -69,13 +76,21 @@ export interface ShopInfo {
   canWriteThemes: boolean;
 }
 
-export const SYNC_STRATEGY_VALUES = ['commit_changes', 'full_snapshot'] as const;
+/**
+ * commit_changes   — one commit's changed files ("single commit")
+ * selected_commits — several selected commits combined ("multiple commits")
+ * since_last_sync  — every commit from the theme's last sync to the selected one
+ * full_snapshot    — every theme file at the commit ("full sync")
+ */
+export const SYNC_STRATEGY_VALUES = ['commit_changes', 'full_snapshot', 'since_last_sync', 'selected_commits'] as const;
 export type SyncStrategy = (typeof SYNC_STRATEGY_VALUES)[number];
 
 export interface SyncPreferences {
   /**
    * commit_changes – apply only the files the selected commit changed.
    * full_snapshot  – upsert every theme file present in the repository at the commit.
+   * since_last_sync – every update between the theme's last synced commit (on this
+   *                   branch) and the selected one, applied together in one step.
    */
   strategy: SyncStrategy;
   /** Apply deletions for files removed (or renamed away) in the commit. Off by default. */
@@ -87,7 +102,8 @@ export interface SyncPreferences {
 }
 
 export const DEFAULT_SYNC_PREFERENCES: SyncPreferences = {
-  strategy: 'commit_changes',
+  // Push everything from the theme's last synced commit to the selected one.
+  strategy: 'since_last_sync',
   allowDeletes: false,
   themeRoot: '',
   // Merchant customizations live in settings_data.json; overwriting it from Git
@@ -137,6 +153,11 @@ export interface GithubConnectionInfo {
 export interface GithubConnectionResponse {
   connected: boolean;
   connection: GithubConnectionInfo | null;
+  /**
+   * Set when a different GitHub account was connected: the previous account's repository selection and
+   * mappings were cleared (sync history is kept).
+   */
+  reset?: { previousAccount: string | null; repository: string | null; mappingsRemoved: number };
 }
 
 export interface CreateGithubConnectionRequest {
@@ -177,6 +198,36 @@ export interface CommitSummary {
   date: string | null;
   htmlUrl: string;
   parents: string[];
+}
+
+/** The last commit fully synced to a theme from a branch. */
+export interface LastSynced {
+  themeId: string;
+  branch: string;
+  sha: string;
+  shortSha: string;
+  message: string | null;
+  syncedAt: string;
+  syncId: string | null;
+}
+
+/**
+ * new         – newer than the theme's last synced commit on this branch (waiting)
+ * last_synced – the commit the theme was last synced to from this branch
+ * added       – already in the theme (synced before, or older than the last synced commit)
+ */
+export type CommitSyncStatus = 'new' | 'last_synced' | 'added';
+
+export interface CommitListItem extends CommitSummary {
+  syncStatus: CommitSyncStatus | null;
+}
+
+export interface CommitsResponse extends Paginated<CommitListItem> {
+  /** Present when the list was requested for a theme. */
+  lastSynced: LastSynced | null;
+  /** Commits newer than the last synced one on this branch. */
+  waiting: number;
+  waitingMore: boolean;
 }
 
 export interface CommitDetail extends CommitSummary {
@@ -259,6 +310,8 @@ export interface SyncPreviewRequest {
   commitSha: string;
   themeId: string;
   strategy?: SyncStrategy;
+  /** strategy "selected_commits": the selected commits (full SHAs, any order; all on the branch). */
+  commitShas?: string[];
   allowDeletes?: boolean;
   /** Restrict the plan to these theme paths (subset of the commit's files). */
   includePaths?: string[];
@@ -274,18 +327,55 @@ export interface SyncPlanOperation {
   size: number | null;
   blobSha: string | null;
   skipReason: string | null;
+  /** Preview only: short SHAs of the included commits that changed this file (oldest first). */
+  commits?: string[];
+  /** The commit this file's content is taken from, when not the sync's commit (multiple commits). */
+  sourceCommitSha?: string | null;
 }
 
 export interface SyncPreviewSummary {
   creates: number;
   updates: number;
   deletes: number;
+  /** Skipped for another reason than an ignore pattern (too large, protected, deletions off, …). */
   skipped: number;
+  /** Excluded by the ignore patterns in Settings (never written or deleted). */
+  ignored: number;
   total: number;
+}
+
+export interface CodeIssue {
+  path: string;
+  line: number | null;
+  message: string;
+}
+
+export interface DirectEdit {
+  path: string;
+  updatedAt: string | null;
+}
+
+/** Step 3 — automatic checks, run before anything changes. */
+export interface SyncChecks {
+  code: { status: 'passed' | 'failed'; filesChecked: number; filesDeferred: number; issues: CodeIssue[] };
+  directEdits: { status: 'passed' | 'warning' | 'skipped'; files: DirectEdit[]; note: string | null };
+}
+
+export interface IncludedCommit {
+  sha: string;
+  shortSha: string;
+  message: string;
 }
 
 export interface SyncPreview {
   syncId: string;
+  /** The theme's last synced commit on this branch (what it is updated from). */
+  base: { sha: string; shortSha: string; message: string | null } | null;
+  /** Every update the sync brings in, oldest first. */
+  commitsIncluded: IncludedCommit[];
+  /** Multiple commits: files whose content also carries changes of unselected commits in between. */
+  conflicts: string[];
+  checks: SyncChecks;
   expiresAt: string;
   repository: string;
   branch: string | null;
@@ -305,6 +395,8 @@ export interface ConfirmSyncRequest {
   confirmLiveTheme?: boolean;
   /** Required for the live theme: must equal the theme name exactly. */
   confirmThemeName?: string;
+  /** Replace files that were edited directly in Shopify since the last sync. */
+  acceptDirectEdits?: boolean;
 }
 
 export interface RetrySyncRequest {
@@ -327,6 +419,8 @@ export interface SyncRun {
   filesSucceeded: number;
   filesFailed: number;
   filesSkipped: number;
+  /** Of the skipped files, those excluded by ignore patterns. */
+  filesIgnored: number;
   errorDetails: { code: string; message: string } | null;
   attempt: number;
   initiatedAt: string;
@@ -334,6 +428,32 @@ export interface SyncRun {
   completedAt: string | null;
   /** Failed operations can be retried; upserts/deletes are idempotent. */
   canRetry: boolean;
+  /** The commit the theme was on before this sync (same branch), when known. */
+  baseSha: string | null;
+  commitsIncluded: IncludedCommit[];
+  /** Files whose previous version was saved before they changed. */
+  backedUp: number;
+  /** Deletions were enabled for this sync (used by "Run full update again"). */
+  allowDeletes: boolean;
+  /** An incomplete update with a backup can put the theme back as it was before it. */
+  canRestore: boolean;
+  /** When the backup was restored (the theme is back as it was before this update). */
+  restoredAt: string | null;
+  restoredFiles: number;
+}
+
+/**
+ * Why a file failed, in plain words:
+ *   temporary — Shopify or GitHub was busy; retrying usually works
+ *   code      — the file has a code error; the developer must fix it first
+ *   changed   — the repository no longer matches the plan; run the full update again
+ *   other     — anything else (see `detail`)
+ */
+export type FailureKind = 'temporary' | 'code' | 'changed' | 'other';
+export interface FailureInfo {
+  kind: FailureKind;
+  reason: string;
+  detail: string;
 }
 
 export interface SyncOperation {
@@ -347,6 +467,12 @@ export interface SyncOperation {
   skipReason: string | null;
   attempts: number;
   error: string | null;
+  /** Set for failed files. */
+  failure: FailureInfo | null;
+  /** When the file was last attempted (the failure time for failed files). */
+  lastAttemptAt: string | null;
+  /** Multiple commits: the commit this file was taken from. */
+  sourceCommitSha: string | null;
 }
 
 export interface SyncRunDetail extends SyncRun {
@@ -357,3 +483,61 @@ export interface HealthResponse {
   status: 'ok';
   time: string;
 }
+
+export interface IgnorePreviewRequest {
+  patterns: string[];
+}
+
+export interface IgnorePatternMatch {
+  pattern: string;
+  description: string;
+  /** Theme files on the branch that the pattern matches. */
+  matches: number;
+  examples: string[];
+}
+
+export interface IgnorePreviewResponse {
+  repository: string;
+  branch: string;
+  /** Theme files on the branch (after the theme root). */
+  themeFiles: number;
+  /** Files excluded by at least one pattern. */
+  ignoredFiles: number;
+  patterns: IgnorePatternMatch[];
+}
+
+/** A repository branch connected to a Shopify theme (one theme per branch, one branch per theme). */
+export interface ThemeMapping {
+  id: string;
+  repository: string;
+  branch: string;
+  themeId: string;
+  themeName: string;
+  createdAt: string;
+}
+
+export interface ThemeMappingsResponse {
+  items: ThemeMapping[];
+}
+
+export interface CreateThemeMappingRequest {
+  /** `owner/name`; defaults to Settings → repository. */
+  repository?: string;
+  branch: string;
+  themeId: string;
+}
+
+/** Changing a mapping replaces it (the old one stays in the audit trail). */
+export interface UpdateThemeMappingRequest {
+  branch?: string;
+  themeId?: string;
+  confirm: true;
+}
+
+/** Changed-file count of a commit (for the commit list). */
+export interface CommitStats {
+  files: number;
+  /** GitHub stopped listing at 3000 files. */
+  truncated: boolean;
+}
+export type CommitStatsResponse = Record<string, CommitStats>;

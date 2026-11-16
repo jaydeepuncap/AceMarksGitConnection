@@ -109,13 +109,23 @@ interface KeyMaterial {
 
 const aesKeyCache = new Map<string, Promise<KeyMaterial>>();
 
+export function parseKeyBytes(str: string): Uint8Array {
+  if (str.length === 32) return encoder.encode(str);
+  if (str.length === 64 && /^[0-9a-fA-F]+$/.test(str)) {
+    const bytes = new Uint8Array(32);
+    for (let i = 0; i < 32; i++) bytes[i] = parseInt(str.slice(i * 2, i * 2 + 2), 16);
+    return bytes;
+  }
+  return base64ToBytes(str);
+}
+
 function loadAesKey(b64: string): Promise<KeyMaterial> {
   let entry = aesKeyCache.get(b64);
   if (!entry) {
     entry = (async () => {
-      const raw = base64ToBytes(b64);
+      const raw = parseKeyBytes(b64);
       if (raw.byteLength !== 32) {
-        throw new Error('Encryption key must be 32 bytes (base64-encoded)');
+        throw new Error('Encryption key must be 32 bytes (base64-encoded or 32 characters)');
       }
       const id = (await sha256Hex(raw)).slice(0, 8);
       const key = await crypto.subtle.importKey('raw', raw, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);

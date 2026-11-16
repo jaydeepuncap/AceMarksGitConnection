@@ -11,11 +11,19 @@
 import type {
   ApiErrorBody,
   ApiErrorCode,
+  IgnorePreviewResponse,
+  SyncStrategy,
+  CommitStatsResponse,
+  CreateThemeMappingRequest,
+  ThemeMapping,
+  ThemeMappingsResponse,
+  UpdateThemeMappingRequest,
   ApiResponse,
   AppSettings,
   CommitDetail,
   CommitFilesResponse,
-  CommitSummary,
+  CommitsResponse,
+  LastSynced,
   ConfirmSyncRequest,
   CreateGithubConnectionRequest,
   GithubBranch,
@@ -150,6 +158,8 @@ export const api = {
   settings: {
     get: () => apiRequest<SettingsResponse>('GET', '/api/settings'),
     update: (body: UpdateSettingsRequest) => apiRequest<SettingsResponse>('PUT', '/api/settings', { body }),
+    ignorePreview: (patterns: string[]) =>
+      apiRequest<IgnorePreviewResponse>('POST', '/api/settings/ignore-preview', { body: { patterns } }),
   },
   github: {
     connection: () => apiRequest<GithubConnectionResponse>('GET', '/api/github/connection'),
@@ -160,26 +170,53 @@ export const api = {
       apiRequest<Paginated<GithubRepository>>('GET', '/api/github/repositories', { query }),
     branches: (query: { repository?: string; page?: number; perPage?: number } = {}) =>
       apiRequest<Paginated<GithubBranch>>('GET', '/api/github/branches', { query }),
+    repository: (repository: string) => apiRequest<GithubRepository>('GET', '/api/github/repository', { query: { repository } }),
+    branch: (name: string, repository?: string) =>
+      apiRequest<GithubBranch>('GET', '/api/github/branch', { query: { name, repository } }),
+  },
+  mappings: {
+    list: () => apiRequest<ThemeMappingsResponse>('GET', '/api/mappings'),
+    create: (body: CreateThemeMappingRequest) => apiRequest<ThemeMapping>('POST', '/api/mappings', { body }),
+    update: (id: string, body: UpdateThemeMappingRequest) =>
+      apiRequest<ThemeMapping>('PUT', `/api/mappings/${encodeURIComponent(id)}`, { body }),
+    remove: (id: string) => apiRequest<ThemeMapping>('DELETE', `/api/mappings/${encodeURIComponent(id)}`, { body: { confirm: true } }),
   },
   themes: {
     list: (refresh = false) => apiRequest<ShopifyTheme[]>('GET', '/api/themes', { query: { refresh: refresh ? 1 : undefined } }),
+    lastSynced: () => apiRequest<Record<string, LastSynced>>('GET', '/api/themes/last-synced'),
   },
   commits: {
-    list: (query: { repository?: string; branch?: string; page?: number; perPage?: number; path?: string }) =>
-      apiRequest<Paginated<CommitSummary>>('GET', '/api/commits', { query }),
+    list: (query: { repository?: string; branch?: string; page?: number; perPage?: number; path?: string; themeId?: string }) =>
+      apiRequest<CommitsResponse>('GET', '/api/commits', { query }),
     get: (sha: string, repository?: string) =>
       apiRequest<CommitDetail>('GET', `/api/commits/${encodeURIComponent(sha)}`, { query: { repository } }),
     files: (sha: string, query: { repository?: string; page?: number; perPage?: number } = {}) =>
       apiRequest<CommitFilesResponse>('GET', `/api/commits/${encodeURIComponent(sha)}/files`, { query }),
+    stats: (shas: string[], repository?: string) =>
+      apiRequest<CommitStatsResponse>('GET', '/api/commits/stats', { query: { shas: shas.join(','), repository } }),
   },
   sync: {
     preview: (body: SyncPreviewRequest) => apiRequest<SyncPreview>('POST', '/api/sync/preview', { body }),
     confirm: (body: ConfirmSyncRequest) => apiRequest<SyncRun>('POST', '/api/sync', { body }),
-    history: (query: { page?: number; perPage?: number; status?: SyncStatus } = {}) =>
+    history: (
+      query: {
+        page?: number;
+        perPage?: number;
+        status?: SyncStatus;
+        themeId?: string;
+        branch?: string;
+        strategy?: SyncStrategy;
+        from?: string;
+        to?: string;
+      } = {},
+    ) =>
       apiRequest<Paginated<SyncRun>>('GET', '/api/sync/history', { query }),
     get: (id: string) => apiRequest<SyncRunDetail>('GET', `/api/sync/history/${encodeURIComponent(id)}`),
     retry: (id: string, body: RetrySyncRequest = {}) =>
       apiRequest<SyncRun>('POST', `/api/sync/history/${encodeURIComponent(id)}/retry`, { body }),
+    last: (query: { themeId: string; branch?: string }) => apiRequest<SyncRun | null>('GET', '/api/sync/last', { query }),
+    restore: (id: string, body: RetrySyncRequest = {}) =>
+      apiRequest<SyncRun>('POST', `/api/sync/history/${encodeURIComponent(id)}/restore`, { body }),
   },
 };
 

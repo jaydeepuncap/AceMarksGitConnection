@@ -1,6 +1,6 @@
 import { encryptSecret } from '../../worker/lib/crypto';
 import { githubTokenAad } from '../../worker/lib/clients';
-import { getDb, upsertGithubConnection, upsertSettings } from '../../worker/lib/database';
+import { createMapping, getDb, upsertGithubConnection, upsertSettings } from '../../worker/lib/database';
 import { storeOfflineToken } from '../../worker/lib/sessions';
 import type { Env } from '../../worker/env';
 
@@ -26,7 +26,7 @@ export async function seedShop(env: Env, shopDomain: string, opts: { github?: bo
       tokenExpiresAt: null,
       lastVerifiedAt: new Date(),
     });
-    await upsertSettings(db, shop.id, { defaultRepository: 'acme/theme', defaultBranch: 'main' });
+    await upsertSettings(db, shop.id, { defaultRepository: 'acme/theme', defaultBranch: 'main', githubAccount: 'octocat' });
   }
   return shop;
 }
@@ -42,3 +42,14 @@ export const THEME_DEV = {
 };
 
 export const THEME_LIVE = { ...THEME_DEV, id: 'gid://shopify/OnlineStoreTheme/222', name: 'Live theme', role: 'MAIN' };
+
+/** Maps `branch` of acme/theme to a theme (what the Theme mapping page does). */
+export async function seedMapping(
+  env: Env,
+  shopId: string,
+  theme: { id: string; name: string },
+  branch = 'main',
+  repository = 'acme/theme',
+) {
+  return createMapping(getDb(env.DB), shopId, { repository, branch, themeId: theme.id, themeName: theme.name, createdBy: null });
+}

@@ -12,6 +12,8 @@
  *   DELETE /api/github/connection
  *   GET    /api/github/repositories   ?page&perPage&q
  *   GET    /api/github/branches       ?repository=owner/name&page&perPage
+ *   GET    /api/github/branch         ?repository=owner/name&name=main   one branch and its newest commit
+ *   GET    /api/github/repository     ?repository=owner/name             one repository (access verified)
  */
 import { Hono } from 'hono';
 import type {
@@ -29,6 +31,9 @@ import {
   getDb,
   getGithubConnection,
   getSettings,
+  getSettingsGithubAccount,
+  reconcileGithubAccount,
+  removeMappingsExcept,
   toGithubConnectionDto,
   upsertGithubConnection,
   upsertSettings,
@@ -36,6 +41,8 @@ import {
 import { GitHubClient } from '../lib/github-client';
 import { ApiError, ok } from '../lib/response';
 import {
+  branchQuerySchema,
+  repositoryQuerySchema,
   branchesQuerySchema,
   createGithubConnectionSchema,
   parseOrThrow,
@@ -46,6 +53,7 @@ import {
 
 export const githubRoutes = new Hono<AppEnv>()
   .get('/connection', async (c) => {
+    await reconcileGithubAccount(getDb(c.env.DB), c.get('auth').shop.id);
     const connection = await getGithubConnection(getDb(c.env.DB), c.get('auth').shop.id);
     return ok<GithubConnectionResponse>(c, {
       connected: !!connection,
@@ -75,6 +83,20 @@ export const githubRoutes = new Hono<AppEnv>()
     }
 
     const db = getDb(c.env.DB);
+    // The repository and mappings belong to the account that set them up. Another account (or an
+    // unrecorded one after a disconnect) starts clean; replacing the token of the same account keeps them.
+    const before = await getSettings(db, shop.id);
+    const previousAccount = await getSettingsGithubAccount(db, shop.id);
+    const sameAccount = !!previousAccount && previousAccount.toLowerCase() === user.login.toLowerCase();
+    let reset: GithubConnectionResponse['reset'];
+    if (!sameAccount) {
+      const mappingsRemoved = await removeMappingsExcept(db, shop.id, null, `github:${user.login}`);
+      if (before.defaultRepository || mappingsRemoved > 0) {
+        reset = { previousAccount, repository: before.defaultRepository, mappingsRemoved };
+      }
+      await upsertSettings(db, shop.id, { defaultRepository: null, defaultBranch: null, githubAccount: user.login });
+    }
+
     const connection = await upsertGithubConnection(db, shop.id, {
       authType: body.token.startsWith('github_pat_') ? 'fine_grained_pat' : 'classic_pat',
       accountLogin: user.login,
@@ -94,10 +116,16 @@ export const githubRoutes = new Hono<AppEnv>()
       }
     }
 
-    logger.info('github.connected', { account: user.login, authType: connection.authType, repository: repo?.fullName });
+    logger.info('github.connected', {
+      account: user.login,
+      authType: connection.authType,
+      repository: repo?.fullName,
+      accountChanged: !sameAccount,
+      mappingsRemoved: reset?.mappingsRemoved ?? 0,
+    });
     return ok<GithubConnectionResponse>(
       c,
-      { connected: true, connection: toGithubConnectionDto(connection) },
+      { connected: true, connection: toGithubConnectionDto(connection), ...(reset ? { reset } : {}) },
       'GitHub connected',
       201,
     );
@@ -135,4 +163,16 @@ export const githubRoutes = new Hono<AppEnv>()
     const { owner, repo } = await resolveRepository(c, connection, query.repository);
     const result = await client.listBranches(owner, repo, query.page, query.perPage);
     return ok<Paginated<GithubBranch>>(c, { ...result, page: query.page, perPage: query.perPage });
+  })
+  .get('/branch', async (c) => {
+    const query = parseOrThrow(branchQuerySchema, c.req.query());
+    const { client, connection } = await githubClient(c);
+    const { owner, repo } = await resolveRepository(c, connection, query.repository);
+    return ok<GithubBranch>(c, await client.getBranch(owner, repo, query.name));
+  })
+  .get('/repository', async (c) => {
+    const query = parseOrThrow(repositoryQuerySchema, c.req.query());
+    const { client } = await githubClient(c);
+    const { owner, repo } = splitRepository(query.repository);
+    return ok<GithubRepository>(c, await client.verifyRepositoryAccess(owner, repo));
   });

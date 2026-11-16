@@ -19,9 +19,13 @@ describe('api client', () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
-        respond(401, { success: false, error: { code: 'UNAUTHORIZED', message: 'expired' } }, {
-          'X-Shopify-Retry-Invalid-Session-Request': '1',
-        }),
+        respond(
+          401,
+          { success: false, error: { code: 'UNAUTHORIZED', message: 'expired' } },
+          {
+            'X-Shopify-Retry-Invalid-Session-Request': '1',
+          },
+        ),
       )
       .mockResolvedValueOnce(respond(200, { success: true, data: 'second' }));
     vi.stubGlobal('fetch', fetchMock);
@@ -34,16 +38,28 @@ describe('api client', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async () =>
-        respond(429, { success: false, error: { code: 'RATE_LIMITED', message: 'slow down', requestId: 'r-1' } }, { 'Retry-After': '60' }),
+        respond(
+          429,
+          { success: false, error: { code: 'RATE_LIMITED', message: 'slow down', requestId: 'r-1' } },
+          { 'Retry-After': '60' },
+        ),
       ),
     );
     const err = (await apiRequest('POST', '/api/sync', { body: {} }).catch((e) => e)) as ApiClientError;
     expect(err).toBeInstanceOf(ApiClientError);
-    expect(err).toMatchObject({ status: 429, code: 'RATE_LIMITED', message: 'slow down', requestId: 'r-1', retryAfter: 60 });
+    expect(err).toMatchObject({
+      status: 429,
+      code: 'RATE_LIMITED',
+      message: 'slow down',
+      requestId: 'r-1',
+      retryAfter: 60,
+    });
   });
 
   it('never auto-retries failed writes on 5xx', async () => {
-    const fetchMock = vi.fn(async () => respond(500, { success: false, error: { code: 'INTERNAL_ERROR', message: 'boom' } }));
+    const fetchMock = vi.fn(async () =>
+      respond(500, { success: false, error: { code: 'INTERNAL_ERROR', message: 'boom' } }),
+    );
     vi.stubGlobal('fetch', fetchMock);
     await expect(apiRequest('POST', '/api/sync', { body: {} })).rejects.toMatchObject({ status: 500 });
     expect(fetchMock).toHaveBeenCalledTimes(1);

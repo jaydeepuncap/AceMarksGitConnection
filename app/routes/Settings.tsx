@@ -1,18 +1,35 @@
 import { useCallback, useEffect, useState } from 'react';
 import { AppLayout } from '../components/AppLayout';
 import { ErrorBanner } from '../components/ErrorBanner';
+import { IgnorePatternsEditor } from '../components/IgnorePatternsEditor';
 import { LoadingState } from '../components/LoadingState';
 import { api } from '../lib/api-client';
 import { showToast } from '../lib/app-bridge';
 import { formatDate } from '../lib/format';
-import { useApiQuery, useMutation, useNavigateHandler } from '../lib/hooks';
-import type { SyncStrategy, UpdateSettingsRequest } from '../lib/types';
+import { useApiQuery, useMutation } from '../lib/hooks';
+import type { GithubConnectionResponse, UpdateSettingsRequest } from '../lib/types';
+import { ignorePatternError } from '../../shared/theme-paths';
+import { validateGithubToken, validateRepository } from '../lib/validation';
 import {
-  parseIgnorePatterns,
-  validateGithubToken,
-  validateRepository,
-  validateThemeRootInput,
-} from '../lib/validation';
+  Badge,
+  Banner,
+  Box,
+  Button,
+  Icon,
+  Link,
+  Modal,
+  Option,
+  Paragraph,
+  PasswordField,
+  Section,
+  Select,
+  Stack,
+  Text,
+  TextField,
+} from '../components/ui';
+
+/** Select value for "no choice" — an empty option value is not reliable in <Select>. */
+const NONE = '__none__';
 
 function GithubConnectionSection({ onChanged }: { onChanged: () => void }) {
   const connection = useApiQuery(() => api.github.connection(), []);
@@ -21,6 +38,8 @@ function GithubConnectionSection({ onChanged }: { onChanged: () => void }) {
   const [touched, setTouched] = useState(false);
   const connect = useMutation(api.github.connect);
   const disconnect = useMutation(api.github.disconnect);
+  // Set when another account was connected and the previous account's repository and mappings were cleared.
+  const [reset, setReset] = useState<GithubConnectionResponse['reset'] | null>(null);
 
   const tokenError = touched ? validateGithubToken(token) : null;
   const repoError = touched && repository.trim() ? validateRepository(repository) : null;
@@ -33,14 +52,17 @@ function GithubConnectionSection({ onChanged }: { onChanged: () => void }) {
       setToken(''); // never keep the token in UI state longer than needed
       setTouched(false);
       connection.setData(result);
-      showToast('GitHub connected');
+      setReset(result.reset ?? null);
+      showToast(`GitHub connected as ${result.connection?.accountLogin ?? 'new account'}`);
       onChanged();
     }
   };
 
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const remove = async () => {
     const result = await disconnect.run();
     if (result) {
+      setConfirmOpen(false);
       connection.setData(result);
       showToast('GitHub disconnected');
       onChanged();
@@ -49,49 +71,56 @@ function GithubConnectionSection({ onChanged }: { onChanged: () => void }) {
 
   const info = connection.data?.connection;
   return (
-    <s-section heading="GitHub connection">
+    <Section heading="GitHub connection">
       {connection.data && (
-        <s-badge slot="secondary-actions" tone={connection.data.connected ? 'success' : 'caution'}>
+        <Badge slot="secondary-actions" tone={connection.data.connected ? 'success' : 'caution'}>
           {connection.data.connected ? 'Connected' : 'Not connected'}
-        </s-badge>
+        </Badge>
       )}
-      <s-stack gap="base">
+      <Stack gap="base">
         <ErrorBanner error={connection.error ?? connect.error ?? disconnect.error} onDismiss={connect.clearError} />
-
-        {info && (
-          <s-stack gap="small-200">
-            <s-paragraph>
-              Account <s-text type="strong">{info.accountLogin}</s-text> ·{' '}
-              {info.authType === 'fine_grained_pat' ? 'fine-grained token' : 'classic token'}
-            </s-paragraph>
-            <s-text color="subdued">
-              Verified {formatDate(info.lastVerifiedAt)}
-              {info.tokenExpiresAt ? ` · token expires ${formatDate(info.tokenExpiresAt)}` : ''}
-            </s-text>
-            <s-stack direction="inline">
-              <s-button tone="critical" loading={disconnect.pending} onClick={remove}>
-                Disconnect
-              </s-button>
-            </s-stack>
-          </s-stack>
+        {reset && (
+          <Banner tone="info" heading="Started fresh for the new account" dismissible onDismiss={() => setReset(null)}>
+            <Paragraph>
+              {`${reset.previousAccount ? `The repository and mappings set up with ${reset.previousAccount}` : 'The previous repository and mappings'}${reset.repository ? ` (${reset.repository}` : ''}${reset.repository ? `, ${reset.mappingsRemoved} mapping(s))` : ` (${reset.mappingsRemoved} mapping(s))`} were cleared. Sync history is kept. Choose this account's repository below, then map its branches to themes.`}
+            </Paragraph>
+          </Banner>
         )}
 
-        <s-paragraph color="subdued">
+        {info && (
+          <Stack gap="small-200">
+            <Paragraph>
+              Account <Text type="strong">{info.accountLogin}</Text> ·{' '}
+              {info.authType === 'fine_grained_pat' ? 'fine-grained token' : 'classic token'}
+            </Paragraph>
+            <Text color="subdued">
+              Verified {formatDate(info.lastVerifiedAt)}
+              {info.tokenExpiresAt ? ` · token expires ${formatDate(info.tokenExpiresAt)}` : ''}
+            </Text>
+            <Stack direction="inline">
+              <Button tone="critical" loading={disconnect.pending} onClick={() => setConfirmOpen(true)}>
+                Disconnect
+              </Button>
+            </Stack>
+          </Stack>
+        )}
+
+        <Paragraph color="subdued">
           Create a{' '}
-          <s-link href="https://github.com/settings/personal-access-tokens/new" target="_blank">
+          <Link href="https://github.com/settings/personal-access-tokens/new" target="_blank">
             fine-grained personal access token
-          </s-link>{' '}
-          limited to your theme repository with Contents: Read-only and Metadata: Read-only. The token is encrypted
-          on the server and is never shown again.
-        </s-paragraph>
-        <s-password-field
+          </Link>{' '}
+          limited to your theme repository with Contents: Read-only and Metadata: Read-only. The token is encrypted on
+          the server and is never shown again.
+        </Paragraph>
+        <PasswordField
           label={info ? 'Replace token' : 'Personal access token'}
           value={token}
           autocomplete="off"
           error={tokenError ?? undefined}
           onInput={(event) => setToken(event.currentTarget.value)}
         />
-        <s-text-field
+        <TextField
           label="Repository (optional)"
           placeholder="owner/name"
           value={repository}
@@ -100,77 +129,105 @@ function GithubConnectionSection({ onChanged }: { onChanged: () => void }) {
           error={repoError ?? undefined}
           onInput={(event) => setRepository(event.currentTarget.value)}
         />
-        <s-stack direction="inline">
-          <s-button variant="primary" loading={connect.pending} onClick={submit}>
+        <Stack direction="inline">
+          <Button variant="primary" loading={connect.pending} onClick={submit}>
             {info ? 'Update connection' : 'Connect GitHub'}
-          </s-button>
-        </s-stack>
-      </s-stack>
-    </s-section>
+          </Button>
+        </Stack>
+      </Stack>
+      <DisconnectModal
+        open={confirmOpen}
+        account={info?.accountLogin ?? ''}
+        pending={disconnect.pending}
+        onClose={() => setConfirmOpen(false)}
+        onConfirm={remove}
+      />
+    </Section>
+  );
+}
+
+function DisconnectModal({
+  open,
+  account,
+  pending,
+  onClose,
+  onConfirm,
+}: {
+  open: boolean;
+  account: string;
+  pending: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <Modal id="disconnect-github-modal" open={open} heading="Disconnect GitHub?" onHide={onClose}>
+      <Paragraph>
+        {`The saved token for ${account} is deleted. Syncs stop until you connect again. Theme mappings, ignore settings and the sync history are kept.`}
+      </Paragraph>
+      <Button slot="primary-action" variant="primary" tone="critical" loading={pending} onClick={onConfirm}>
+        Disconnect
+      </Button>
+      <Button slot="secondary-actions" onClick={onClose}>
+        Cancel
+      </Button>
+    </Modal>
   );
 }
 
 export default function Settings() {
-  const go = useNavigateHandler();
   const settingsQuery = useApiQuery(() => api.settings.get(), []);
-  const themesQuery = useApiQuery(() => api.themes.list(), []);
   const githubQuery = useApiQuery(() => api.github.connection(), []);
   const save = useMutation(api.settings.update);
 
   const [repository, setRepository] = useState('');
-  const [branch, setBranch] = useState('');
-  const [themeId, setThemeId] = useState('');
-  const [strategy, setStrategy] = useState<SyncStrategy>('commit_changes');
-  const [allowDeletes, setAllowDeletes] = useState(false);
-  const [themeRoot, setThemeRoot] = useState('');
-  const [ignoreText, setIgnoreText] = useState('');
+  const [ignorePatterns, setIgnorePatterns] = useState<string[]>([]);
 
   const settings = settingsQuery.data?.settings;
   useEffect(() => {
     if (!settings) return;
     setRepository(settings.defaultRepository ?? '');
-    setBranch(settings.defaultBranch ?? '');
-    setThemeId(settings.defaultThemeId ?? '');
-    setStrategy(settings.syncPreferences.strategy);
-    setAllowDeletes(settings.syncPreferences.allowDeletes);
-    setThemeRoot(settings.syncPreferences.themeRoot);
-    setIgnoreText(settings.syncPreferences.ignorePatterns.join('\n'));
+    setIgnorePatterns(settings.syncPreferences.ignorePatterns);
   }, [settings]);
 
   const connected = !!githubQuery.data?.connected;
-  const repoValid = repository.trim() !== '' && !validateRepository(repository);
-  const branchesQuery = useApiQuery(
-    () => api.github.branches({ repository: repository.trim(), perPage: 100 }),
-    [repoValid ? repository.trim() : ''],
-    repoValid && connected,
+  const savedRepository = settings?.defaultRepository ?? '';
+  // Details of the saved repository, shown under the choice.
+  const repoInfo = useApiQuery(
+    () => api.github.repository(savedRepository),
+    [savedRepository, connected],
+    !!savedRepository && connected,
   );
 
   const repoError = repository.trim() ? validateRepository(repository) : null;
-  const rootError = validateThemeRootInput(themeRoot);
-  const ignore = parseIgnorePatterns(ignoreText);
-  const invalid = !!(repoError || rootError || ignore.error);
+  const ignoreInvalid = ignorePatterns.some((p, i) => !!ignorePatternError(p) || ignorePatterns.indexOf(p) !== i);
+  const invalid = !!(repoError || ignoreInvalid);
+  // Reload the list whenever the connected account or token changes, not only on connect/disconnect.
+  const connectionKey = `${githubQuery.data?.connection?.accountLogin ?? ''}:${githubQuery.data?.connection?.lastVerifiedAt ?? ''}`;
+  const reposQuery = useApiQuery(
+    () => api.github.repositories({ perPage: 100 }),
+    [connected, connectionKey],
+    connected,
+  );
+  const repos = reposQuery.data?.items ?? [];
 
   const onSave = useCallback(async () => {
     if (invalid) return;
     const body: UpdateSettingsRequest = {
-      syncPreferences: { strategy, allowDeletes, themeRoot, ignorePatterns: ignore.patterns },
+      syncPreferences: { ignorePatterns: ignorePatterns.map((p) => p.trim()) },
     };
-    if (repository.trim() !== (settings?.defaultRepository ?? '') || branch !== (settings?.defaultBranch ?? '')) {
+    // Each mapping chooses its own branch, so only the repository is saved here.
+    if (repository.trim() !== savedRepository) {
       body.defaultRepository = repository.trim() || null;
-      body.defaultBranch = repository.trim() ? branch || null : null;
+      body.defaultBranch = null;
     }
-    if (themeId !== (settings?.defaultThemeId ?? '')) body.defaultThemeId = themeId || null;
     const result = await save.run(body);
     if (result) {
       settingsQuery.setData(result);
       showToast('Settings saved');
     }
-  }, [invalid, strategy, allowDeletes, themeRoot, ignore.patterns, repository, branch, themeId, settings, save, settingsQuery]);
+  }, [invalid, ignorePatterns, repository, savedRepository, save, settingsQuery]);
 
   if (settingsQuery.loading && !settingsQuery.data) return <LoadingState title="Settings" />;
-
-  const branches = branchesQuery.data?.items ?? [];
-  const selectedTheme = themesQuery.data?.find((t) => t.id === themeId);
 
   return (
     <AppLayout
@@ -190,99 +247,70 @@ export default function Settings() {
         }}
       />
 
-      <s-section heading="Repository">
-        <s-button slot="secondary-actions" variant="tertiary" disabled={!connected} onClick={go('/repositories')}>
-          Browse repositories
-        </s-button>
-        <s-grid gridTemplateColumns="repeat(auto-fit, minmax(240px, 1fr))" gap="base">
-          <s-text-field
-            label="Default repository"
-            placeholder="owner/name"
-            value={repository}
-            autocomplete="off"
+      <Section heading="Repository">
+        <Stack gap="base">
+          <Paragraph color="subdued">
+            The app syncs from one repository. Each branch is connected to its own theme on the Theme mapping page.
+          </Paragraph>
+          <Select
+            label="Repository"
+            value={repository || NONE}
+            disabled={!connected || reposQuery.loading}
+            details={
+              reposQuery.error
+                ? reposQuery.error.message
+                : !connected
+                  ? 'Connect GitHub first.'
+                  : 'Repositories the connected token can read. Access is verified again when you save.'
+            }
             error={repoError ?? undefined}
-            disabled={!connected}
-            onInput={(event) => setRepository(event.currentTarget.value)}
-          />
-          <s-select
-            label="Default branch"
-            value={branch}
-            disabled={!repoValid || branchesQuery.loading}
-            details={branchesQuery.error ? branchesQuery.error.message : undefined}
-            onChange={(event) => setBranch(event.currentTarget.value)}
+            onChange={(event) => setRepository(event.currentTarget.value === NONE ? '' : event.currentTarget.value)}
           >
-            <s-option value="">Repository default</s-option>
-            {branches.map((b) => (
-              <s-option key={b.name} value={b.name}>
-                {b.name}
-              </s-option>
+            <Option value={NONE}>No repository</Option>
+            {repos.map((r) => (
+              <Option key={r.fullName} value={r.fullName}>
+                {`${r.fullName}${r.private ? ' (private)' : ''}`}
+              </Option>
             ))}
-            {branch && !branches.some((b) => b.name === branch) && <s-option value={branch}>{branch}</s-option>}
-          </s-select>
-        </s-grid>
-      </s-section>
-
-      <s-section heading="Default Shopify theme">
-        <s-stack gap="base">
-          <ErrorBanner error={themesQuery.error} onRetry={themesQuery.reload} heading="Themes could not be loaded" />
-          <s-select label="Target theme" value={themeId} onChange={(event) => setThemeId(event.currentTarget.value)}>
-            <s-option value="">No default theme</s-option>
-            {(themesQuery.data ?? []).map((t) => (
-              <s-option key={t.id} value={t.id} disabled={!t.writable}>
-                {`${t.name}${t.isLive ? ' (live)' : ''}${t.writable ? '' : ' — read-only'}`}
-              </s-option>
-            ))}
-          </s-select>
-          {selectedTheme?.isLive && (
-            <s-banner tone="warning">
-              <s-paragraph>This is the live theme. Every sync to it will require an extra confirmation.</s-paragraph>
-            </s-banner>
+            {repository && !repos.some((r) => r.fullName === repository) && (
+              <Option value={repository}>{repository}</Option>
+            )}
+          </Select>
+          {repository.trim() !== savedRepository && savedRepository && (
+            <Banner tone="warning" heading="Changing the repository">
+              <Paragraph>
+                {`The app syncs from one repository, so the mappings of ${savedRepository} are removed when you save. Their sync history is kept, and mapping a theme again later continues where it left off.`}
+              </Paragraph>
+            </Banner>
           )}
-        </s-stack>
-      </s-section>
+          {repoInfo.data && repository.trim() === savedRepository && (
+            <Box padding="small" background="subdued" borderRadius="base">
+              <Stack direction="inline" gap="small-200" alignItems="center" justifyContent="space-between">
+                <Stack direction="inline" gap="small-200" alignItems="center">
+                  <Icon type="git-repository" />
+                  <Text type="strong">{repoInfo.data.fullName}</Text>
+                  <Badge tone="neutral">{repoInfo.data.private ? 'Private' : 'Public'}</Badge>
+                  <Badge tone={repoInfo.data.permissions.push ? 'info' : 'neutral'}>
+                    {repoInfo.data.permissions.push ? 'Read & write' : 'Read only'}
+                  </Badge>
+                  <Text color="subdued">{`Default branch ${repoInfo.data.defaultBranch}`}</Text>
+                </Stack>
+                <Link href={repoInfo.data.htmlUrl} target="_blank">
+                  View on GitHub
+                </Link>
+              </Stack>
+            </Box>
+          )}
+        </Stack>
+      </Section>
 
-      <s-section heading="Sync preferences">
-        <s-stack gap="base">
-          <s-choice-list
-            label="Strategy"
-            values={[strategy]}
-            onChange={(event) => setStrategy((event.currentTarget.values[0] as SyncStrategy) ?? 'commit_changes')}
-          >
-            <s-choice value="commit_changes" selected={strategy === 'commit_changes'}>
-              Commit changes
-              <s-text slot="details">Apply only the files changed in the selected commit.</s-text>
-            </s-choice>
-            <s-choice value="full_snapshot" selected={strategy === 'full_snapshot'}>
-              Full snapshot
-              <s-text slot="details">
-                Write every theme file as it exists at the selected commit. Never deletes files.
-              </s-text>
-            </s-choice>
-          </s-choice-list>
-          <s-checkbox
-            label="Allow deletions"
-            details="Delete theme files that the commit removed or renamed. Protected files (layout/theme.liquid, config/*) are never deleted."
-            checked={allowDeletes}
-            onChange={(event) => setAllowDeletes(event.currentTarget.checked)}
-          />
-          <s-text-field
-            label="Theme root folder"
-            placeholder="e.g. theme (leave empty if the theme is at the repository root)"
-            value={themeRoot}
-            autocomplete="off"
-            error={rootError ?? undefined}
-            onInput={(event) => setThemeRoot(event.currentTarget.value)}
-          />
-          <s-text-area
-            label="Ignore patterns"
-            details="One glob per line (theme paths). * matches within a folder, ** across folders."
-            value={ignoreText}
-            rows={4}
-            error={ignore.error ?? undefined}
-            onInput={(event) => setIgnoreText(event.currentTarget.value)}
-          />
-        </s-stack>
-      </s-section>
+      <Section heading="Ignore files">
+        <IgnorePatternsEditor
+          patterns={ignorePatterns}
+          onChange={setIgnorePatterns}
+          canPreview={connected && !!settings?.defaultRepository}
+        />
+      </Section>
     </AppLayout>
   );
 }

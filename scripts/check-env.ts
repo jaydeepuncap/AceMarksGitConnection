@@ -32,8 +32,11 @@ if (!prod) {
       if (!value || value.startsWith('replace-with')) errors.push(`${name} is not set in .dev.vars`);
     }
     const key = vars.ENCRYPTION_KEY;
-    if (key && !key.startsWith('replace-with') && Buffer.from(key, 'base64').length !== 32) {
-      errors.push('ENCRYPTION_KEY must be 32 random bytes encoded as base64');
+    if (key && !key.startsWith('replace-with')) {
+      const len = key.length === 32 || (key.length === 64 && /^[0-9a-fA-F]+$/.test(key)) ? 32 : Buffer.from(key, 'base64').length;
+      if (len !== 32) {
+        errors.push('ENCRYPTION_KEY must be 32 bytes (or 32 characters, or base64-encoded)');
+      }
     }
     if (process.env.SHOPIFY_API_KEY && vars.SHOPIFY_API_KEY && process.env.SHOPIFY_API_KEY !== vars.SHOPIFY_API_KEY) {
       warnings.push('SHOPIFY_API_KEY from Shopify CLI differs from .dev.vars — session tokens will fail verification.');

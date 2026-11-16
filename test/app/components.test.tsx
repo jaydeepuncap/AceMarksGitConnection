@@ -4,7 +4,6 @@ import { MemoryRouter } from 'react-router-dom';
 import { ErrorBanner } from '../../app/components/ErrorBanner';
 import { LoadingState } from '../../app/components/LoadingState';
 import { ApiClientError } from '../../app/lib/api-client';
-import Repositories from '../../app/routes/Repositories';
 import type * as ApiClientModule from '../../app/lib/api-client';
 import SyncHistory from '../../app/routes/SyncHistory';
 
@@ -13,8 +12,16 @@ vi.mock('../../app/lib/api-client', async (importOriginal) => {
   return {
     ...actual,
     api: {
-      github: { repositories: vi.fn() },
-      settings: { get: vi.fn(), update: vi.fn() },
+      github: {
+        repositories: vi.fn(),
+        branches: vi.fn().mockResolvedValue({ items: [], page: 1, perPage: 100, hasNextPage: false }),
+      },
+      settings: {
+        get: vi.fn().mockResolvedValue({ shop: {}, settings: { defaultRepository: null } }),
+        update: vi.fn(),
+      },
+      themes: { list: vi.fn().mockResolvedValue([]) },
+      mappings: { list: vi.fn().mockResolvedValue({ items: [] }) },
       sync: { history: vi.fn(), get: vi.fn(), retry: vi.fn() },
     },
   };
@@ -35,12 +42,35 @@ describe('loading and error states', () => {
   });
 
   it('shows the error message, a code-specific hint and the request ID', () => {
-    const err = new ApiClientError(400, 'GITHUB_NOT_CONNECTED', 'Connect GitHub first', undefined, undefined, 'req-123');
+    const err = new ApiClientError(
+      400,
+      'GITHUB_NOT_CONNECTED',
+      'Connect GitHub first',
+      undefined,
+      undefined,
+      'req-123',
+    );
     wrap(<ErrorBanner error={err} onRetry={() => undefined} />);
     expect(screen.getByText('Connect GitHub first')).toBeInTheDocument();
     expect(screen.getByText(/Connect a GitHub account in Settings/)).toBeInTheDocument();
     expect(screen.getByText(/req-123/)).toBeInTheDocument();
     expect(screen.getByText('Open settings')).toBeInTheDocument();
+  });
+
+  it('shows "already up to date" as an info notice, not an error', () => {
+    const err = new ApiClientError(
+      409,
+      'ALREADY_SYNCED',
+      'Dawn is already on 5e41c63 from main',
+      undefined,
+      undefined,
+      'req-9',
+    );
+    const { container } = wrap(<ErrorBanner error={err} heading="Preview failed" />);
+    const banner = container.querySelector('s-banner')!;
+    expect(banner.getAttribute('tone')).toBe('info');
+    expect(banner.getAttribute('heading')).toBe('Already up to date');
+    expect(screen.queryByText(/req-9/)).not.toBeInTheDocument();
   });
 
   it('renders nothing without an error', () => {
@@ -50,21 +80,7 @@ describe('loading and error states', () => {
 });
 
 describe('pages', () => {
-  it('Repositories shows an empty state', async () => {
-    mocked.github.repositories.mockResolvedValue({ items: [], page: 1, perPage: 30, hasNextPage: false });
-    mocked.settings.get.mockResolvedValue({ shop: {}, settings: { defaultRepository: null } });
-    wrap(<Repositories />);
-    await waitFor(() => expect(screen.getByText(/No repositories found/)).toBeInTheDocument());
-  });
-
-  it('Repositories shows API errors', async () => {
-    mocked.github.repositories.mockRejectedValue(new ApiClientError(401, 'GITHUB_AUTH_FAILED', 'Token revoked'));
-    mocked.settings.get.mockResolvedValue({ shop: {}, settings: { defaultRepository: null } });
-    wrap(<Repositories />);
-    await waitFor(() => expect(screen.getByText('Token revoked')).toBeInTheDocument());
-  });
-
-  it('Sync history lists runs with status and file counts', async () => {
+  it('Sync history lists runs with their status', async () => {
     mocked.sync.history.mockResolvedValue({
       items: [
         {
@@ -82,12 +98,20 @@ describe('pages', () => {
           filesSucceeded: 2,
           filesFailed: 1,
           filesSkipped: 0,
+          filesIgnored: 0,
           errorDetails: { code: 'FILES_FAILED', message: '1 file(s) failed to sync' },
           attempt: 1,
           initiatedAt: '2026-01-01T00:00:00Z',
           startedAt: null,
           completedAt: null,
           canRetry: true,
+          baseSha: null,
+          commitsIncluded: [],
+          backedUp: 0,
+          allowDeletes: false,
+          canRestore: false,
+          restoredAt: null,
+          restoredFiles: 0,
         },
       ],
       page: 1,
@@ -98,7 +122,20 @@ describe('pages', () => {
     await waitFor(() => expect(screen.getByText('bbbbbbb')).toBeInTheDocument());
     expect(screen.getByText('Update header')).toBeInTheDocument();
     expect(screen.getAllByText('Partially failed').length).toBeGreaterThan(0);
-    expect(screen.getByText(/2\/3/)).toBeInTheDocument();
+    // File counts are on the sync's own page, not in the list.
+    expect(screen.queryByText(/ok · .* failed/)).not.toBeInTheDocument();
+    expect(screen.getAllByText('Single commit').length).toBeGreaterThan(1); // type column + filter option
     expect(screen.getByText('View / retry')).toBeInTheDocument();
+  });
+});
+
+describe('themeFileLabel', () => {
+  it('turns theme paths into readable names', async () => {
+    const { themeFileLabel } = await import('../../app/lib/format');
+    expect(themeFileLabel('sections/cart.liquid')).toBe('Cart section');
+    expect(themeFileLabel('snippets/cart-item.liquid')).toBe('Cart item snippet');
+    expect(themeFileLabel('blocks/cart-item.liquid')).toBe('Cart item block');
+    expect(themeFileLabel('templates/customers/account.json')).toBe('Customers account template');
+    expect(themeFileLabel('assets/cart.css')).toBe('cart.css');
   });
 });

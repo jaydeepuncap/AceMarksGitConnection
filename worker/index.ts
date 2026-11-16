@@ -24,11 +24,13 @@ import {
   notFoundHandler,
   rateLimit,
   requestContext,
+  requireServerConfig,
 } from './middleware/error-handler';
 import { requireShopifySession } from './middleware/shopify-session-token';
 import { commitsRoutes } from './routes/commits';
 import { githubRoutes } from './routes/github';
 import { healthRoutes } from './routes/health';
+import { mappingsRoutes } from './routes/mappings';
 import { appBaseUrl, decodeAdminHost, oauthRoutes } from './routes/oauth';
 import { settingsRoutes } from './routes/settings';
 import { syncRoutes } from './routes/sync';
@@ -58,6 +60,7 @@ app.use(
 );
 app.route('/api/health', healthRoutes);
 
+app.use('/api/*', requireServerConfig());
 app.use('/api/*', requireShopifySession());
 app.use(
   '/api/*',
@@ -67,6 +70,7 @@ app.route('/api/settings', settingsRoutes);
 app.route('/api/github', githubRoutes);
 app.route('/api/themes', themesRoutes);
 app.route('/api/commits', commitsRoutes);
+app.route('/api/mappings', mappingsRoutes);
 app.route('/api/sync', syncRoutes);
 app.all('/api/*', notFoundHandler);
 
@@ -77,6 +81,9 @@ const ipKey = (c: { req: { header: (n: string) => string | undefined } }) =>
   c.req.header('cf-connecting-ip') ?? 'unknown';
 app.use('/auth/*', rateLimit({ binding: 'API_RATE_LIMITER', limit: 30, periodSeconds: 60, key: ipKey }));
 app.use('/auth', rateLimit({ binding: 'API_RATE_LIMITER', limit: 30, periodSeconds: 60, key: ipKey }));
+app.use('/auth', requireServerConfig());
+app.use('/auth/*', requireServerConfig());
+app.use('/webhooks/*', requireServerConfig());
 app.route('/auth', oauthRoutes);
 app.route('/webhooks', webhookRoutes);
 app.all('/webhooks/*', notFoundHandler);

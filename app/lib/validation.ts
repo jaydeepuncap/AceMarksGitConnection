@@ -34,13 +34,3 @@ export function validateThemeRootInput(value: string): string | null {
   const result = normalizeThemeRoot(value);
   return result.ok ? null : result.reason;
 }
-
-export function parseIgnorePatterns(value: string): { patterns: string[]; error: string | null } {
-  const patterns = value
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean);
-  if (patterns.length > 50) return { patterns, error: 'At most 50 patterns' };
-  const bad = patterns.find((p) => p.includes('..') || p.startsWith('/') || p.length > 200);
-  return { patterns, error: bad ? `Invalid pattern: ${bad}` : null };
-}

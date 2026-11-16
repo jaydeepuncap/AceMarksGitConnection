@@ -1,0 +1,46 @@
+/* skeleton */
+.skeleton-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.skeleton-line {
+    background-color: #e6e6e6;
+    border-radius: 8px;
+    width: 100%;
+    animation: pulse 1.6s ease-in-out infinite;
+    opacity: 0.6;
+}
+
+@keyframes pulse {
+    0% {
+        opacity: .4;
+    }
+
+    50% {
+        opacity: 1;
+    }
+
+    100% {
+        opacity: .4;
+    }
+}
+
+/* Skeleton Line */
+.skeleton-line {
+    background: linear-gradient(90deg, #e2e2e2 0%, #f3f3f3 50%, #e2e2e2 100%);
+    background-size: 200% 100%;
+    border-radius: 4px;
+    animation: skeleton-loading 1.4s ease infinite;
+}
+
+@keyframes skeleton-loading {
+    0% {
+        background-position: 200% 0;
+    }
+
+    100% {
+        background-position: -200% 0;
+    }
+}
