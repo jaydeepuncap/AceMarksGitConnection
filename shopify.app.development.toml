@@ -7,7 +7,7 @@
 client_id = "3f42249ab5e0487ed91f4ce37edeebb3"
 name = "Ace Marks Git Connection"
 handle = "ace-marks-git-connection"
-application_url = "https://ace-marks-git-connection.uncap.workers.dev"
+application_url = "https://ace-marks-git-connection.romi-4b1.workers.dev"
 embedded = true
 
 [build]
@@ -29,7 +29,7 @@ use_legacy_install_flow = false
 # Used only by the authorization-code OAuth flow (/auth → /auth/callback),
 # which remains available for non-embedded installs and manual re-authorization.
 redirect_urls = [
-  "https://ace-marks-git-connection.uncap.workers.dev/auth/callback"
+  "https://ace-marks-git-connection.romi-4b1.workers.dev/auth/callback"
 ]
 
 [webhooks]
