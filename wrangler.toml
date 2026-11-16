@@ -35,18 +35,18 @@ APP_ENV = "production"
 LOG_LEVEL = "info"
 SHOPIFY_API_VERSION = "2026-07"
 SHOPIFY_SCOPES = "read_themes,write_themes"
-SHOPIFY_APP_URL = "https://ace-marks-git-connection.REPLACE_WITH_WORKERS_SUBDOMAIN.workers.dev"
+SHOPIFY_APP_URL = "https://ace-marks-git-connection.romi-4b1.workers.dev"
 GITHUB_API_BASE_URL = "https://api.github.com"
 
 [[d1_databases]]
 binding = "DB"
 database_name = "ace-marks-git-connection"
-database_id = "0fa8cf96-ed3d-4505-9028-79064d9a422a"
+database_id = "10f59743-ad44-45ab-8c59-a1e0d06975e4"
 migrations_dir = "migrations"
 
 [[kv_namespaces]]
 binding = "KV"
-id = "45ff456d0e2644b58e0aba0140c28da1"
+id = "dd3175ef6b2f4944b83fce28f5993f27"
 
 [[queues.producers]]
 binding = "SYNC_QUEUE"
