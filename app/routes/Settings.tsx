@@ -7,7 +7,7 @@ import { api } from '../lib/api-client';
 import { showToast } from '../lib/app-bridge';
 import { formatDate } from '../lib/format';
 import { useApiQuery, useMutation } from '../lib/hooks';
-import type { GithubConnectionResponse, UpdateSettingsRequest } from '../lib/types';
+import type { FieldEvent, GithubConnectionResponse, UpdateSettingsRequest } from '../lib/types';
 import { ignorePatternError } from '../../shared/theme-paths';
 import { validateGithubToken, validateRepository } from '../lib/validation';
 import {
@@ -118,7 +118,7 @@ function GithubConnectionSection({ onChanged }: { onChanged: () => void }) {
           value={token}
           autocomplete="off"
           error={tokenError ?? undefined}
-          onInput={(event) => setToken(event.currentTarget.value)}
+          onInput={(event: FieldEvent) => setToken(event.currentTarget.value)}
         />
         <TextField
           label="Repository (optional)"
@@ -127,7 +127,7 @@ function GithubConnectionSection({ onChanged }: { onChanged: () => void }) {
           autocomplete="off"
           details="Verifies the token can read this repository right away."
           error={repoError ?? undefined}
-          onInput={(event) => setRepository(event.currentTarget.value)}
+          onInput={(event: FieldEvent) => setRepository(event.currentTarget.value)}
         />
         <Stack direction="inline">
           <Button variant="primary" loading={connect.pending} onClick={submit}>
@@ -264,7 +264,9 @@ export default function Settings() {
                   : 'Repositories the connected token can read. Access is verified again when you save.'
             }
             error={repoError ?? undefined}
-            onChange={(event) => setRepository(event.currentTarget.value === NONE ? '' : event.currentTarget.value)}
+            onChange={(event: FieldEvent) =>
+              setRepository(event.currentTarget.value === NONE ? '' : event.currentTarget.value)
+            }
           >
             <Option value={NONE}>No repository</Option>
             {repos.map((r) => (

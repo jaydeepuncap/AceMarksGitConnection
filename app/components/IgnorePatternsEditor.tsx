@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { describeIgnorePattern, ignorePatternError, MAX_IGNORE_PATTERNS } from '../../shared/theme-paths';
 import { api } from '../lib/api-client';
 import { useMutation } from '../lib/hooks';
-import type { IgnorePreviewResponse } from '../lib/types';
+import type { FieldEvent, IgnorePreviewResponse } from '../lib/types';
 import { ErrorBanner } from './ErrorBanner';
 import { Button, Grid, Paragraph, Stack, Text, TextField } from './ui';
 
@@ -98,7 +98,7 @@ export function IgnorePatternsEditor({
                             : ''
                         }`
                   }
-                  onInput={(event) => update(index, event.currentTarget.value)}
+                  onInput={(event: FieldEvent) => update(index, event.currentTarget.value)}
                 />
                 <Button
                   variant="tertiary"
@@ -121,7 +121,7 @@ export function IgnorePatternsEditor({
           value={draft}
           error={draftError ?? (draftTouched && duplicate ? 'Already in the list' : undefined)}
           details={draft.trim() && !ignorePatternError(draft) ? describeIgnorePattern(draft) : undefined}
-          onInput={(event) => setDraft(event.currentTarget.value)}
+          onInput={(event: FieldEvent) => setDraft(event.currentTarget.value)}
         />
         <Button disabled={patterns.length >= MAX_IGNORE_PATTERNS} onClick={add}>
           Add

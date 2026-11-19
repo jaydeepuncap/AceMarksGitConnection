@@ -5,3 +5,6 @@
 export * from '../../shared/api-types';
 
 export type { Tone } from './format';
+
+/** Change/input event of a Polaris form field rendered through the ui wrappers (typed `any` there). */
+export type FieldEvent = Event & { currentTarget: HTMLInputElement };

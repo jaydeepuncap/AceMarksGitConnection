@@ -9,7 +9,7 @@ import { Banner, Button, Modal, Option, Paragraph, Section, Select, Stack, Text 
 import { api } from '../lib/api-client';
 import { showToast } from '../lib/app-bridge';
 import { useApiQuery, useMutation, useNavigateHandler } from '../lib/hooks';
-import type { GithubBranch, ShopifyTheme, ThemeMapping as Mapping } from '../lib/types';
+import type { FieldEvent, GithubBranch, ShopifyTheme, ThemeMapping as Mapping } from '../lib/types';
 
 const NONE = '__none__';
 
@@ -193,7 +193,9 @@ export default function ThemeMapping() {
                     ? 'Loading branches…'
                     : `${freeBranches.length} of ${branchList.length} branches free`
                 }
-                onChange={(event) => setNewBranch(event.currentTarget.value === NONE ? '' : event.currentTarget.value)}
+                onChange={(event: FieldEvent) =>
+                  setNewBranch(event.currentTarget.value === NONE ? '' : event.currentTarget.value)
+                }
               >
                 <Option value={NONE}>Select a branch</Option>
                 {branchList.map((b) => {
@@ -212,7 +214,9 @@ export default function ThemeMapping() {
                 label="Shopify theme"
                 value={newThemeId || NONE}
                 details={themes.loading ? 'Loading themes…' : `${freeThemes.length} of ${allThemes.length} themes free`}
-                onChange={(event) => setNewThemeId(event.currentTarget.value === NONE ? '' : event.currentTarget.value)}
+                onChange={(event: FieldEvent) =>
+                  setNewThemeId(event.currentTarget.value === NONE ? '' : event.currentTarget.value)
+                }
               >
                 <Option value={NONE}>Select a theme</Option>
                 {allThemes.map((t) => {

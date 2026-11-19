@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { SyncPlanOperation, SyncPreview } from '../lib/types';
+import type { FieldEvent, SyncPlanOperation, SyncPreview } from '../lib/types';
 import { syncTypeLabel, type Tone } from '../lib/format';
 import {
   Badge,
@@ -159,7 +159,7 @@ export function ConfirmSyncModal({ open, preview, submitting, error, onClose, on
               <Checkbox
                 label="Replace these files with the repository version"
                 checked={acceptEdits}
-                onChange={(event) => setAcceptEdits(event.currentTarget.checked)}
+                onChange={(event: FieldEvent) => setAcceptEdits(event.currentTarget.checked)}
               />
             </Banner>
           )}
@@ -223,7 +223,7 @@ export function ConfirmSyncModal({ open, preview, submitting, error, onClose, on
               <Checkbox
                 label="Show skipped files"
                 checked={showSkipped}
-                onChange={(event) => setShowSkipped(event.currentTarget.checked)}
+                onChange={(event: FieldEvent) => setShowSkipped(event.currentTarget.checked)}
               />
             </Stack>
 
@@ -259,14 +259,14 @@ export function ConfirmSyncModal({ open, preview, submitting, error, onClose, on
               <Checkbox
                 label="I understand this modifies the live storefront theme"
                 checked={ack}
-                onChange={(event) => setAck(event.currentTarget.checked)}
+                onChange={(event: FieldEvent) => setAck(event.currentTarget.checked)}
               />
               <TextField
                 label={`Type the theme name "${preview.theme.name}" to confirm`}
                 value={typedName}
                 autocomplete="off"
                 disabled={!ack}
-                onInput={(event) => setTypedName(event.currentTarget.value)}
+                onInput={(event: FieldEvent) => setTypedName(event.currentTarget.value)}
               />
             </Stack>
           )}

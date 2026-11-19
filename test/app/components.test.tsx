@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { ErrorBanner } from '../../app/components/ErrorBanner';
 import { LoadingState } from '../../app/components/LoadingState';
@@ -132,15 +132,16 @@ describe('pages', () => {
     const { container } = wrap(<SyncHistory />, '/sync-history?id=a237643b-25d7-43af-a214-5266c0a5226d');
     expect(await screen.findByText('Update complete', {}, { timeout: 5000 })).toBeInTheDocument();
     expect(screen.getByText('Copy of Dawn is now on d818759 · Fix the upload issue.')).toBeInTheDocument();
-    expect(container.querySelector('s-section[heading="Updates included (2)"]')).not.toBeNull();
-    expect(screen.getByText('Add the slide show section')).toBeInTheDocument();
-    expect(screen.getByText('Theme is on this')).toBeInTheDocument();
+    // Files tab first: counts and the file; the commits and summary are one click away.
     expect(screen.getByText('Review slide show section')).toBeInTheDocument();
-    expect(screen.getByText('Backed up')).toBeInTheDocument();
-    // Main column and the Summary / Files side column are titled sections.
-    for (const heading of ['Result', 'Summary', 'Files', 'Files (1)']) {
-      expect(container.querySelector(`s-section[heading="${heading}"]`)).not.toBeNull();
-    }
+    expect(screen.getByText('1 backed up')).toBeInTheDocument();
+    expect(screen.getByText('Multiple commits · 2 commits · 1 of 1 file updated · took 3s')).toBeInTheDocument();
+    expect(screen.queryByText('Add the slide show section')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText('Updates included (2)'));
+    expect(await screen.findByText('Add the slide show section')).toBeInTheDocument();
+    expect(screen.getByText('Theme is on this')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('Summary'));
+    expect(await screen.findByText('Job ID')).toBeInTheDocument();
     expect(container.querySelector('s-button[href="shopify://admin/themes/190367367473/editor"]')).not.toBeNull();
   });
 
