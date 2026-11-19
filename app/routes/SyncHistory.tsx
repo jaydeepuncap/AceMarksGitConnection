@@ -36,6 +36,7 @@ import {
   Text,
   TextField,
 } from '../components/ui';
+import { ViewSyncButton } from '../components/ViewSyncButton';
 
 const PER_PAGE = 20;
 const POLL_MS = 2000;
@@ -797,7 +798,6 @@ function SyncList({ onOpen }: { onOpen: (id: string) => void }) {
                     </Text>
                     <Text color="subdued">{firstLine(run.commitMessage)}</Text>
                     {run.errorDetails && <Text tone="critical">{run.errorDetails.message}</Text>}
-                    <Text color="subdued">{`Job ${run.id.slice(0, 8)}`}</Text>
                   </Stack>
                 </IndexTableCell>
                 <IndexTableCell>
@@ -810,9 +810,7 @@ function SyncList({ onOpen }: { onOpen: (id: string) => void }) {
                 <IndexTableCell>{formatDate(run.startedAt ?? run.initiatedAt)}</IndexTableCell>
                 <IndexTableCell>{formatDate(run.completedAt)}</IndexTableCell>
                 <IndexTableCell>
-                  <Button variant="tertiary" accessibilityLabel={`Open sync ${run.id}`} onClick={() => onOpen(run.id)}>
-                    {run.canRetry ? 'View / retry' : 'View'}
-                  </Button>
+                  <ViewSyncButton run={run} onOpen={() => onOpen(run.id)} />
                 </IndexTableCell>
               </IndexTableRow>
             );

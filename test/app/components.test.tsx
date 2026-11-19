@@ -189,7 +189,9 @@ describe('pages', () => {
     // File counts are on the sync's own page, not in the list.
     expect(screen.queryByText(/ok · .* failed/)).not.toBeInTheDocument();
     expect(screen.getAllByText('Single commit').length).toBeGreaterThan(1); // type column + filter option
-    expect(screen.getByText('View / retry')).toBeInTheDocument();
+    // A retryable sync's row action is a Retry button; the job ID is not shown in the list.
+    expect(screen.getByText('Retry')).toBeInTheDocument();
+    expect(screen.queryByText(/^Job /)).not.toBeInTheDocument();
   });
 });
 

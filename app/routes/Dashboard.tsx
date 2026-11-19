@@ -24,6 +24,7 @@ import {
 import { api } from '../lib/api-client';
 import { firstLine, formatDate, SYNC_STATUS_BADGE, syncTypeLabel } from '../lib/format';
 import { useApiQuery, useNavigateHandler } from '../lib/hooks';
+import { ViewSyncButton } from '../components/ViewSyncButton';
 
 const RECENT = 5;
 
@@ -372,9 +373,7 @@ export default function Dashboard() {
                 </IndexTableCell>
                 <IndexTableCell>{formatDate(run.completedAt ?? run.startedAt ?? run.initiatedAt)}</IndexTableCell>
                 <IndexTableCell>
-                  <Button variant="tertiary" onClick={go(`/sync-history?id=${run.id}`)}>
-                    View
-                  </Button>
+                  <ViewSyncButton run={run} onOpen={go(`/sync-history?id=${run.id}`)} />
                 </IndexTableCell>
               </IndexTableRow>
             ))}
