@@ -1,10 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { AppLayout } from '../components/AppLayout';
 import { ConfirmSyncModal } from '../components/ConfirmSyncModal';
 import { ErrorBanner } from '../components/ErrorBanner';
 import { LoadingState } from '../components/LoadingState';
-import { BranchThemeTitle, Card, CardSection, KeyValue, StatTile } from '../components/Common';
+import { BranchThemeTitle } from '../components/Common';
 import { api } from '../lib/api-client';
 import { showToast } from '../lib/app-bridge';
 import { firstLine, formatDate, SYNC_STATUS_BADGE, syncTypeLabel, themeFileLabel } from '../lib/format';
@@ -17,6 +17,7 @@ import {
   Box,
   Button,
   Checkbox,
+  Divider,
   Grid,
   Heading,
   Icon,
@@ -28,6 +29,7 @@ import {
   Option,
   Paragraph,
   ProgressBar,
+  QueryContainer,
   Section,
   Select,
   Stack,
@@ -212,6 +214,59 @@ function SyncDetail({ id, onBack, onOpen }: { id: string; onBack: () => void; on
       ? Math.max(0, Math.round((Date.parse(data.completedAt) - Date.parse(data.startedAt ?? data.initiatedAt)) / 1000))
       : null;
   const duration = seconds === null ? null : seconds < 60 ? `${seconds}s` : `${Math.round(seconds / 60)} min`;
+  const included = data
+    ? data.commitsIncluded.length
+      ? data.commitsIncluded
+      : [{ sha: data.commitSha, shortSha: data.commitSha.slice(0, 7), message: data.commitMessage ?? '' }]
+    : [];
+  const summaryRows: [string, ReactNode][] = data
+    ? [
+        ['Sync type', <Text key="t">{syncTypeLabel(data.strategy)}</Text>],
+        [
+          'Repository',
+          <Link key="r" href={`https://github.com/${data.repository}`} target="_blank">
+            {data.repository}
+          </Link>,
+        ],
+        ['Branch', <Text key="b">{data.branch ?? '—'}</Text>],
+        ['Started', <Text key="s">{formatDate(data.startedAt ?? data.initiatedAt)}</Text>],
+        ['Duration', <Text key="d">{duration ?? '—'}</Text>],
+        ['Attempt', <Text key="a">{String(data.attempt)}</Text>],
+        [
+          'Job ID',
+          <Text key="j" color="subdued">
+            {data.id.slice(0, 8)}
+          </Text>,
+        ],
+      ]
+    : [];
+  const countRows = data
+    ? [
+        {
+          label: 'Updated',
+          hint: `of ${data.filesChanged} planned`,
+          value: data.filesSucceeded,
+          icon: 'check-circle',
+          tone: 'success',
+        },
+        {
+          label: 'Failed',
+          hint: data.filesFailed ? 'listed above' : 'none',
+          value: data.filesFailed,
+          icon: 'alert-circle',
+          tone: data.filesFailed ? 'critical' : 'auto',
+        },
+        {
+          label: 'Unchanged',
+          hint: 'already the same in the theme',
+          value: Math.max(0, data.filesSkipped - data.filesIgnored),
+          icon: 'minus-circle',
+          tone: 'auto',
+        },
+        { label: 'Ignored', hint: 'by your ignore list', value: data.filesIgnored, icon: 'hide', tone: 'auto' },
+        { label: 'Backed up', hint: 'saved before changing', value: data.backedUp, icon: 'save', tone: 'info' },
+      ]
+    : [];
   const onCommit = data ? `${data.commitSha.slice(0, 7)} · ${firstLine(data.commitMessage)}` : '';
   /** The result at a glance: icon, heading, one line and a note on what to do next. */
   const hero: { icon: string; tone: string; heading: string; text: string; note?: string } = !data
@@ -282,291 +337,295 @@ function SyncDetail({ id, onBack, onOpen }: { id: string; onBack: () => void; on
       }
     >
       {data && (
-        <Card>
-          <CardSection>
+        <QueryContainer>
+          <Grid
+            gridTemplateColumns="@container (inline-size > 760px) minmax(0, 2fr) minmax(0, 1fr), minmax(0, 1fr)"
+            gap="base"
+            alignItems="start"
+          >
             <Stack gap="base">
-              <Stack direction="inline" gap="base" alignItems="center" justifyContent="space-between">
-                <Stack direction="inline" gap="small-200" alignItems="center">
-                  <Icon type={hero.icon} tone={hero.tone} />
-                  <Heading>{hero.heading}</Heading>
-                </Stack>
-                <Stack direction="inline" gap="small-200" alignItems="center">
-                  {live && <Badge tone="warning">Live theme</Badge>}
-                  <Badge tone={SYNC_STATUS_BADGE[data.status].tone}>{SYNC_STATUS_BADGE[data.status].label}</Badge>
-                </Stack>
-              </Stack>
-              <Text>{hero.text}</Text>
-              {active && (
-                <Stack gap="small-200">
-                  <ProgressBar progress={(done / Math.max(1, data.filesChanged)) * 100} tone="info" />
-                  <Text color="subdued">
-                    {`${Math.round((done / Math.max(1, data.filesChanged)) * 100)}% · ${done} of ${data.filesChanged} files · each file is backed up right before it changes. You can leave this page; the update continues in the background.`}
-                  </Text>
-                </Stack>
-              )}
-            </Stack>
-          </CardSection>
-          <CardSection>
-            <Stack direction="inline" gap="base" alignItems="center" justifyContent="space-between">
-              <BranchThemeTitle
-                branch={data.branch ?? '—'}
-                themeName={data.themeName}
-                role={data.themeRole as ThemeRole}
-              />
-              <Button variant="secondary" icon="external" href={`shopify://admin/themes/${themeNumericId}/editor`}>
-                Open in theme editor
-              </Button>
-            </Stack>
-          </CardSection>
-          {hero.note && (
-            <CardSection>
-              <Text color="subdued">{hero.note}</Text>
-            </CardSection>
-          )}
-        </Card>
-      )}
-
-      {data && (
-        <Grid gridTemplateColumns="repeat(auto-fit, minmax(150px, 1fr))" gap="base">
-          <StatTile label="Updated" icon="check-circle" hint={`of ${data.filesChanged} planned`}>
-            <Text type="strong">{String(data.filesSucceeded)}</Text>
-          </StatTile>
-          <StatTile label="Failed" icon="alert-circle" hint={data.filesFailed ? 'see below' : 'none'}>
-            <Text type="strong" tone={data.filesFailed ? 'critical' : 'auto'}>
-              {String(data.filesFailed)}
-            </Text>
-          </StatTile>
-          <StatTile label="Unchanged" icon="minus-circle" hint="already the same in the theme">
-            <Text type="strong">{String(Math.max(0, data.filesSkipped - data.filesIgnored))}</Text>
-          </StatTile>
-          <StatTile label="Ignored" icon="hide" hint="by your ignore list">
-            <Text type="strong">{String(data.filesIgnored)}</Text>
-          </StatTile>
-          <StatTile label="Backed up" icon="save" hint="saved before changing">
-            <Text type="strong">{String(data.backedUp)}</Text>
-          </StatTile>
-        </Grid>
-      )}
-
-      {data && incomplete && (
-        <Section accessibilityLabel="Update result">
-          <Stack gap="base">
-            {data.restoredAt ? (
-              <Banner tone="info" heading="Backup restored">
-                <Paragraph>
-                  {`${data.themeName} is back exactly as it was before this update (${data.restoredFiles} file(s), ${formatDate(data.restoredAt)}). Run the full update again when you are ready.`}
-                </Paragraph>
-              </Banner>
-            ) : (
-              <Banner
-                tone="critical"
-                heading={`Update incomplete · ${data.filesSucceeded} of ${data.filesChanged} files updated`}
-              >
-                <Paragraph>
-                  The theme is not marked as updated until every file succeeds.
-                  {data.errorDetails && data.errorDetails.code !== 'FILES_FAILED'
-                    ? ` ${data.errorDetails.message}`
-                    : ''}
-                </Paragraph>
-              </Banner>
-            )}
-
-            {failed.length > 0 && (
-              <Stack gap="small-200">
-                {failed.map((op) => (
-                  <Grid
-                    key={op.id}
-                    gridTemplateColumns="minmax(0, 1fr) minmax(0, 1.4fr)"
-                    gap="small-200"
-                    alignItems="start"
-                  >
-                    <Stack gap="none">
-                      <Text type="strong">
-                        <Text tone="critical">×</Text> {themeFileLabel(op.path)}
-                      </Text>
-                      <Text color="subdued">{op.path}</Text>
-                    </Stack>
-                    <Stack gap="none">
-                      <Text>{op.failure?.reason ?? 'Could not be updated'}</Text>
-                      {op.failure?.detail && <Text color="subdued">{op.failure.detail}</Text>}
-                    </Stack>
-                  </Grid>
-                ))}
-              </Stack>
-            )}
-
-            <Text>
-              {`${data.themeName} remains on `}
-              <Text type="strong">{data.baseSha ? data.baseSha.slice(0, 7) : 'its previous version'}</Text>
-              <Text color="subdued">{data.baseSha ? ' (its last synced commit)' : ''}</Text>
-            </Text>
-
-            <Stack direction="inline" gap="small-200" justifyContent="end">
-              {!data.restoredAt && (
-                <Button
-                  disabled={!data.canRestore}
-                  loading={restore.pending}
-                  onClick={() => setConfirmAction('restore')}
-                >
-                  Restore Backup
-                </Button>
-              )}
-              <Button loading={rerunPreview.pending} onClick={doRerun}>
-                Run Full Update Again
-              </Button>
-              {!data.restoredAt && (
-                <Button
-                  variant="primary"
-                  disabled={!data.canRetry || !retryHelps}
-                  loading={retry.pending}
-                  onClick={() => (live ? setConfirmAction('retry') : doRetry())}
-                >
-                  Retry Failed Files
-                </Button>
-              )}
-            </Stack>
-            {!retryHelps && !data.restoredAt && (
-              <Text color="subdued">
-                Every failed file has a code error: ask your developer to fix it, then apply the new update.
-              </Text>
-            )}
-
-            <IndexTable
-              variant="auto"
-              columns={[
-                { title: 'Option', listSlot: 'primary' },
-                { title: 'When to use it', listSlot: 'secondary' },
-              ]}
-              rows={INCOMPLETE_OPTIONS.map((o) => (
-                <IndexTableRow key={o.option}>
-                  <IndexTableCell>
-                    <Text type="strong">{o.option}</Text>
-                  </IndexTableCell>
-                  <IndexTableCell>{o.when}</IndexTableCell>
-                </IndexTableRow>
-              ))}
-            />
-            <Banner tone="info">
-              <Paragraph>Temporary issues are usually retried automatically before you see any message.</Paragraph>
-            </Banner>
-          </Stack>
-        </Section>
-      )}
-
-      {data && (
-        <Grid gridTemplateColumns="repeat(auto-fit, minmax(320px, 1fr))" gap="base" alignItems="start">
-          <Section heading={`Updates included (${data.commitsIncluded.length || 1})`}>
-            <Stack gap="small-300">
-              {data.baseSha && (
-                <Stack direction="inline" gap="small-200" alignItems="center">
-                  <Icon type="clock" tone="auto" />
-                  <Text color="subdued">{`Before: ${data.baseSha.slice(0, 7)} (last synced)`}</Text>
-                </Stack>
-              )}
-              {(data.commitsIncluded.length
-                ? data.commitsIncluded
-                : [{ sha: data.commitSha, shortSha: data.commitSha.slice(0, 7), message: data.commitMessage ?? '' }]
-              ).map((c) => (
-                <Box key={c.sha} padding="small" border="base" borderRadius="base">
-                  <Stack direction="inline" gap="small-200" alignItems="center">
-                    <Icon type="git-commit" tone="info" />
-                    <Link href={`https://github.com/${data.repository}/commit/${c.sha}`} target="_blank">
-                      {c.shortSha}
-                    </Link>
-                    <Text>{firstLine(c.message)}</Text>
-                    {c.sha === data.commitSha && <Badge tone="success">Theme is now on this</Badge>}
-                  </Stack>
-                </Box>
-              ))}
-            </Stack>
-          </Section>
-
-          <Section heading="Details">
-            <Grid gridTemplateColumns="repeat(auto-fit, minmax(140px, 1fr))" gap="base">
-              <KeyValue label="Sync type">
-                <Text>{syncTypeLabel(data.strategy)}</Text>
-              </KeyValue>
-              <KeyValue label="Repository">
-                <Link href={`https://github.com/${data.repository}`} target="_blank">
-                  {data.repository}
-                </Link>
-              </KeyValue>
-              <KeyValue label="Started">
-                <Text>{formatDate(data.startedAt ?? data.initiatedAt)}</Text>
-              </KeyValue>
-              <KeyValue label="Completed">
-                <Text>
-                  {data.completedAt ? `${formatDate(data.completedAt)}${duration ? ` · ${duration}` : ''}` : '—'}
-                </Text>
-              </KeyValue>
-              <KeyValue label="Attempt">
-                <Text>{String(data.attempt)}</Text>
-              </KeyValue>
-              <KeyValue label="Job ID">
-                <Text color="subdued">{data.id.slice(0, 8)}</Text>
-              </KeyValue>
-            </Grid>
-          </Section>
-        </Grid>
-      )}
-
-      <Section heading={`Files (${operations.length})`}>
-        <Checkbox
-          slot="secondary-actions"
-          label="Show unchanged and ignored files"
-          checked={showSkipped}
-          onChange={(event) => setShowSkipped(event.currentTarget.checked)}
-        />
-        <IndexTable
-          variant="auto"
-          columns={[
-            { title: 'File', listSlot: 'primary' },
-            { title: 'Change', listSlot: 'inline' },
-            { title: 'From commit', listSlot: 'labeled' },
-            { title: 'Result', listSlot: 'secondary' },
-          ]}
-          rows={operations.map((op) => (
-            <IndexTableRow key={op.id}>
-              <IndexTableCell>
-                <Stack gap="none">
-                  <Text type="strong">{themeFileLabel(op.path)}</Text>
-                  <Text color="subdued">
-                    {op.previousPath ? `${op.path} (renamed from ${op.previousPath})` : op.path}
-                  </Text>
-                </Stack>
-              </IndexTableCell>
-              <IndexTableCell>
-                <Badge tone={op.action === 'delete' ? 'critical' : 'info'}>
-                  {op.action === 'delete' ? 'Deleted' : op.changeType === 'added' ? 'Added' : 'Updated'}
+              <Section heading="Result">
+                <Badge slot="secondary-actions" tone={SYNC_STATUS_BADGE[data.status].tone}>
+                  {SYNC_STATUS_BADGE[data.status].label}
                 </Badge>
-              </IndexTableCell>
-              <IndexTableCell>
-                <Text color="subdued">{(op.sourceCommitSha ?? data?.commitSha ?? '').slice(0, 7) || '—'}</Text>
-              </IndexTableCell>
-              <IndexTableCell>
-                <Stack gap="none">
-                  <Stack direction="inline">
-                    <Badge tone={OP_BADGE[op.status].tone}>{OP_BADGE[op.status].label}</Badge>
-                  </Stack>
-                  {(op.failure || op.skipReason) && (
-                    <Text color="subdued">
-                      {op.failure ? `${op.failure.reason} · ${op.failure.detail}` : op.skipReason}
-                    </Text>
+                <Stack gap="base">
+                  <Box padding="base" borderRadius="base" background="subdued">
+                    <Stack direction="inline" gap="base" alignItems="center">
+                      <Icon type={hero.icon} tone={hero.tone} />
+                      <Stack gap="small-100">
+                        <Heading>{hero.heading}</Heading>
+                        <Text>{hero.text}</Text>
+                      </Stack>
+                    </Stack>
+                  </Box>
+                  {active && (
+                    <Stack gap="small-200">
+                      <ProgressBar progress={(done / Math.max(1, data.filesChanged)) * 100} tone="info" />
+                      <Text color="subdued">
+                        {`${Math.round((done / Math.max(1, data.filesChanged)) * 100)}% · ${done} of ${data.filesChanged} files. Each file is backed up right before it changes; you can leave this page.`}
+                      </Text>
+                    </Stack>
                   )}
-                  {op.attempts > 1 && <Text color="subdued">{`${op.attempts} attempts`}</Text>}
+                  <Divider />
+                  <Stack direction="inline" gap="base" alignItems="center" justifyContent="space-between">
+                    <BranchThemeTitle
+                      branch={data.branch ?? '—'}
+                      themeName={data.themeName}
+                      role={data.themeRole as ThemeRole}
+                    />
+                    <Button variant="primary" icon="external" href={`shopify://admin/themes/${themeNumericId}/editor`}>
+                      Open in theme editor
+                    </Button>
+                  </Stack>
+                  {hero.note && <Text color="subdued">{hero.note}</Text>}
                 </Stack>
-              </IndexTableCell>
-            </IndexTableRow>
-          ))}
-        />
-        {operations.length === 0 && (
-          <Paragraph color="subdued">
-            {showSkipped
-              ? 'No files in this update.'
-              : 'No files changed. Tick "Show unchanged and ignored files" to see the rest.'}
-          </Paragraph>
-        )}
-      </Section>
+              </Section>
+
+              {data && incomplete && (
+                <Section heading={data.restoredAt ? 'Backup restored' : 'What went wrong'}>
+                  <Stack gap="base">
+                    {data.restoredAt ? (
+                      <Banner tone="info" heading="Backup restored">
+                        <Paragraph>
+                          {`${data.themeName} is back exactly as it was before this update (${data.restoredFiles} file(s), ${formatDate(data.restoredAt)}). Run the full update again when you are ready.`}
+                        </Paragraph>
+                      </Banner>
+                    ) : (
+                      <Banner
+                        tone="critical"
+                        heading={`Update incomplete · ${data.filesSucceeded} of ${data.filesChanged} files updated`}
+                      >
+                        <Paragraph>
+                          The theme is not marked as updated until every file succeeds.
+                          {data.errorDetails && data.errorDetails.code !== 'FILES_FAILED'
+                            ? ` ${data.errorDetails.message}`
+                            : ''}
+                        </Paragraph>
+                      </Banner>
+                    )}
+
+                    {failed.length > 0 && (
+                      <Stack gap="small-200">
+                        {failed.map((op) => (
+                          <Grid
+                            key={op.id}
+                            gridTemplateColumns="minmax(0, 1fr) minmax(0, 1.4fr)"
+                            gap="small-200"
+                            alignItems="start"
+                          >
+                            <Stack gap="none">
+                              <Text type="strong">
+                                <Text tone="critical">×</Text> {themeFileLabel(op.path)}
+                              </Text>
+                              <Text color="subdued">{op.path}</Text>
+                            </Stack>
+                            <Stack gap="none">
+                              <Text>{op.failure?.reason ?? 'Could not be updated'}</Text>
+                              {op.failure?.detail && <Text color="subdued">{op.failure.detail}</Text>}
+                            </Stack>
+                          </Grid>
+                        ))}
+                      </Stack>
+                    )}
+
+                    <Text>
+                      {`${data.themeName} remains on `}
+                      <Text type="strong">{data.baseSha ? data.baseSha.slice(0, 7) : 'its previous version'}</Text>
+                      <Text color="subdued">{data.baseSha ? ' (its last synced commit)' : ''}</Text>
+                    </Text>
+
+                    <Stack direction="inline" gap="small-200" justifyContent="end">
+                      {!data.restoredAt && (
+                        <Button
+                          disabled={!data.canRestore}
+                          loading={restore.pending}
+                          onClick={() => setConfirmAction('restore')}
+                        >
+                          Restore Backup
+                        </Button>
+                      )}
+                      <Button loading={rerunPreview.pending} onClick={doRerun}>
+                        Run Full Update Again
+                      </Button>
+                      {!data.restoredAt && (
+                        <Button
+                          variant="primary"
+                          disabled={!data.canRetry || !retryHelps}
+                          loading={retry.pending}
+                          onClick={() => (live ? setConfirmAction('retry') : doRetry())}
+                        >
+                          Retry Failed Files
+                        </Button>
+                      )}
+                    </Stack>
+                    {!retryHelps && !data.restoredAt && (
+                      <Text color="subdued">
+                        Every failed file has a code error: ask your developer to fix it, then apply the new update.
+                      </Text>
+                    )}
+
+                    <IndexTable
+                      variant="auto"
+                      columns={[
+                        { title: 'Option', listSlot: 'primary' },
+                        { title: 'When to use it', listSlot: 'secondary' },
+                      ]}
+                      rows={INCOMPLETE_OPTIONS.map((o) => (
+                        <IndexTableRow key={o.option}>
+                          <IndexTableCell>
+                            <Text type="strong">{o.option}</Text>
+                          </IndexTableCell>
+                          <IndexTableCell>{o.when}</IndexTableCell>
+                        </IndexTableRow>
+                      ))}
+                    />
+                    <Banner tone="info">
+                      <Paragraph>
+                        Temporary issues are usually retried automatically before you see any message.
+                      </Paragraph>
+                    </Banner>
+                  </Stack>
+                </Section>
+              )}
+
+              <Section heading={`Updates included (${included.length})`}>
+                <Stack gap="none">
+                  {data.baseSha && (
+                    <Stack gap="none">
+                      <Box paddingBlock="small-200">
+                        <Stack direction="inline" gap="small-200" alignItems="center">
+                          <Icon type="clock" color="subdued" />
+                          <Text color="subdued">{`${data.baseSha.slice(0, 7)} · theme was on this before`}</Text>
+                        </Stack>
+                      </Box>
+                      <Divider />
+                    </Stack>
+                  )}
+                  {included.map((c, i) => (
+                    <Stack key={c.sha} gap="none">
+                      <Box paddingBlock="small-200">
+                        <Stack direction="inline" gap="small-200" alignItems="center" justifyContent="space-between">
+                          <Stack direction="inline" gap="small-200" alignItems="center">
+                            <Icon type="git-commit" tone="info" />
+                            <Link href={`https://github.com/${data.repository}/commit/${c.sha}`} target="_blank">
+                              {c.shortSha}
+                            </Link>
+                            <Text>{firstLine(c.message)}</Text>
+                          </Stack>
+                          {c.sha === data.commitSha && data.status === 'succeeded' && (
+                            <Badge tone="success" icon="check">
+                              Theme is on this
+                            </Badge>
+                          )}
+                        </Stack>
+                      </Box>
+                      {i < included.length - 1 && <Divider />}
+                    </Stack>
+                  ))}
+                </Stack>
+              </Section>
+
+              <Section heading={`Files (${operations.length})`}>
+                <Checkbox
+                  slot="secondary-actions"
+                  label="Show unchanged and ignored files"
+                  checked={showSkipped}
+                  onChange={(event) => setShowSkipped(event.currentTarget.checked)}
+                />
+                <IndexTable
+                  variant="auto"
+                  columns={[
+                    { title: 'File', listSlot: 'primary' },
+                    { title: 'Change', listSlot: 'inline' },
+                    { title: 'From commit', listSlot: 'labeled' },
+                    { title: 'Result', listSlot: 'secondary' },
+                  ]}
+                  rows={operations.map((op) => (
+                    <IndexTableRow key={op.id}>
+                      <IndexTableCell>
+                        <Stack gap="none">
+                          <Text type="strong">{themeFileLabel(op.path)}</Text>
+                          <Text color="subdued">
+                            {op.previousPath ? `${op.path} (renamed from ${op.previousPath})` : op.path}
+                          </Text>
+                        </Stack>
+                      </IndexTableCell>
+                      <IndexTableCell>
+                        <Badge tone={op.action === 'delete' ? 'critical' : 'info'}>
+                          {op.action === 'delete' ? 'Deleted' : op.changeType === 'added' ? 'Added' : 'Updated'}
+                        </Badge>
+                      </IndexTableCell>
+                      <IndexTableCell>
+                        <Text color="subdued">{(op.sourceCommitSha ?? data?.commitSha ?? '').slice(0, 7) || '—'}</Text>
+                      </IndexTableCell>
+                      <IndexTableCell>
+                        <Stack gap="none">
+                          <Stack direction="inline">
+                            <Badge tone={OP_BADGE[op.status].tone}>{OP_BADGE[op.status].label}</Badge>
+                          </Stack>
+                          {(op.failure || op.skipReason) && (
+                            <Text color="subdued">
+                              {op.failure ? `${op.failure.reason} · ${op.failure.detail}` : op.skipReason}
+                            </Text>
+                          )}
+                          {op.attempts > 1 && <Text color="subdued">{`${op.attempts} attempts`}</Text>}
+                        </Stack>
+                      </IndexTableCell>
+                    </IndexTableRow>
+                  ))}
+                />
+                {operations.length === 0 && (
+                  <Paragraph color="subdued">
+                    {showSkipped
+                      ? 'No files in this update.'
+                      : 'No files changed. Tick "Show unchanged and ignored files" to see the rest.'}
+                  </Paragraph>
+                )}
+              </Section>
+            </Stack>
+
+            <Stack gap="base">
+              <Section heading="Summary">
+                <Stack gap="none">
+                  {summaryRows.map(([label, value], i) => (
+                    <Stack key={label} gap="none">
+                      <Box paddingBlock="small-200">
+                        <Stack direction="inline" gap="base" alignItems="center" justifyContent="space-between">
+                          <Text color="subdued">{label}</Text>
+                          {value}
+                        </Stack>
+                      </Box>
+                      {i < summaryRows.length - 1 && <Divider />}
+                    </Stack>
+                  ))}
+                </Stack>
+              </Section>
+
+              <Section heading="Files">
+                <Stack gap="none">
+                  {countRows.map((row, i) => (
+                    <Stack key={row.label} gap="none">
+                      <Box paddingBlock="small-200">
+                        <Stack direction="inline" gap="base" alignItems="center" justifyContent="space-between">
+                          <Stack direction="inline" gap="small-200" alignItems="center">
+                            <Icon type={row.icon} tone={row.tone} />
+                            <Stack gap="none">
+                              <Text>{row.label}</Text>
+                              <Text color="subdued">{row.hint}</Text>
+                            </Stack>
+                          </Stack>
+                          <Text type="strong">{String(row.value)}</Text>
+                        </Stack>
+                      </Box>
+                      {i < countRows.length - 1 && <Divider />}
+                    </Stack>
+                  ))}
+                </Stack>
+              </Section>
+            </Stack>
+          </Grid>
+        </QueryContainer>
+      )}
 
       {data && (
         <ConfirmActionModal

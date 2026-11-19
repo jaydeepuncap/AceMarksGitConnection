@@ -134,9 +134,13 @@ describe('pages', () => {
     expect(screen.getByText('Copy of Dawn is now on d818759 · Fix the upload issue.')).toBeInTheDocument();
     expect(container.querySelector('s-section[heading="Updates included (2)"]')).not.toBeNull();
     expect(screen.getByText('Add the slide show section')).toBeInTheDocument();
-    expect(screen.getByText('Theme is now on this')).toBeInTheDocument();
+    expect(screen.getByText('Theme is on this')).toBeInTheDocument();
     expect(screen.getByText('Review slide show section')).toBeInTheDocument();
     expect(screen.getByText('Backed up')).toBeInTheDocument();
+    // Main column and the Summary / Files side column are titled sections.
+    for (const heading of ['Result', 'Summary', 'Files', 'Files (1)']) {
+      expect(container.querySelector(`s-section[heading="${heading}"]`)).not.toBeNull();
+    }
     expect(container.querySelector('s-button[href="shopify://admin/themes/190367367473/editor"]')).not.toBeNull();
   });
 
