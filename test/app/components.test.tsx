@@ -80,6 +80,66 @@ describe('loading and error states', () => {
 });
 
 describe('pages', () => {
+  it('Sync details shows the result, counts, included commits and files', async () => {
+    (api.sync.get as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: 'a237643b-25d7-43af-a214-5266c0a5226d',
+      repository: 'acme/theme',
+      branch: 'UI-chages',
+      commitSha: 'd818759' + '0'.repeat(33),
+      commitMessage: 'Fix the upload issue',
+      themeId: 'gid://shopify/OnlineStoreTheme/190367367473',
+      themeName: 'Copy of Dawn',
+      themeRole: 'UNPUBLISHED',
+      strategy: 'selected_commits',
+      status: 'succeeded',
+      filesChanged: 1,
+      filesSucceeded: 1,
+      filesFailed: 0,
+      filesSkipped: 0,
+      filesIgnored: 0,
+      errorDetails: null,
+      attempt: 1,
+      initiatedAt: '2026-11-19T10:59:03Z',
+      startedAt: '2026-11-19T10:59:03Z',
+      completedAt: '2026-11-19T10:59:06Z',
+      canRetry: false,
+      baseSha: '5e41c63' + '0'.repeat(33),
+      commitsIncluded: [
+        { sha: '2b69c0d' + '0'.repeat(33), shortSha: '2b69c0d', message: 'Add the slide show section' },
+        { sha: 'd818759' + '0'.repeat(33), shortSha: 'd818759', message: 'Fix the upload issue' },
+      ],
+      backedUp: 1,
+      allowDeletes: false,
+      canRestore: false,
+      restoredAt: null,
+      restoredFiles: 0,
+      operations: [
+        {
+          id: 'op1',
+          path: 'sections/review-slide-show.liquid',
+          action: 'upsert',
+          status: 'succeeded',
+          changeType: 'modified',
+          previousPath: null,
+          skipReason: null,
+          sourceCommitSha: 'd818759' + '0'.repeat(33),
+          attempts: 1,
+          lastAttemptAt: null,
+          failure: null,
+        },
+      ],
+    });
+    const { container } = wrap(<SyncHistory />, '/sync-history?id=a237643b-25d7-43af-a214-5266c0a5226d');
+    expect(await screen.findByText('Update complete', {}, { timeout: 5000 })).toBeInTheDocument();
+    expect(screen.getByText('Copy of Dawn is now on d818759 · Fix the upload issue.')).toBeInTheDocument();
+    expect(container.querySelector('s-section[heading="Updates included (2)"]')).not.toBeNull();
+    expect(screen.getByText('Add the slide show section')).toBeInTheDocument();
+    expect(screen.getByText('Theme is now on this')).toBeInTheDocument();
+    expect(screen.getByText('Review slide show section')).toBeInTheDocument();
+    expect(screen.getByText('Backed up')).toBeInTheDocument();
+    expect(container.querySelector('s-button[href="shopify://admin/themes/190367367473/editor"]')).not.toBeNull();
+  });
+
   it('Sync history lists runs with their status', async () => {
     mocked.sync.history.mockResolvedValue({
       items: [
