@@ -49,6 +49,7 @@ import { rateLimit } from '../middleware/error-handler';
 import { dispatchSync, STALE_RUN_MS } from '../sync/dispatch';
 import { buildSyncPreview } from '../sync/planner';
 import { restoreBackup } from '../sync/restore';
+import { previewDownloadBudget, subrequestBudget } from '../lib/limits';
 
 const syncLimiter = rateLimit({
   binding: 'SYNC_RATE_LIMITER',
@@ -154,6 +155,7 @@ export const syncRoutes = new Hono<AppEnv>()
         preferences: settings.syncPreferences,
         includePaths: body.includePaths,
         commitShas: body.commitShas,
+        downloadBudget: previewDownloadBudget(subrequestBudget(c.env)),
       },
     );
     return ok<SyncPreview>(c, preview, 'Preview generated. No changes were made to the theme.', 201);

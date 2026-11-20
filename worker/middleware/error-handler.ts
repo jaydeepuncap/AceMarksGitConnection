@@ -48,7 +48,10 @@ export const errorHandler: ErrorHandler<AppEnv> = (err, c) => {
   const logger = c.get('logger') ?? createLogger(c.env?.LOG_LEVEL);
 
   if (err instanceof ApiError) {
-    if (err.status >= 500) logger.error('request.failed', { code: err.code, message: err.message });
+    if (err.status >= 500) {
+      const cause = err.cause instanceof Error ? `${err.cause.name}: ${err.cause.message}` : err.cause;
+      logger.error('request.failed', { code: err.code, message: err.message, ...(cause ? { cause } : {}) });
+    }
     else logger.warn('request.rejected', { code: err.code, status: err.status, message: err.message });
     if (err.headers) for (const [k, v] of Object.entries(err.headers)) c.header(k, v);
     if (err.retryAfter !== undefined) c.header('Retry-After', String(err.retryAfter));

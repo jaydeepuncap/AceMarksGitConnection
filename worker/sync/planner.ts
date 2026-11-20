@@ -76,6 +76,11 @@ export interface PlanInput {
   includePaths?: string[];
   /** strategy "selected_commits": the selected commits (commitSha is the newest of them). */
   commitShas?: string[];
+  /**
+   * Files the preview may download for its checks (Cloudflare request limit). Files beyond it are
+   * still code-checked when they are applied. Default: no extra limit.
+   */
+  downloadBudget?: number;
 }
 
 type PlannedOp = SyncPlanOperation;
@@ -264,6 +269,10 @@ export const md5Matches = (bytes: Uint8Array, checksum: string) => {
   return checksum.toLowerCase() === hex || checksum === bytesToBase64(digest);
 };
 
+/** Downloads for the code check: about 60% of the preview's download budget (the rest compares direct edits). */
+const codeCheckBudget = (input: PlanInput) =>
+  input.downloadBudget === undefined ? Infinity : Math.floor(input.downloadBudget * 0.6);
+
 /** Step 3: code check (Liquid / JSON) of the files that will be written. */
 async function runCodeCheck(
   github: GitHubClient,
@@ -271,7 +280,7 @@ async function runCodeCheck(
   ops: PlannedOp[],
 ): Promise<SyncChecks['code']> {
   const candidates = ops.filter((op) => op.action === 'upsert' && isCheckedFile(op.path));
-  const checked = candidates.slice(0, MAX_CODE_CHECK_FILES);
+  const checked = candidates.slice(0, Math.min(MAX_CODE_CHECK_FILES, codeCheckBudget(input)));
   const issues: CodeIssue[] = [];
   for (let i = 0; i < checked.length; i += 6) {
     await Promise.all(
@@ -319,7 +328,10 @@ async function detectDirectEdits(
     if (!before) found.push({ path: op.path, updatedAt: current.updatedAt });
     else compare.push({ path: op.path, sha: before.sha, checksum: current.checksumMd5, updatedAt: current.updatedAt });
   }
-  const limited = compare.slice(0, MAX_DIRECT_EDIT_DOWNLOADS);
+  const limited = compare.slice(
+    0,
+    Math.min(MAX_DIRECT_EDIT_DOWNLOADS, Math.max(0, (input.downloadBudget ?? Infinity) - codeCheckBudget(input))),
+  );
   for (let i = 0; i < limited.length; i += 6) {
     await Promise.all(
       limited.slice(i, i + 6).map(async (item) => {
