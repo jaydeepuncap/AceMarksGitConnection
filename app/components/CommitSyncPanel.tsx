@@ -5,6 +5,7 @@ import { useApiQuery, useMutation, type QueryState } from '../lib/hooks';
 import type {
   CommitSyncStatus,
   CommitsResponse,
+  FieldEvent,
   ShopifyTheme,
   SyncPreview,
   SyncStrategy,
@@ -298,7 +299,7 @@ export function CommitSyncPanel({
         label="Also delete files the commits removed"
         details="Off by default; every deletion is listed in the review first."
         checked={allowDeletes}
-        onChange={(event) => setAllowDeletes(event.currentTarget.checked)}
+        onChange={(event: FieldEvent) => setAllowDeletes(event.currentTarget.checked)}
       />
 
       {reapply && selected && (
@@ -367,7 +368,7 @@ export function CommitSyncPanel({
                   ref={(el: (HTMLElement & { checked: boolean }) | null) => {
                     if (el && el.checked !== on) el.checked = on;
                   }}
-                  onChange={(event) => setCommitPicked(index, !!event.currentTarget.checked)}
+                  onChange={(event: FieldEvent) => setCommitPicked(index, !!event.currentTarget.checked)}
                 />
               </IndexTableCell>
               <IndexTableCell>

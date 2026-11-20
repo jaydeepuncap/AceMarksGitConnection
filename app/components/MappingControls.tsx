@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { api } from '../lib/api-client';
 import { showToast } from '../lib/app-bridge';
 import { useMutation } from '../lib/hooks';
-import type { ShopifyTheme, SyncPreview, ThemeMapping } from '../lib/types';
+import type { FieldEvent, ShopifyTheme, SyncPreview, ThemeMapping } from '../lib/types';
 import { ErrorBanner } from './ErrorBanner';
 import { Button, Checkbox, List, Modal, Option, Paragraph, Select, Stack } from './ui';
 import { ConfirmModal } from './Common/ConfirmModal';
@@ -62,7 +62,7 @@ export function FullSyncControls({
         label="Delete theme files that are not in the repository"
         details="Off by default. The review lists every file that would be deleted; protected and ignored files never are."
         checked={allowDeletes}
-        onChange={(event) => setAllowDeletes(event.currentTarget.checked)}
+        onChange={(event: FieldEvent) => setAllowDeletes(event.currentTarget.checked)}
       />
       <ErrorBanner error={preview.error} heading="Full sync could not be prepared" onDismiss={preview.clearError} />
       <Stack direction="inline">

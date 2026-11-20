@@ -428,7 +428,11 @@ describe('Themes page without GitHub', () => {
       () => expect(container.querySelector('s-banner[heading="GitHub is not connected"]')).not.toBeNull(),
       wait,
     );
-    expect(screen.getAllByText('GitHub not connected')).toHaveLength(3);
+    // Only the themes and their roles: no branch, commit or action columns.
+    expect(screen.getByText('spare')).toBeInTheDocument();
+    expect(screen.queryByText('Receives')).not.toBeInTheDocument();
+    expect(screen.queryByText('Theme is on')).not.toBeInTheDocument();
+    expect(screen.queryByText('No sync yet')).not.toBeInTheDocument();
     expect(screen.queryByText('Open mapping')).not.toBeInTheDocument();
     expect(screen.queryByText('Map a branch')).not.toBeInTheDocument();
     expect(screen.queryByText('main')).not.toBeInTheDocument();
@@ -437,6 +441,33 @@ describe('Themes page without GitHub', () => {
 });
 
 describe('Settings', () => {
+  it('shows no repository while GitHub is disconnected', async () => {
+    const { api } = await import('../../app/lib/api-client');
+    (api.github.connection as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      connected: false,
+      connection: null,
+    });
+    const { container } = render(
+      <MemoryRouter initialEntries={['/settings']}>
+        <Settings />
+      </MemoryRouter>,
+    );
+    expect(
+      await screen.findByText(
+        'Connect GitHub above, then choose the repository the app syncs from.',
+        {},
+        { timeout: 5000 },
+      ),
+    ).toBeInTheDocument();
+    const labels = [...container.querySelectorAll('s-select')].map((el) => el.getAttribute('label'));
+    expect(labels).not.toContain('Repository');
+    expect(screen.queryByText('acme/theme')).not.toBeInTheDocument();
+    (api.github.connection as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      connected: true,
+      connection: null,
+    });
+  });
+
   it('chooses one repository, with no branch choice and no separate repositories page', async () => {
     const { container } = render(
       <MemoryRouter initialEntries={['/settings']}>

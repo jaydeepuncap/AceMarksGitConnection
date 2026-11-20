@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { ErrorBanner } from '../../app/components/ErrorBanner';
 import { LoadingState } from '../../app/components/LoadingState';
@@ -80,6 +80,71 @@ describe('loading and error states', () => {
 });
 
 describe('pages', () => {
+  it('Sync details shows the result, counts, included commits and files', async () => {
+    (api.sync.get as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: 'a237643b-25d7-43af-a214-5266c0a5226d',
+      repository: 'acme/theme',
+      branch: 'UI-chages',
+      commitSha: 'd818759' + '0'.repeat(33),
+      commitMessage: 'Fix the upload issue',
+      themeId: 'gid://shopify/OnlineStoreTheme/190367367473',
+      themeName: 'Copy of Dawn',
+      themeRole: 'UNPUBLISHED',
+      strategy: 'selected_commits',
+      status: 'succeeded',
+      filesChanged: 1,
+      filesSucceeded: 1,
+      filesFailed: 0,
+      filesSkipped: 0,
+      filesIgnored: 0,
+      errorDetails: null,
+      attempt: 1,
+      initiatedAt: '2026-11-19T10:59:03Z',
+      startedAt: '2026-11-19T10:59:03Z',
+      completedAt: '2026-11-19T10:59:06Z',
+      canRetry: false,
+      baseSha: '5e41c63' + '0'.repeat(33),
+      commitsIncluded: [
+        { sha: '2b69c0d' + '0'.repeat(33), shortSha: '2b69c0d', message: 'Add the slide show section' },
+        { sha: 'd818759' + '0'.repeat(33), shortSha: 'd818759', message: 'Fix the upload issue' },
+      ],
+      backedUp: 1,
+      allowDeletes: false,
+      canRestore: false,
+      restoredAt: null,
+      restoredFiles: 0,
+      operations: [
+        {
+          id: 'op1',
+          path: 'sections/review-slide-show.liquid',
+          action: 'upsert',
+          status: 'succeeded',
+          changeType: 'modified',
+          previousPath: null,
+          skipReason: null,
+          sourceCommitSha: 'd818759' + '0'.repeat(33),
+          attempts: 1,
+          lastAttemptAt: null,
+          failure: null,
+        },
+      ],
+    });
+    const { container } = wrap(<SyncHistory />, '/sync-history?id=a237643b-25d7-43af-a214-5266c0a5226d');
+    expect(await screen.findByText('Update complete', {}, { timeout: 5000 })).toBeInTheDocument();
+    expect(screen.getByText('Copy of Dawn is now on d818759 · Fix the upload issue.')).toBeInTheDocument();
+    // Files tab first: counts and the file; the commits and summary are one click away.
+    expect(screen.getByText('Review slide show section')).toBeInTheDocument();
+    expect(screen.getByText('1 backed up')).toBeInTheDocument();
+    expect(screen.getByText('Multiple commits · 2 commits · 1 of 1 file updated · took 3s')).toBeInTheDocument();
+    expect(screen.queryByText('Add the slide show section')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText('Updates included (2)'));
+    expect(await screen.findByText('Add the slide show section')).toBeInTheDocument();
+    expect(screen.getByText('Theme is on this')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('Summary'));
+    expect(await screen.findByText('Job ID')).toBeInTheDocument();
+    expect(container.querySelector('s-button[href="shopify://admin/themes/190367367473/editor"]')).not.toBeNull();
+  });
+
   it('Sync history lists runs with their status', async () => {
     mocked.sync.history.mockResolvedValue({
       items: [
@@ -125,7 +190,9 @@ describe('pages', () => {
     // File counts are on the sync's own page, not in the list.
     expect(screen.queryByText(/ok · .* failed/)).not.toBeInTheDocument();
     expect(screen.getAllByText('Single commit').length).toBeGreaterThan(1); // type column + filter option
-    expect(screen.getByText('View / retry')).toBeInTheDocument();
+    // A retryable sync's row action is a Retry button; the job ID is not shown in the list.
+    expect(screen.getByText('Retry')).toBeInTheDocument();
+    expect(screen.queryByText(/^Job /)).not.toBeInTheDocument();
   });
 });
 

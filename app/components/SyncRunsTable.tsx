@@ -3,7 +3,8 @@ import { api } from '../lib/api-client';
 import { firstLine, formatDate, SYNC_STATUS_BADGE, syncTypeLabel } from '../lib/format';
 import { useApiQuery, useNavigateHandler } from '../lib/hooks';
 import { ErrorBanner } from './ErrorBanner';
-import { Badge, Button, IndexTable, IndexTableCell, IndexTableRow, Paragraph, Stack, Text } from './ui';
+import { Badge, IndexTable, IndexTableCell, IndexTableRow, Paragraph, Stack, Text } from './ui';
+import { ViewSyncButton } from './ViewSyncButton';
 
 /** Syncs applied to one theme from one branch, newest first (persistent, paginated). */
 export function SyncRunsTable({
@@ -68,9 +69,7 @@ export function SyncRunsTable({
                 {`${run.filesSucceeded} ok${run.filesFailed ? ` · ${run.filesFailed} failed` : ''}${run.filesIgnored ? ` · ${run.filesIgnored} ignored` : ''}`}
               </IndexTableCell>
               <IndexTableCell>
-                <Button variant="tertiary" onClick={go(`/sync-history?id=${run.id}`)}>
-                  {run.canRetry ? 'Open / retry' : 'Open'}
-                </Button>
+                <ViewSyncButton run={run} onOpen={go(`/sync-history?id=${run.id}`)} />
               </IndexTableCell>
             </IndexTableRow>
           );

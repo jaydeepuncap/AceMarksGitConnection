@@ -85,12 +85,17 @@ export default function Themes() {
         ) : (
           <IndexTable
             variant="auto"
+            // Without GitHub (or a repository) only the store's themes are listed: no branch, commit or action.
             columns={[
               { title: 'Theme', listSlot: 'primary' },
               { title: 'Role', listSlot: 'inline' },
-              { title: 'Receives', listSlot: 'secondary' },
-              { title: 'Theme is on', listSlot: 'labeled' },
-              { title: 'Action' },
+              ...(linked
+                ? [
+                    { title: 'Receives', listSlot: 'secondary' },
+                    { title: 'Theme is on', listSlot: 'labeled' },
+                    { title: 'Action' },
+                  ]
+                : []),
             ]}
             rows={items.map((t) => {
               const m = mappings.data?.items.find((x) => x.themeId === t.id);
@@ -111,43 +116,43 @@ export default function Themes() {
                   <IndexTableCell>
                     <Badge tone={role.tone}>{role.label}</Badge>
                   </IndexTableCell>
-                  <IndexTableCell>
-                    {!linked ? (
-                      <Text color="subdued">{disconnected ? 'GitHub not connected' : 'No repository'}</Text>
-                    ) : m ? (
-                      <Stack direction="inline" gap="small-100" alignItems="center">
-                        <Icon type="git-branch" />
-                        <Text>{sameRepo(m) ? m.branch : `${m.repository} · ${m.branch}`}</Text>
-                      </Stack>
-                    ) : (
-                      <Text color="subdued">{t.writable ? 'Not mapped' : 'Cannot be synced'}</Text>
-                    )}
-                  </IndexTableCell>
-                  <IndexTableCell>
-                    {on ? (
-                      <Stack gap="none">
-                        <Text>{`${on.shortSha} · ${firstLine(on.message)}`}</Text>
-                        <Text color="subdued">{`${on.branch} · ${formatDate(on.syncedAt)}`}</Text>
-                      </Stack>
-                    ) : (
-                      <Text color="subdued">No sync yet</Text>
-                    )}
-                  </IndexTableCell>
-                  <IndexTableCell>
-                    {!linked ? (
-                      <Text color="subdued">—</Text>
-                    ) : m && sameRepo(m) ? (
-                      <Button variant="tertiary" onClick={go(`/mappings/${m.id}`)}>
-                        Open mapping
-                      </Button>
-                    ) : !m && t.writable ? (
-                      <Button variant="tertiary" onClick={go(`/mappings?themeId=${encodeURIComponent(t.id)}`)}>
-                        Map a branch
-                      </Button>
-                    ) : (
-                      <Text color="subdued">—</Text>
-                    )}
-                  </IndexTableCell>
+                  {linked && (
+                    <>
+                      <IndexTableCell>
+                        {m ? (
+                          <Stack direction="inline" gap="small-100" alignItems="center">
+                            <Icon type="git-branch" />
+                            <Text>{sameRepo(m) ? m.branch : `${m.repository} · ${m.branch}`}</Text>
+                          </Stack>
+                        ) : (
+                          <Text color="subdued">{t.writable ? 'Not mapped' : 'Cannot be synced'}</Text>
+                        )}
+                      </IndexTableCell>
+                      <IndexTableCell>
+                        {on ? (
+                          <Stack gap="none">
+                            <Text>{`${on.shortSha} · ${firstLine(on.message)}`}</Text>
+                            <Text color="subdued">{`${on.branch} · ${formatDate(on.syncedAt)}`}</Text>
+                          </Stack>
+                        ) : (
+                          <Text color="subdued">No sync yet</Text>
+                        )}
+                      </IndexTableCell>
+                      <IndexTableCell>
+                        {m && sameRepo(m) ? (
+                          <Button variant="tertiary" onClick={go(`/mappings/${m.id}`)}>
+                            Open mapping
+                          </Button>
+                        ) : !m && t.writable ? (
+                          <Button variant="tertiary" onClick={go(`/mappings?themeId=${encodeURIComponent(t.id)}`)}>
+                            Map a branch
+                          </Button>
+                        ) : (
+                          <Text color="subdued">—</Text>
+                        )}
+                      </IndexTableCell>
+                    </>
+                  )}
                 </IndexTableRow>
               );
             })}
