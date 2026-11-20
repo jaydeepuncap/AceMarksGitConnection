@@ -32,6 +32,7 @@ const NOTICES: Partial<Record<string, { tone: 'info' | 'warning'; heading: strin
   PREVIEW_EXPIRED: { tone: 'warning', heading: 'Preview expired' },
   RATE_LIMITED: { tone: 'warning', heading: 'Please wait a moment' },
   GITHUB_RATE_LIMITED: { tone: 'warning', heading: 'GitHub is busy' },
+  SUBREQUEST_LIMIT: { tone: 'warning', heading: 'Too many requests at once' },
   DIRECT_EDITS_FOUND: { tone: 'warning', heading: 'Files were edited directly in Shopify' },
 };
 

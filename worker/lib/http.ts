@@ -61,10 +61,27 @@ export async function fetchWithRetry(
         attempt++;
         continue;
       }
+      const host = (() => {
+        try {
+          return new URL(input).hostname;
+        } catch {
+          return 'the upstream service';
+        }
+      })();
       if (isTimeout) {
-        throw new ApiError(504, 'UPSTREAM_TIMEOUT', `Upstream request timed out after ${timeoutMs} ms`);
+        throw new ApiError(504, 'UPSTREAM_TIMEOUT', `${host} did not answer within ${timeoutMs / 1000} s. Try again.`);
       }
-      throw new ApiError(502, 'INTERNAL_ERROR', 'Upstream request failed', { cause: err });
+      const reason = err instanceof Error ? err.message : String(err);
+      // Cloudflare refuses requests beyond the invocation's subrequest limit (worker/lib/limits.ts).
+      if (/subrequest/i.test(reason)) {
+        throw new ApiError(
+          503,
+          'SUBREQUEST_LIMIT',
+          'This step needed more requests to GitHub and Shopify than Cloudflare allows at once. Try again; if it keeps happening, ignore files you do not sync or raise SUBREQUEST_BUDGET on a paid Workers plan.',
+          { cause: err },
+        );
+      }
+      throw new ApiError(502, 'UPSTREAM_UNREACHABLE', `Could not reach ${host}: ${reason}`, { cause: err });
     }
 
     const retryable = response.status === 429 || (idempotent && response.status >= 500);

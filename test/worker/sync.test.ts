@@ -190,6 +190,27 @@ describe('sync workflow', () => {
       expect(detail.data).toMatchObject({ status: 'succeeded', filesSucceeded: 3, filesFailed: 0, canRetry: false });
     });
 
+    it('stays within the Cloudflare request budget: writes a few files per step and continues', async () => {
+      await setup();
+      // The smallest budget writes one file per step (worker/lib/limits.ts).
+      (t.env as { SUBREQUEST_BUDGET?: string }).SUBREQUEST_BUDGET = '20';
+      const { body: p } = await preview({});
+      // The preview downloads no files for its checks with this budget; they are checked when applied.
+      expect(p.data.checks.code.filesChecked).toBe(0);
+      expect(p.data.checks.code.filesDeferred).toBeGreaterThan(0);
+      await api<SyncRun>('POST', '/api/sync', { syncId: p.data.syncId, confirm: true });
+
+      let steps = 0;
+      for (; steps < 20 && t.queue.sent.length > 0; steps++) {
+        const msg = t.queue.sent.shift()!;
+        const delay = await handleSyncMessage(t.env, msg.body, logger);
+        if (delay !== null) t.queue.sent.push({ body: msg.body });
+      }
+      expect(steps).toBeGreaterThanOrEqual(3); // 3 files, one per step
+      const { body: detail } = await api<SyncRunDetail>('GET', `/api/sync/history/${p.data.syncId}`);
+      expect(detail.data).toMatchObject({ status: 'succeeded', filesSucceeded: 3, filesFailed: 0 });
+    });
+
     it('requires confirm: true and refuses to execute a preview twice', async () => {
       await setup();
       const { body: p } = await preview({});

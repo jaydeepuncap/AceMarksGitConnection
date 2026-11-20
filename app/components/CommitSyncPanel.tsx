@@ -39,6 +39,20 @@ export const COMMIT_STATUS: Record<CommitSyncStatus, { label: string; tone: Tone
   added: { label: 'Added', tone: 'neutral' },
 };
 
+/** "+16 −0" on one line: additions in green, deletions in red, zero counts muted. */
+function LineChanges({ added, removed }: { added: number; removed: number }) {
+  return (
+    <Text style={{ whiteSpace: 'nowrap' }} accessibilityLabel={`${added} lines added, ${removed} removed`}>
+      <Text type="strong" tone={added ? 'success' : 'auto'} color={added ? 'base' : 'subdued'}>{`+${added}`}</Text>{' '}
+      <Text
+        type="strong"
+        tone={removed ? 'critical' : 'auto'}
+        color={removed ? 'base' : 'subdued'}
+      >{`−${removed}`}</Text>
+    </Text>
+  );
+}
+
 /** Files changed by one commit and the theme path each maps to (shown in the files modal). */
 function CommitFiles({ sha, repository }: { sha: string; repository: string }) {
   const [filePage, setFilePage] = useState(1);
@@ -64,9 +78,12 @@ function CommitFiles({ sha, repository }: { sha: string; repository: string }) {
         commit && (
           <Stack gap="small-200">
             <Text type="strong">{`${commit.sha.slice(0, 7)} · ${firstLine(commit.message)}`}</Text>
-            <Text color="subdued">
-              {`${commit.authorLogin ?? commit.authorName ?? 'Unknown author'} · ${formatDate(commit.date)} · ${commit.filesCount} file(s) · +${commit.stats.additions} −${commit.stats.deletions}`}
-            </Text>
+            <Stack direction="inline" gap="small-200" alignItems="center">
+              <Text color="subdued">
+                {`${commit.authorLogin ?? commit.authorName ?? 'Unknown author'} · ${formatDate(commit.date)} · ${commit.filesCount} file(s) ·`}
+              </Text>
+              <LineChanges added={commit.stats.additions} removed={commit.stats.deletions} />
+            </Stack>
             {commit.filesTruncated && (
               <Banner tone="warning" heading="Large commit">
                 <Paragraph>
@@ -112,7 +129,9 @@ function CommitFiles({ sha, repository }: { sha: string; repository: string }) {
                   <Text tone="success">{file.themePath}</Text>
                 )}
               </IndexTableCell>
-              <IndexTableCell>{`+${file.additions} −${file.deletions}`}</IndexTableCell>
+              <IndexTableCell>
+                <LineChanges added={file.additions} removed={file.deletions} />
+              </IndexTableCell>
             </IndexTableRow>
           );
         })}

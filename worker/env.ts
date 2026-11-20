@@ -28,6 +28,8 @@ export interface Env {
   SHOPIFY_SCOPES: string;
   SHOPIFY_APP_URL?: string;
   GITHUB_API_BASE_URL?: string;
+  /** Requests one invocation may make (worker/lib/limits.ts). Default 45 (Workers Free); raise on Paid. */
+  SUBREQUEST_BUDGET?: string;
 
   // Secrets (wrangler secret put / .dev.vars)
   SHOPIFY_API_KEY: string;

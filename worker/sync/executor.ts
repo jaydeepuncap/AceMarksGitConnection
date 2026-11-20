@@ -51,6 +51,7 @@ import { splitRepository } from '../lib/validators';
 import { IGNORED_REASON, MAX_FILE_BYTES, md5Matches } from './planner';
 import { isIgnored } from '../../shared/theme-paths';
 import type { SyncHistoryRow, SyncOperationRow } from '../../drizzle/schema';
+import { filesPerStep, subrequestBudget } from '../lib/limits';
 
 const MAX_OPERATION_ATTEMPTS = 3;
 const MAX_UPSERT_PAYLOAD_BYTES = 4 * 1024 * 1024;
@@ -450,9 +451,18 @@ export async function processSyncChunk(
 
   const ctx = { db, shopId, github, admin, logger, kv: env.KV, fetchImpl: options.fetchImpl };
   const ignorePatterns = (await getSettings(db, shopId)).syncPreferences.ignorePatterns;
+  // Cloudflare limits the requests of one invocation: write at most this many files now and let the
+  // next step (queue message, or the next status poll) continue.
+  const stepLimit = filesPerStep(subrequestBudget(env));
+  let filesThisStep = 0;
   try {
-    while (Date.now() < options.deadline) {
-      const listed = await listPendingOperations(db, shopId, syncId, THEME_WRITE_BATCH_LIMIT);
+    while (Date.now() < options.deadline && filesThisStep < stepLimit) {
+      const listed = await listPendingOperations(
+        db,
+        shopId,
+        syncId,
+        Math.min(THEME_WRITE_BATCH_LIMIT, stepLimit - filesThisStep),
+      );
       if (listed.length === 0) break;
       // Ignored files are never modified, even when the pattern was added after the preview.
       const nowIgnored = listed.filter((op) => isIgnored(op.path, ignorePatterns));
@@ -471,6 +481,7 @@ export async function processSyncChunk(
       if (deletes.length > 0) await processDeletes(ctx, run, deletes);
       // Progress after every batch, so the result page counts files as they are updated.
       await saveProgress(db, shopId, syncId);
+      filesThisStep += listed.length;
     }
   } catch (err) {
     if (err instanceof ApiError && err.code === 'GITHUB_RATE_LIMITED') {

@@ -377,6 +377,10 @@ describe('Changed files of a commit', () => {
     fireEvent.click(screen.getByText('3 files'));
     expect(container.querySelector('s-modal[heading="Files changed in ddddddd"]')).not.toBeNull();
     expect(await screen.findAllByText('sections/banner.liquid', {}, wait)).toHaveLength(2);
+    // Line changes on one line: +10 in green, −2 in red.
+    // (shown for the file and in the commit's totals)
+    for (const el of screen.getAllByText('+10')) expect(el.getAttribute('tone')).toBe('success');
+    for (const el of screen.getAllByText('−2')) expect(el.getAttribute('tone')).toBe('critical');
   });
 });
 
