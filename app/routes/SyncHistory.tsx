@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { AppLayout } from '../components/AppLayout';
 import { ConfirmSyncModal } from '../components/ConfirmSyncModal';
 import { ErrorBanner } from '../components/ErrorBanner';
@@ -646,6 +646,7 @@ const ALL = 'all';
 const SYNC_TYPES: SyncStrategy[] = ['full_snapshot', 'commit_changes', 'selected_commits', 'since_last_sync'];
 
 function SyncList({ onOpen }: { onOpen: (id: string) => void }) {
+  const navigate = useNavigate();
   const [page, setPage] = useState(1);
   const [status, setStatus] = useState<SyncStatus | ''>('');
   const [themeId, setThemeId] = useState('');
@@ -674,6 +675,15 @@ function SyncList({ onOpen }: { onOpen: (id: string) => void }) {
       setPage(1);
     };
   const filtered = !!(status || themeId || branch || strategy);
+  const clearFilters = () => {
+    setStatus('');
+    setThemeId('');
+    setBranch('');
+    setStrategy('');
+    setPage(1);
+  };
+  // No rows at all: show a message instead of an empty table.
+  const empty = !history.loading && !history.error && (history.data?.items.length ?? 0) === 0 && page === 1;
 
   return (
     <AppLayout
@@ -741,80 +751,86 @@ function SyncList({ onOpen }: { onOpen: (id: string) => void }) {
           </Select>
         </Grid>
         {filtered && (
-          <Button
-            slot="secondary-actions"
-            variant="tertiary"
-            onClick={() => {
-              setStatus('');
-              setThemeId('');
-              setBranch('');
-              setStrategy('');
-              setPage(1);
-            }}
-          >
+          <Button slot="secondary-actions" variant="tertiary" onClick={clearFilters}>
             Clear filters
           </Button>
         )}
       </Section>
 
-      <Section padding="none" accessibilityLabel="Sync history">
-        <IndexTable
-          variant="auto"
-          loading={history.loading}
-          paginate
-          hasPreviousPage={page > 1}
-          hasNextPage={!!history.data?.hasNextPage}
-          onPreviousPage={() => setPage((p) => Math.max(1, p - 1))}
-          onNextPage={() => setPage((p) => p + 1)}
-          columns={[
-            { title: 'Commits', listSlot: 'primary' },
-            { title: 'Repository · branch → theme', listSlot: 'secondary' },
-            { title: 'Type', listSlot: 'labeled' },
-            { title: 'Status', listSlot: 'inline' },
-            { title: 'Started', listSlot: 'labeled' },
-            { title: 'Completed', listSlot: 'labeled' },
-            { title: 'Details' },
-          ]}
-          rows={(history.data?.items ?? []).map((run) => {
-            const shas =
-              run.commitsIncluded.length > 1 ? run.commitsIncluded.map((c) => c.shortSha) : [run.commitSha.slice(0, 7)];
-            return (
-              <IndexTableRow key={run.id}>
-                <IndexTableCell>
-                  <Stack gap="none">
-                    <Text type="strong">
-                      {shas.length > 3 ? `${shas[0]} … ${shas[shas.length - 1]} (${shas.length})` : shas.join(', ')}
-                    </Text>
-                    <Text color="subdued">{firstLine(run.commitMessage)}</Text>
-                    {run.errorDetails && <Text tone="critical">{run.errorDetails.message}</Text>}
-                  </Stack>
-                </IndexTableCell>
-                <IndexTableCell>
-                  {`${run.repository} · ${run.branch ?? '—'} → ${run.themeName}${run.themeRole === 'MAIN' ? ' (live)' : ''}`}
-                </IndexTableCell>
-                <IndexTableCell>{syncTypeLabel(run.strategy)}</IndexTableCell>
-                <IndexTableCell>
-                  <Badge tone={SYNC_STATUS_BADGE[run.status].tone}>{SYNC_STATUS_BADGE[run.status].label}</Badge>
-                </IndexTableCell>
-                <IndexTableCell>{formatDate(run.startedAt ?? run.initiatedAt)}</IndexTableCell>
-                <IndexTableCell>{formatDate(run.completedAt)}</IndexTableCell>
-                <IndexTableCell>
-                  <ViewSyncButton run={run} onOpen={() => onOpen(run.id)} />
-                </IndexTableCell>
-              </IndexTableRow>
-            );
-          })}
-        />
-        {!history.loading && history.data?.items.length === 0 && (
-          <Box padding="base">
-            <Paragraph color="subdued">
-              {filtered
-                ? 'No synchronizations match these filters.'
-                : 'No synchronizations yet. Start one from Theme mapping or Commit sync.'}
-            </Paragraph>
+      {empty ? (
+        <Section accessibilityLabel="Sync history">
+          <Box padding="large">
+            <Stack gap="base" alignItems="center">
+              <Icon type={filtered ? 'filter' : 'clock'} />
+              <Heading>{filtered ? 'No syncs match these filters' : 'No syncs yet'}</Heading>
+              <Paragraph color="subdued">
+                {filtered
+                  ? 'Try another theme, branch, sync type or status, or clear the filters to see every sync.'
+                  : 'Syncs you run appear here with their status and files. Open a mapping on Theme mapping to run your first sync — you review every change before anything is written.'}
+              </Paragraph>
+              {filtered ? (
+                <Button onClick={clearFilters}>Clear filters</Button>
+              ) : (
+                <Button variant="primary" onClick={() => navigate('/mappings')}>
+                  Go to Theme mapping
+                </Button>
+              )}
+            </Stack>
           </Box>
-        )}
-      </Section>
+        </Section>
+      ) : (
+        <Section padding="none" accessibilityLabel="Sync history">
+          <IndexTable
+            variant="auto"
+            loading={history.loading}
+            paginate
+            hasPreviousPage={page > 1}
+            hasNextPage={!!history.data?.hasNextPage}
+            onPreviousPage={() => setPage((p) => Math.max(1, p - 1))}
+            onNextPage={() => setPage((p) => p + 1)}
+            columns={[
+              { title: 'Commits', listSlot: 'primary' },
+              { title: 'Repository · branch → theme', listSlot: 'secondary' },
+              { title: 'Type', listSlot: 'labeled' },
+              { title: 'Status', listSlot: 'inline' },
+              { title: 'Started', listSlot: 'labeled' },
+              { title: 'Completed', listSlot: 'labeled' },
+              { title: 'Details' },
+            ]}
+            rows={(history.data?.items ?? []).map((run) => {
+              const shas =
+                run.commitsIncluded.length > 1
+                  ? run.commitsIncluded.map((c) => c.shortSha)
+                  : [run.commitSha.slice(0, 7)];
+              return (
+                <IndexTableRow key={run.id}>
+                  <IndexTableCell>
+                    <Stack gap="none">
+                      <Text type="strong">
+                        {shas.length > 3 ? `${shas[0]} … ${shas[shas.length - 1]} (${shas.length})` : shas.join(', ')}
+                      </Text>
+                      <Text color="subdued">{firstLine(run.commitMessage)}</Text>
+                      {run.errorDetails && <Text tone="critical">{run.errorDetails.message}</Text>}
+                    </Stack>
+                  </IndexTableCell>
+                  <IndexTableCell>
+                    {`${run.repository} · ${run.branch ?? '—'} → ${run.themeName}${run.themeRole === 'MAIN' ? ' (live)' : ''}`}
+                  </IndexTableCell>
+                  <IndexTableCell>{syncTypeLabel(run.strategy)}</IndexTableCell>
+                  <IndexTableCell>
+                    <Badge tone={SYNC_STATUS_BADGE[run.status].tone}>{SYNC_STATUS_BADGE[run.status].label}</Badge>
+                  </IndexTableCell>
+                  <IndexTableCell>{formatDate(run.startedAt ?? run.initiatedAt)}</IndexTableCell>
+                  <IndexTableCell>{formatDate(run.completedAt)}</IndexTableCell>
+                  <IndexTableCell>
+                    <ViewSyncButton run={run} onOpen={() => onOpen(run.id)} />
+                  </IndexTableCell>
+                </IndexTableRow>
+              );
+            })}
+          />
+        </Section>
+      )}
     </AppLayout>
   );
 }

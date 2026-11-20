@@ -145,6 +145,14 @@ describe('pages', () => {
     expect(container.querySelector('s-button[href="shopify://admin/themes/190367367473/editor"]')).not.toBeNull();
   });
 
+  it('Sync history shows a message instead of an empty table', async () => {
+    mocked.sync.history.mockResolvedValueOnce({ items: [], page: 1, perPage: 20, hasNextPage: false });
+    const { container } = wrap(<SyncHistory />, '/sync-history');
+    expect(await screen.findByText('No syncs yet', {}, { timeout: 5000 })).toBeInTheDocument();
+    expect(screen.getByText('Go to Theme mapping')).toBeInTheDocument();
+    expect(container.querySelector('s-table')).toBeNull();
+  });
+
   it('Sync history lists runs with their status', async () => {
     mocked.sync.history.mockResolvedValue({
       items: [
