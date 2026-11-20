@@ -270,6 +270,8 @@ export const createMappingSchema = z
     repository: repositorySchema.optional(),
     branch: branchSchema,
     themeId: themeIdSchema,
+    /** Required when the theme is the live theme: every sync then changes the storefront. */
+    confirmLive: z.boolean().optional(),
   })
   .strict();
 
@@ -278,6 +280,7 @@ export const updateMappingSchema = z
     branch: branchSchema.optional(),
     themeId: themeIdSchema.optional(),
     confirm: z.literal(true),
+    confirmLive: z.boolean().optional(),
   })
   .strict()
   .refine((v) => v.branch !== undefined || v.themeId !== undefined, 'Give a new branch or theme');

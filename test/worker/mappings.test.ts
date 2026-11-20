@@ -33,7 +33,9 @@ describe('branch to theme mappings', () => {
     );
     return { status: res.status, body: (await res.json()) as { data: T; error: { code: string; message: string } } };
   };
-  const map = (branch: string, themeId: string) => api<ThemeMapping>('POST', '/api/mappings', { branch, themeId });
+  // The live theme needs an explicit confirmation (tested below); the other tests give it.
+  const map = (branch: string, themeId: string) =>
+    api<ThemeMapping>('POST', '/api/mappings', { branch, themeId, ...(themeId === THEME_LIVE.id ? { confirmLive: true } : {}) });
 
   it('maps a branch to a theme and lists it', async () => {
     await setup();
@@ -71,6 +73,17 @@ describe('branch to theme mappings', () => {
     expect(isUniqueViolation(sameTheme)).toBe(true);
   });
 
+  it('maps a branch to the live theme only with an explicit confirmation', async () => {
+    await setup();
+    const unconfirmed = await api<ThemeMapping>('POST', '/api/mappings', { branch: 'main', themeId: THEME_LIVE.id });
+    expect(unconfirmed.status).toBe(422);
+    expect(unconfirmed.body.error.code).toBe('LIVE_THEME_CONFIRMATION_REQUIRED');
+    const created = await map('main', THEME_DEV.id);
+    const moved = await api<ThemeMapping>('PUT', `/api/mappings/${created.body.data.id}`, { themeId: THEME_LIVE.id, confirm: true });
+    expect(moved.status).toBe(422);
+    expect((await map('feature', THEME_LIVE.id)).status).toBe(201);
+  });
+
   it('rejects branches and themes that do not exist', async () => {
     await setup();
     expect((await map('no-such-branch', THEME_DEV.id)).status).toBe(404);
@@ -82,7 +95,7 @@ describe('branch to theme mappings', () => {
     const { body } = await map('main', THEME_DEV.id);
     expect((await api('DELETE', `/api/mappings/${body.data.id}`, {})).status).toBe(400); // confirm missing
 
-    const changed = await api<ThemeMapping>('PUT', `/api/mappings/${body.data.id}`, { themeId: THEME_LIVE.id, confirm: true });
+    const changed = await api<ThemeMapping>('PUT', `/api/mappings/${body.data.id}`, { themeId: THEME_LIVE.id, confirm: true, confirmLive: true });
     expect(changed.status).toBe(200);
     expect(changed.body.data).toMatchObject({ branch: 'main', themeId: THEME_LIVE.id });
     // The theme freed by the change can be mapped again.

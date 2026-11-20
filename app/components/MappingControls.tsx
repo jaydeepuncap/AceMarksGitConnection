@@ -4,12 +4,43 @@ import { showToast } from '../lib/app-bridge';
 import { useMutation } from '../lib/hooks';
 import type { FieldEvent, ShopifyTheme, SyncPreview, ThemeMapping } from '../lib/types';
 import { ErrorBanner } from './ErrorBanner';
-import { Button, Checkbox, List, Modal, Option, Paragraph, Select, Stack } from './ui';
+import { Banner, Button, Checkbox, List, Modal, Option, Paragraph, Select, Stack } from './ui';
 import { ConfirmModal } from './Common/ConfirmModal';
 
 const NONE = '__none__';
 
-export const themeLabel = (t: ShopifyTheme) => `${t.name}${t.isLive ? ' (live)' : ''}`;
+export const themeLabel = (t: ShopifyTheme) => `${t.name}${t.isLive ? ' (live — customers see every sync)' : ''}`;
+
+/**
+ * Shown when the live theme is chosen for a mapping: every sync from the branch then changes the
+ * storefront, so the merchant must confirm (the server requires it too).
+ */
+export function LiveThemeWarning({
+  theme,
+  branch,
+  checked,
+  onChange,
+}: {
+  theme: ShopifyTheme;
+  branch: string | null;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <Banner tone="critical" heading={`${theme.name} is your live theme`}>
+      <Stack gap="small-200">
+        <Paragraph>
+          {`Every sync from ${branch ?? 'this branch'} will change what customers see right away. The safer setup is to map a copy of your live theme, check it, and publish it in Shopify when you are happy.`}
+        </Paragraph>
+        <Checkbox
+          label="I understand that syncs to this theme change my storefront"
+          checked={checked}
+          onChange={(event: FieldEvent) => onChange(event.currentTarget.checked)}
+        />
+      </Stack>
+    </Banner>
+  );
+}
 
 /** Themes a mapping may move to: every other theme, disabled when it cannot be used. */
 export function themeOptionsFor(mapping: ThemeMapping | null, themes: ShopifyTheme[], mappings: ThemeMapping[]) {
@@ -95,13 +126,17 @@ export function MappingActionDialogs({
   onRemoved: () => void;
 }) {
   const [newThemeId, setNewThemeId] = useState('');
-  const update = useMutation((themeId: string) => api.mappings.update(mapping.id, { themeId, confirm: true }));
+  const [liveAck, setLiveAck] = useState(false);
+  const update = useMutation((themeId: string) =>
+    api.mappings.update(mapping.id, { themeId, confirm: true, ...(liveAck ? { confirmLive: true } : {}) }),
+  );
   const remove = useMutation(() => api.mappings.remove(mapping.id));
   const newTheme = themeOptions.find((o) => o.theme.id === newThemeId)?.theme;
   const free = themeOptions.filter((o) => !o.disabledReason).length;
 
   const close = () => {
     setNewThemeId('');
+    setLiveAck(false);
     update.clearError();
     remove.clearError();
     onClose();
@@ -153,12 +188,15 @@ export function MappingActionDialogs({
               </Option>
             ))}
           </Select>
+          {newTheme?.isLive && (
+            <LiveThemeWarning theme={newTheme} branch={mapping.branch} checked={liveAck} onChange={setLiveAck} />
+          )}
           <ErrorBanner error={update.error} heading="Theme not changed" onDismiss={update.clearError} />
         </Stack>
         <Button
           slot="primary-action"
           variant="primary"
-          disabled={!newThemeId}
+          disabled={!newThemeId || (!!newTheme?.isLive && !liveAck)}
           loading={update.pending}
           onClick={doChange}
         >

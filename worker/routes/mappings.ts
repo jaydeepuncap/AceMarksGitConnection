@@ -44,7 +44,10 @@ const conflictRace = () =>
   new ApiError(409, 'MAPPING_CONFLICT', 'This branch or theme was mapped by another request at the same time. Refresh and try again.');
 
 /** Verifies the repository, branch and theme upstream; returns canonical values. */
-async function verifyTarget(c: Context<AppEnv>, input: { repository?: string; branch: string; themeId: string }) {
+async function verifyTarget(
+  c: Context<AppEnv>,
+  input: { repository?: string; branch: string; themeId: string; confirmLive?: boolean; liveCheck?: boolean },
+) {
   const { client, connection } = await githubClient(c);
   const target = await resolveRepository(c, connection, input.repository);
   const repo = await client.verifyRepositoryAccess(target.owner, target.repo);
@@ -53,6 +56,14 @@ async function verifyTarget(c: Context<AppEnv>, input: { repository?: string; br
   if (!theme) throw new ApiError(404, 'NOT_FOUND', 'Theme not found in this store');
   if (!theme.writable) {
     throw new ApiError(409, 'THEME_NOT_WRITABLE', `${theme.name} is a ${theme.role.toLowerCase()} theme and cannot be synced`);
+  }
+  // Mapping a branch to the live theme means every sync changes the storefront: it must be confirmed.
+  if ((input.liveCheck ?? true) && theme.isLive && input.confirmLive !== true) {
+    throw new ApiError(
+      422,
+      'LIVE_THEME_CONFIRMATION_REQUIRED',
+      `${theme.name} is your live theme: every sync from ${input.branch} would change your storefront. Confirm to map it, or map a copy of the theme instead.`,
+    );
   }
   return { repository: repo.fullName, branch: input.branch, theme };
 }
@@ -133,6 +144,9 @@ export const mappingsRoutes = new Hono<AppEnv>()
       repository: current.repository,
       branch: body.branch ?? current.branch,
       themeId: body.themeId ?? current.themeId,
+      confirmLive: body.confirmLive,
+      // Only a change to another theme needs the live-theme confirmation.
+      liveCheck: body.themeId !== undefined && body.themeId !== current.themeId,
     });
     await assertFree(db, shop.id, { repository, branch, themeId: theme.id, themeName: theme.name }, current.id);
     await assertNoRunningSync(db, shop.id, [...new Set([current.themeId, theme.id])]);

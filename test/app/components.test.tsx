@@ -214,3 +214,55 @@ describe('themeFileLabel', () => {
     expect(themeFileLabel('assets/cart.css')).toBe('cart.css');
   });
 });
+
+describe('Review before a full sync', () => {
+  it('asks to confirm replacing code in a theme the app never synced', async () => {
+    const { ConfirmSyncModal } = await import('../../app/components/ConfirmSyncModal');
+    const preview = {
+      syncId: 's1',
+      expiresAt: '2026-11-20T12:00:00Z',
+      base: null,
+      commitsIncluded: [],
+      conflicts: [],
+      repository: 'acme/theme',
+      branch: 'main',
+      commit: { sha: 'a'.repeat(40), message: 'Dawn 16.2.0' },
+      theme: {
+        id: 'gid://shopify/OnlineStoreTheme/1',
+        numericId: '1',
+        name: 'Copy of Dawn',
+        role: 'UNPUBLISHED',
+        isLive: false,
+        writable: true,
+      },
+      strategy: 'full_snapshot',
+      requiresLiveConfirmation: false,
+      summary: { creates: 0, updates: 204, deletes: 0, skipped: 0, ignored: 0, total: 204 },
+      warnings: [],
+      checks: {
+        code: { status: 'passed', filesChecked: 0, filesDeferred: 0, issues: [] },
+        directEdits: { status: 'skipped', files: [], note: null },
+      },
+      operations: [],
+    };
+    const { container } = wrap(
+      <ConfirmSyncModal
+        open
+        preview={preview as never}
+        submitting={false}
+        error={null}
+        onClose={() => undefined}
+        onConfirm={() => undefined}
+      />,
+    );
+    expect(container.querySelector('s-banner[heading="This replaces existing code in Copy of Dawn"]')).not.toBeNull();
+    const confirm = container.querySelector('s-button[slot="primary-action"]')!;
+    expect(confirm.hasAttribute('disabled')).toBe(true);
+    const ack = [...container.querySelectorAll('s-checkbox')].find(
+      (c) => c.getAttribute('label') === 'Replace the existing code in Copy of Dawn',
+    ) as HTMLElement & { checked?: boolean };
+    ack.checked = true;
+    fireEvent(ack, new Event('change', { bubbles: true }));
+    await waitFor(() => expect(confirm.hasAttribute('disabled')).toBe(false));
+  });
+});

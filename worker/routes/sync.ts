@@ -16,21 +16,28 @@ import type { SyncHistoryRow } from '../../drizzle/schema';
 import type { AppEnv } from '../env';
 import { adminClient, githubClient, resolveRepository } from '../lib/clients';
 import {
+  BACKUP_DAYS,
   claimRestore,
+  commitMessageFromHistory,
+  deleteLastSynced,
   findActiveSyncForTheme,
   getActiveMappingForTheme,
-  latestCompletedRun,
-  type Database,
   getDb,
   getSettings,
   getSyncRun,
+  latestCompletedRun,
+  listLastSyncedForTheme,
   listSyncOperations,
   listSyncRuns,
   mergeRunOptions,
+  newerThemeChange,
+  recordFailedPreview,
   resetFailedOperations,
+  saveLastSynced,
   toSyncOperationDto,
   toSyncRunDto,
   transitionSyncRun,
+  type Database,
 } from '../lib/database';
 import { ApiError, ok } from '../lib/response';
 import { getTheme } from '../lib/shopify-graphql';
@@ -49,6 +56,7 @@ import { rateLimit } from '../middleware/error-handler';
 import { dispatchSync, STALE_RUN_MS } from '../sync/dispatch';
 import { buildSyncPreview } from '../sync/planner';
 import { restoreBackup } from '../sync/restore';
+import { rewriteThemeSyncMarker } from '../sync/theme-state';
 import { previewDownloadBudget, subrequestBudget } from '../lib/limits';
 
 const syncLimiter = rateLimit({
@@ -140,6 +148,8 @@ export const syncRoutes = new Hono<AppEnv>()
       (await github.getRepository(target.owner, target.repo)).defaultBranch;
     await assertMapped(db, shop.id, body.themeId, target.fullName, branch);
 
+    const strategy = body.strategy ?? settings.syncPreferences.strategy;
+    const allowDeletes = body.allowDeletes ?? settings.syncPreferences.allowDeletes;
     const preview = await buildSyncPreview(
       { db, github, admin: await adminClient(c), kv: c.env.KV, logger: c.get('logger') },
       {
@@ -150,14 +160,33 @@ export const syncRoutes = new Hono<AppEnv>()
         branch,
         commitSha: body.commitSha,
         themeId: body.themeId,
-        strategy: body.strategy ?? settings.syncPreferences.strategy,
-        allowDeletes: body.allowDeletes ?? settings.syncPreferences.allowDeletes,
+        strategy,
+        allowDeletes,
         preferences: settings.syncPreferences,
         includePaths: body.includePaths,
         commitShas: body.commitShas,
         downloadBudget: previewDownloadBudget(subrequestBudget(c.env)),
       },
-    );
+    ).catch(async (err: unknown) => {
+      // A server or upstream failure (not a rejected request such as "already synced") is kept in
+      // Sync history so it can be found and run again.
+      const apiErr = err instanceof ApiError ? err : null;
+      if (!apiErr || apiErr.status >= 500) {
+        await recordFailedPreview(db, shop.id, {
+          repository: target.fullName,
+          branch,
+          commitSha: body.commitSha,
+          themeId: body.themeId,
+          themeName: mapped?.themeName ?? 'Theme',
+          themeRole: 'UNKNOWN',
+          strategy,
+          initiatedBy: userId,
+          allowDeletes,
+          error: { code: apiErr?.code ?? 'INTERNAL_ERROR', message: apiErr?.message ?? 'The review could not be prepared' },
+        }).catch((recordErr: unknown) => c.get('logger').warn('sync.preview_failure_not_recorded', { error: String(recordErr) }));
+      }
+      throw err;
+    });
     return ok<SyncPreview>(c, preview, 'Preview generated. No changes were made to the theme.', 201);
   })
   .post('/', syncLimiter, async (c) => {
@@ -247,6 +276,13 @@ export const syncRoutes = new Hono<AppEnv>()
       dto.filesFailed = operations.filter((op) => op.status === 'failed').length;
       dto.filesSkipped = operations.filter((op) => op.status === 'skipped').length;
     }
+    if (dto.canRestore) {
+      const newer = await newerThemeChange(db, shop.id, run);
+      if (newer) {
+        dto.canRestore = false;
+        dto.restoreNote = `A newer sync (${newer.commitSha.slice(0, 7)}) changed ${run.themeName} after this one. Undo that sync first to undo this one.`;
+      }
+    }
     return ok<SyncRunDetail>(c, { ...dto, operations: operations.map(toSyncOperationDto) });
   })
   .post('/history/:id/retry', syncLimiter, async (c) => {
@@ -277,7 +313,8 @@ export const syncRoutes = new Hono<AppEnv>()
     c.get('logger').info('sync.retried', { syncId: id, resetOperations: reset, attempt: queued.attempt });
     return ok<SyncRun>(c, toSyncRunDto(queued), `Retrying ${reset} failed file(s)`, 202);
   })
-  .post('/history/:id/restore', syncLimiter, async (c) => {
+  // No rate limiter: a large restore is several quick steps; the claim keeps them one at a time.
+  .post('/history/:id/restore', async (c) => {
     const id = parseOrThrow(uuidSchema, c.req.param('id'));
     const body = parseOrThrow(retrySyncSchema, await readJsonBody(c.req.raw));
     const { shop, userId } = c.get('auth');
@@ -285,28 +322,40 @@ export const syncRoutes = new Hono<AppEnv>()
     const run = await getSyncRun(db, shop.id, id);
     if (!run) throw new ApiError(404, 'NOT_FOUND', 'Sync not found');
     if (!toSyncRunDto(run).canRestore) {
-      throw new ApiError(409, 'CONFLICT', 'Only an incomplete update with a backup can be restored');
+      throw new ApiError(409, 'CONFLICT', `This update cannot be put back (backups are kept for ${BACKUP_DAYS} days)`);
+    }
+    // Undoing an older sync would also put back what a newer one changed: newest first.
+    const newer = await newerThemeChange(db, shop.id, run);
+    if (newer) {
+      throw new ApiError(
+        409,
+        'CONFLICT',
+        `A newer sync (${newer.commitSha.slice(0, 7)}) changed ${run.themeName} after this one. Undo that sync first.`,
+        { details: { newerSyncId: newer.id } },
+      );
     }
     await assertWriteAllowed(c, run, body);
     const claimed = await claimRestore(db, shop.id, id);
     if (!claimed) throw new ApiError(409, 'CONFLICT', 'This backup is already being restored; refresh in a moment');
 
+    // One step per request, within Cloudflare's request limit (each file needs a backup read).
+    const options = (claimed.options ?? {}) as Record<string, unknown>;
+    const start = typeof options.restoreCursor === 'number' ? options.restoreCursor : 0;
+    const countSoFar = typeof options.restoreCount === 'number' ? options.restoreCount : 0;
+    const admin = await adminClient(c);
     let result;
     try {
-      result = await restoreBackup({ db, admin: await adminClient(c), kv: c.env.KV, logger: c.get('logger') }, claimed);
+      result = await restoreBackup({ db, admin, kv: c.env.KV, logger: c.get('logger') }, claimed, {
+        start,
+        maxFiles: Math.max(5, subrequestBudget(c.env) - 15),
+      });
     } catch (err) {
       await mergeRunOptions(db, shop.id, id, { restoring: null });
       throw err;
     }
-    const complete = result.failed.length === 0;
-    await mergeRunOptions(db, shop.id, id, {
-      restoring: null,
-      ...(complete
-        ? { restoredAt: new Date().toISOString(), restoredFiles: result.restored + result.removed, restoredBy: userId }
-        : { restoreFailed: result.failed.slice(0, 50) }),
-    });
-    const updated = (await getSyncRun(db, shop.id, id))!;
-    if (!complete) {
+    if (result.failed.length > 0) {
+      // The step is repeated from the same file on the next try.
+      await mergeRunOptions(db, shop.id, id, { restoring: null, restoreFailed: result.failed.slice(0, 50) });
       throw new ApiError(
         502,
         'SHOPIFY_ERROR',
@@ -314,9 +363,56 @@ export const syncRoutes = new Hono<AppEnv>()
         { details: { failed: result.failed.slice(0, 50) } },
       );
     }
-    return ok<SyncRun>(
-      c,
-      toSyncRunDto(updated),
-      `Backup restored: ${result.restored} file(s) put back, ${result.removed} new file(s) removed`,
-    );
+    const count = countSoFar + result.restored + result.removed;
+    if (result.next !== null) {
+      await mergeRunOptions(db, shop.id, id, {
+        restoring: null,
+        restoreCursor: result.next,
+        restoreTotal: result.total,
+        restoreCount: count,
+      });
+      return ok<SyncRun>(
+        c,
+        toSyncRunDto((await getSyncRun(db, shop.id, id))!),
+        `Restoring: ${result.next} of ${result.total} files`,
+        202,
+      );
+    }
+    await mergeRunOptions(db, shop.id, id, {
+      restoring: null,
+      restoreCursor: null,
+      restoreTotal: null,
+      restoreCount: null,
+      restoreFailed: null,
+      restoredAt: new Date().toISOString(),
+      restoredFiles: count,
+      restoredBy: userId,
+    });
+    // A completed sync had moved the theme to its commit: move it back to the commit before it.
+    if (run.status === 'succeeded' && run.branch) {
+      const baseSha = typeof options.baseSha === 'string' ? options.baseSha : null;
+      if (baseSha) {
+        await saveLastSynced(db, shop.id, {
+          themeId: run.themeId,
+          branch: run.branch,
+          commitSha: baseSha,
+          commitMessage: await commitMessageFromHistory(db, shop.id, baseSha),
+          syncId: null,
+          syncedAt: new Date(),
+        });
+      } else {
+        await deleteLastSynced(db, shop.id, run.themeId, run.branch);
+      }
+      try {
+        await rewriteThemeSyncMarker(admin, await listLastSyncedForTheme(db, shop.id, run.themeId), {
+          id: run.themeId,
+          name: run.themeName,
+          repository: run.repository,
+        });
+      } catch (err) {
+        c.get('logger').warn('sync.undo_marker_failed', { syncId: id, error: String(err) });
+      }
+    }
+    c.get('logger').info('sync.undone', { syncId: id, files: count, completedSync: run.status === 'succeeded' });
+    return ok<SyncRun>(c, toSyncRunDto((await getSyncRun(db, shop.id, id))!), `Backup restored: ${count} file(s) put back`);
   });

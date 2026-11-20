@@ -256,6 +256,11 @@ export default function MappingDetail() {
           <Stack direction="inline" gap="base" alignItems="center" justifyContent="space-between">
             <Stack gap="small-100">
               <Text>{status?.description ?? 'Checking where the theme stands…'}</Text>
+              {status?.key === 'updates-waiting' && (
+                <Text color="subdued">
+                  Commits are never applied on their own: review the updates and confirm to sync them.
+                </Text>
+              )}
               {theme?.isLive && (
                 <Text tone="caution">This is your live theme: syncs change the storefront, and you confirm twice.</Text>
               )}

@@ -141,7 +141,7 @@ export default function Dashboard() {
     },
     {
       title: 'Map a branch to a theme',
-      description: 'For example main → Live theme and staging → a copy of it.',
+      description: 'For example main → a copy of your live theme. Check the copy, then publish it in Shopify.',
       done: mappings.length > 0,
       action: { label: 'Add mapping', to: '/mappings' },
     },

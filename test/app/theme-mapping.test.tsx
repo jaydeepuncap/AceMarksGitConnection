@@ -207,6 +207,61 @@ describe('Theme mapping page', () => {
   });
 });
 
+describe('Adding a mapping', () => {
+  it('shows the new mapping at once and keeps the other cards', async () => {
+    const { api } = await import('../../app/lib/api-client');
+    (api.mappings.create as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      mapping('m3', 'dev', '3', 'spare'),
+    );
+    const { container } = render(
+      <MemoryRouter initialEntries={['/mappings?branch=dev&themeId=gid%3A%2F%2Fshopify%2FOnlineStoreTheme%2F3']}>
+        <ThemeMapping />
+      </MemoryRouter>,
+    );
+    const wait = { timeout: 5000 };
+    expect(await screen.findByText('Mappings (2)', {}, wait)).toBeInTheDocument();
+    const before = container.querySelector('s-clickable[accessibilityLabel="Open main → abc"]');
+    // The quiet reload after adding never answers here: the new card must not wait for it.
+    (api.mappings.list as unknown as ReturnType<typeof vi.fn>).mockReturnValueOnce(new Promise(() => undefined));
+    const add = [...container.querySelectorAll('s-modal s-button')].find((b) => b.textContent === 'Add mapping')!;
+    await waitFor(() => expect(add.hasAttribute('disabled')).toBe(false), wait);
+    fireEvent.click(add);
+    expect(await screen.findByText('Mappings (3)', {}, wait)).toBeInTheDocument();
+    expect(container.querySelector('s-clickable[accessibilityLabel="Open dev → spare"]')).not.toBeNull();
+    // The existing card was not rebuilt.
+    expect(container.querySelector('s-clickable[accessibilityLabel="Open main → abc"]')).toBe(before);
+  });
+});
+
+describe('Mapping a branch to the live theme', () => {
+  it('warns and needs an explicit confirmation', async () => {
+    const { api } = await import('../../app/lib/api-client');
+    (api.themes.list as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
+      theme('1', 'abc'),
+      theme('2', 'xyz'),
+      theme('3', 'Live store', 'MAIN'),
+    ]);
+    const { container } = render(
+      <MemoryRouter initialEntries={['/mappings?branch=dev&themeId=gid%3A%2F%2Fshopify%2FOnlineStoreTheme%2F3']}>
+        <ThemeMapping />
+      </MemoryRouter>,
+    );
+    const wait = { timeout: 5000 };
+    await waitFor(
+      () => expect(container.querySelector('s-banner[heading="Live store is your live theme"]')).not.toBeNull(),
+      wait,
+    );
+    const add = [...container.querySelectorAll('s-modal s-button')].find((b) => b.textContent === 'Add mapping')!;
+    expect(add.hasAttribute('disabled')).toBe(true);
+    const ack = [...container.querySelectorAll('s-checkbox')].find(
+      (c) => c.getAttribute('label') === 'I understand that syncs to this theme change my storefront',
+    ) as HTMLElement & { checked?: boolean };
+    ack.checked = true;
+    fireEvent(ack, new Event('change', { bubbles: true }));
+    await waitFor(() => expect(add.hasAttribute('disabled')).toBe(false), wait);
+  });
+});
+
 describe('Theme mapping page when everything is mapped', () => {
   it('disables "Add mapping" and explains why', async () => {
     const { api } = await import('../../app/lib/api-client');

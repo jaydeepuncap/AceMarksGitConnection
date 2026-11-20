@@ -6,7 +6,7 @@ import { createLogger } from '../../worker/lib/logger';
 import { handleSyncMessage } from '../../worker/sync/dispatch';
 import { planCommitChanges } from '../../worker/sync/planner';
 import { createTestEnv, sessionToken, type TestContext } from '../helpers/env';
-import { seedMapping, seedShop, SHA_B, THEME_DEV, THEME_LIVE } from '../helpers/fixtures';
+import { seedMapping, seedShop, SHA_B, SHA_D, THEME_DEV, THEME_LIVE } from '../helpers/fixtures';
 import { installWorld, PNG, REPO, type WorldOptions } from '../helpers/sync-world';
 
 const SHOP = 'alpha.myshopify.com';
@@ -119,6 +119,26 @@ describe('sync workflow', () => {
   describe('preview', () => {
     beforeEach(() => setup());
 
+    it('records a review that could not be prepared in Sync history, not as the last sync', async () => {
+      world.mock.first((req) => {
+        if (req.url.includes('api.github.com') && req.url.includes('/commits/')) throw new TypeError('Network connection lost.');
+        return undefined;
+      });
+      const { status, body } = await preview({});
+      expect(status).toBe(502);
+      expect(body.error.code).toBe('UPSTREAM_UNREACHABLE');
+      const { body: history } = await api<{ items: SyncRun[] }>('GET', '/api/sync/history');
+      expect(history.data.items).toHaveLength(1);
+      expect(history.data.items[0]).toMatchObject({
+        status: 'failed',
+        commitSha: SHA_B,
+        filesChanged: 0,
+        errorDetails: { code: 'UPSTREAM_UNREACHABLE' },
+      });
+      const { body: last } = await api<SyncRun | null>('GET', `/api/sync/last?themeId=${encodeURIComponent(THEME_DEV.id)}&branch=main`);
+      expect(last.data).toBeNull();
+    }, 15000);
+
     it('builds a plan without modifying the theme', async () => {
       const { status, body } = await preview({});
       expect(status).toBe(201);
@@ -209,6 +229,20 @@ describe('sync workflow', () => {
       expect(steps).toBeGreaterThanOrEqual(3); // 3 files, one per step
       const { body: detail } = await api<SyncRunDetail>('GET', `/api/sync/history/${p.data.syncId}`);
       expect(detail.data).toMatchObject({ status: 'succeeded', filesSucceeded: 3, filesFailed: 0 });
+    });
+
+    it('confirming a review with nothing to write marks the theme as up to date', async () => {
+      await setup();
+      // Only the ignored file: nothing to write.
+      const { body: p } = await preview({ includePaths: ['config/settings_data.json'] });
+      expect(p.data.summary.creates + p.data.summary.updates + p.data.summary.deletes).toBe(0);
+      const { status } = await api<SyncRun>('POST', '/api/sync', { syncId: p.data.syncId, confirm: true });
+      expect(status).toBe(202);
+      await drainQueue();
+      const { body: detail } = await api<SyncRunDetail>('GET', `/api/sync/history/${p.data.syncId}`);
+      expect(detail.data).toMatchObject({ status: 'succeeded', filesSucceeded: 0, filesFailed: 0 });
+      const { body: last } = await api<SyncRun | null>('GET', `/api/sync/last?themeId=${encodeURIComponent(THEME_DEV.id)}&branch=main`);
+      expect(last.data?.commitSha).toBe(SHA_B);
     });
 
     it('requires confirm: true and refuses to execute a preview twice', async () => {
@@ -338,12 +372,66 @@ describe('sync workflow', () => {
       expect(detail).toMatchObject({ status: 'running', filesSucceeded: 1, filesFailed: 0, filesChanged: writes.length });
     });
 
-    it('does not restore a completed update', async () => {
+    it('undoes a completed sync in steps and moves the theme back', async () => {
       await setup();
+      const before = new Map(world.themeFiles.get(THEME_DEV.id)!);
       const { body: p } = await preview({});
       await api('POST', '/api/sync', { syncId: p.data.syncId, confirm: true });
       await drainQueue();
-      expect((await api('POST', `/api/sync/history/${p.data.syncId}/restore`, {})).status).toBe(409);
+      expect((await api<SyncRunDetail>('GET', `/api/sync/history/${p.data.syncId}`)).body.data).toMatchObject({
+        status: 'succeeded',
+        canRestore: true,
+      });
+
+      // A small request budget restores a few files per request: the client repeats until done.
+      (t.env as { SUBREQUEST_BUDGET?: string }).SUBREQUEST_BUDGET = '20';
+      let res = await api<SyncRun>('POST', `/api/sync/history/${p.data.syncId}/restore`, {});
+      let steps = 1;
+      while (res.status === 202 && steps < 10) {
+        expect(res.body.data.restoreProgress).not.toBeNull();
+        res = await api<SyncRun>('POST', `/api/sync/history/${p.data.syncId}/restore`, {});
+        steps++;
+      }
+      expect(steps).toBeGreaterThan(1);
+      expect(res.status).toBe(200);
+      expect(res.body.data).toMatchObject({ canRestore: false, restoreProgress: null });
+      expect(res.body.data.restoredAt).not.toBeNull();
+
+      // Every file is back; files the sync added are gone.
+      const files = world.themeFiles.get(THEME_DEV.id)!;
+      for (const [path, content] of before) expect(files.get(path)).toBe(content);
+      expect(files.has('snippets/new.liquid')).toBe(false);
+      // The theme is no longer on the undone commit.
+      const { body: last } = await api<SyncRun | null>('GET', `/api/sync/last?themeId=${encodeURIComponent(THEME_DEV.id)}&branch=main`);
+      expect(last.data).toBeNull();
+    });
+
+    it('undoes syncs to a theme newest first', async () => {
+      await setup();
+      const { body: first } = await preview({});
+      await api('POST', '/api/sync', { syncId: first.data.syncId, confirm: true });
+      await drainQueue();
+      // (The test world serves no blobs for the direct-edit check: keep the preview from downloading.)
+      (t.env as { SUBREQUEST_BUDGET?: string }).SUBREQUEST_BUDGET = '20';
+      const { body: second } = await preview({ commitSha: SHA_D });
+      await api('POST', '/api/sync', { syncId: second.data.syncId, confirm: true });
+      await drainQueue();
+
+      const blocked = await api('POST', `/api/sync/history/${first.data.syncId}/restore`, {});
+      expect(blocked.status).toBe(409);
+      expect(blocked.body.error.message).toMatch(/Undo that sync first/);
+      const { body: detail } = await api<SyncRunDetail>('GET', `/api/sync/history/${first.data.syncId}`);
+      expect(detail.data.canRestore).toBe(false);
+      expect(detail.data.restoreNote).toMatch(/Undo that sync first/);
+
+      // Restore runs in steps (202) until done (200).
+      const undo = async (id: string) => {
+        let status = 202;
+        for (let i = 0; i < 10 && status === 202; i++) status = (await api('POST', `/api/sync/history/${id}/restore`, {})).status;
+        return status;
+      };
+      expect(await undo(second.data.syncId)).toBe(200);
+      expect(await undo(first.data.syncId)).toBe(200);
     });
 
     it('does not rewrite files that are already identical in the theme', async () => {
