@@ -252,57 +252,68 @@ export default function Settings() {
           <Paragraph color="subdued">
             The app syncs from one repository. Each branch is connected to its own theme on the Theme mapping page.
           </Paragraph>
-          <Select
-            label="Repository"
-            value={repository || NONE}
-            disabled={!connected || reposQuery.loading}
-            details={
-              reposQuery.error
-                ? reposQuery.error.message
-                : !connected
-                  ? 'Connect GitHub first.'
-                  : 'Repositories the connected token can read. Access is verified again when you save.'
-            }
-            error={repoError ?? undefined}
-            onChange={(event: FieldEvent) =>
-              setRepository(event.currentTarget.value === NONE ? '' : event.currentTarget.value)
-            }
-          >
-            <Option value={NONE}>No repository</Option>
-            {repos.map((r) => (
-              <Option key={r.fullName} value={r.fullName}>
-                {`${r.fullName}${r.private ? ' (private)' : ''}`}
-              </Option>
-            ))}
-            {repository && !repos.some((r) => r.fullName === repository) && (
-              <Option value={repository}>{repository}</Option>
-            )}
-          </Select>
-          {repository.trim() !== savedRepository && savedRepository && (
-            <Banner tone="warning" heading="Changing the repository">
-              <Paragraph>
-                {`The app syncs from one repository, so the mappings of ${savedRepository} are removed when you save. Their sync history is kept, and mapping a theme again later continues where it left off.`}
-              </Paragraph>
-            </Banner>
-          )}
-          {repoInfo.data && repository.trim() === savedRepository && (
-            <Box padding="small" background="subdued" borderRadius="base">
-              <Stack direction="inline" gap="small-200" alignItems="center" justifyContent="space-between">
-                <Stack direction="inline" gap="small-200" alignItems="center">
-                  <Icon type="git-repository" />
-                  <Text type="strong">{repoInfo.data.fullName}</Text>
-                  <Badge tone="neutral">{repoInfo.data.private ? 'Private' : 'Public'}</Badge>
-                  <Badge tone={repoInfo.data.permissions.push ? 'info' : 'neutral'}>
-                    {repoInfo.data.permissions.push ? 'Read & write' : 'Read only'}
-                  </Badge>
-                  <Text color="subdued">{`Default branch ${repoInfo.data.defaultBranch}`}</Text>
-                </Stack>
-                <Link href={repoInfo.data.htmlUrl} target="_blank">
-                  View on GitHub
-                </Link>
+          {/* The repository is chosen from the connected account's repositories; without a connection
+              there is nothing to choose from, so no (old) repository is shown. */}
+          {connected ? (
+            <>
+              <Select
+                label="Repository"
+                value={repository || NONE}
+                disabled={reposQuery.loading}
+                details={
+                  reposQuery.error
+                    ? reposQuery.error.message
+                    : 'Repositories the connected token can read. Access is verified again when you save.'
+                }
+                error={repoError ?? undefined}
+                onChange={(event: FieldEvent) =>
+                  setRepository(event.currentTarget.value === NONE ? '' : event.currentTarget.value)
+                }
+              >
+                <Option value={NONE}>No repository</Option>
+                {repos.map((r) => (
+                  <Option key={r.fullName} value={r.fullName}>
+                    {`${r.fullName}${r.private ? ' (private)' : ''}`}
+                  </Option>
+                ))}
+                {repository && !repos.some((r) => r.fullName === repository) && (
+                  <Option value={repository}>{repository}</Option>
+                )}
+              </Select>
+              {repository.trim() !== savedRepository && savedRepository && (
+                <Banner tone="warning" heading="Changing the repository">
+                  <Paragraph>
+                    {`The app syncs from one repository, so the mappings of ${savedRepository} are removed when you save. Their sync history is kept, and mapping a theme again later continues where it left off.`}
+                  </Paragraph>
+                </Banner>
+              )}
+              {repoInfo.data && repository.trim() === savedRepository && (
+                <Box padding="small" background="subdued" borderRadius="base">
+                  <Stack direction="inline" gap="small-200" alignItems="center" justifyContent="space-between">
+                    <Stack direction="inline" gap="small-200" alignItems="center">
+                      <Icon type="git-repository" />
+                      <Text type="strong">{repoInfo.data.fullName}</Text>
+                      <Badge tone="neutral">{repoInfo.data.private ? 'Private' : 'Public'}</Badge>
+                      <Badge tone={repoInfo.data.permissions.push ? 'info' : 'neutral'}>
+                        {repoInfo.data.permissions.push ? 'Read & write' : 'Read only'}
+                      </Badge>
+                      <Text color="subdued">{`Default branch ${repoInfo.data.defaultBranch}`}</Text>
+                    </Stack>
+                    <Link href={repoInfo.data.htmlUrl} target="_blank">
+                      View on GitHub
+                    </Link>
+                  </Stack>
+                </Box>
+              )}
+            </>
+          ) : githubQuery.data ? (
+            <Box padding="base" background="subdued" borderRadius="base">
+              <Stack direction="inline" gap="small-200" alignItems="center">
+                <Icon type="git-repository" />
+                <Text color="subdued">Connect GitHub above, then choose the repository the app syncs from.</Text>
               </Stack>
             </Box>
-          )}
+          ) : null}
         </Stack>
       </Section>
 
