@@ -131,6 +131,7 @@ function SyncDetail({ id, onBack, onOpen }: { id: string; onBack: () => void; on
   const rerunPreview = useMutation(api.sync.preview);
   const rerunConfirm = useMutation(api.sync.confirm);
   const [confirmAction, setConfirmAction] = useState<'retry' | 'restore' | null>(null);
+  const [restoreProgress, setRestoreProgress] = useState<{ done: number; total: number } | null>(null);
   const [preview, setPreview] = useState<SyncPreview | null>(null);
   const [showSkipped, setShowSkipped] = useState(false);
   const [tab, setTab] = useState<DetailTab>('files');
@@ -165,11 +166,19 @@ function SyncDetail({ id, onBack, onOpen }: { id: string; onBack: () => void; on
     }
   };
 
+  /** Restore / undo runs in steps (Cloudflare request limit): repeat until every file is back. */
   const doRestore = async (confirmThemeName?: string) => {
-    const result = await restore.run(id, liveBody(confirmThemeName));
+    let result = await restore.run(id, liveBody(confirmThemeName));
+    while (result?.restoreProgress) {
+      setRestoreProgress(result.restoreProgress);
+      result = await restore.run(id, liveBody(confirmThemeName));
+    }
+    setRestoreProgress(null);
     if (result) {
       setConfirmAction(null);
-      showToast('Backup restored');
+      showToast(result.status === 'succeeded' ? 'Sync undone' : 'Backup restored');
+      run.reload();
+    } else {
       run.reload();
     }
   };
@@ -279,22 +288,22 @@ function SyncDetail({ id, onBack, onOpen }: { id: string; onBack: () => void; on
           heading: data.status === 'queued' ? 'Starting the update…' : 'Updating…',
           text: `${data.themeName} is being updated to ${onCommit}.`,
         }
-      : data.status === 'succeeded'
+      : data.restoredAt
         ? {
-            icon: 'check-circle',
-            tone: 'success',
-            heading: 'Update complete',
-            text: `${data.themeName} is now on ${onCommit}.`,
-            note: live
-              ? 'This is your live theme: customers see the update now.'
-              : 'Preview the theme in Shopify. When you are happy with it, publish it as usual — the app never publishes a theme on its own.',
+            icon: 'undo',
+            tone: 'info',
+            heading: data.status === 'succeeded' ? 'Sync undone' : 'Backup restored',
+            text: `${data.themeName} is back as it was before this update (${data.restoredFiles} file(s), ${formatDate(data.restoredAt)}).`,
           }
-        : data.restoredAt
+        : data.status === 'succeeded'
           ? {
-              icon: 'undo',
-              tone: 'info',
-              heading: 'Backup restored',
-              text: `${data.themeName} is back as it was before this update.`,
+              icon: 'check-circle',
+              tone: 'success',
+              heading: 'Update complete',
+              text: `${data.themeName} is now on ${onCommit}.`,
+              note: live
+                ? 'This is your live theme: customers see the update now.'
+                : 'Preview the theme in Shopify. When you are happy with it, publish it as usual — the app never publishes a theme on its own.',
             }
           : previewFailed
             ? {
@@ -384,6 +393,23 @@ function SyncDetail({ id, onBack, onOpen }: { id: string; onBack: () => void; on
                 {`${syncTypeLabel(data.strategy)} · ${included.length} commit${included.length === 1 ? '' : 's'} · ${data.filesSucceeded} of ${data.filesChanged} file${data.filesChanged === 1 ? '' : 's'} updated${duration ? ` · took ${duration}` : ''}`}
               </Text>
               {hero.note && <Text color="subdued">{hero.note}</Text>}
+              {data.status === 'succeeded' && !data.restoredAt && (data.canRestore || data.restoreNote) && (
+                <Stack direction="inline" gap="small-200" alignItems="center">
+                  <Button
+                    tone="critical"
+                    icon="undo"
+                    disabled={!data.canRestore}
+                    loading={restore.pending}
+                    onClick={() => setConfirmAction('restore')}
+                  >
+                    {data.restoreProgress ? 'Continue undo' : 'Undo this sync'}
+                  </Button>
+                  <Text color="subdued">
+                    {data.restoreNote ??
+                      'Puts every file back as it was before this sync (backups are kept for 30 days).'}
+                  </Text>
+                </Stack>
+              )}
               {previewFailed && (
                 <Stack direction="inline">
                   <Button variant="primary" icon="refresh" loading={rerunPreview.pending} onClick={doRerun}>
@@ -640,13 +666,27 @@ function SyncDetail({ id, onBack, onOpen }: { id: string; onBack: () => void; on
       {data && (
         <ConfirmActionModal
           open={confirmAction !== null}
-          heading={confirmAction === 'restore' ? 'Restore backup?' : 'Retry on the live theme'}
+          heading={
+            confirmAction === 'restore'
+              ? data.status === 'succeeded'
+                ? 'Undo this sync?'
+                : 'Restore backup?'
+              : 'Retry on the live theme'
+          }
           message={
             confirmAction === 'restore'
-              ? `Every file this update changed in ${data.themeName} is put back to the version saved right before the update, and files it added are removed. The theme stays on ${data.baseSha ? data.baseSha.slice(0, 7) : 'its previous version'}.`
+              ? restoreProgress
+                ? `Putting files back: ${restoreProgress.done} of ${restoreProgress.total}… Keep this page open.`
+                : `Every file this sync changed in ${data.themeName} is put back to the version saved right before it, and files it added are removed. ${data.themeName} ${data.status === 'succeeded' ? 'goes back' : 'stays'} on ${data.baseSha ? data.baseSha.slice(0, 7) : 'its previous version'}.`
               : `This sync targets your live theme ${data.themeName}. Only the failed files are tried again.`
           }
-          actionLabel={confirmAction === 'restore' ? 'Restore Backup' : 'Retry on live theme'}
+          actionLabel={
+            confirmAction === 'restore'
+              ? data.status === 'succeeded'
+                ? 'Undo sync'
+                : 'Restore Backup'
+              : 'Retry on live theme'
+          }
           themeName={data.themeName}
           requireName={live}
           pending={confirmAction === 'restore' ? restore.pending : retry.pending}
@@ -842,7 +882,13 @@ function SyncList({ onOpen }: { onOpen: (id: string) => void }) {
                   </IndexTableCell>
                   <IndexTableCell>{syncTypeLabel(run.strategy)}</IndexTableCell>
                   <IndexTableCell>
-                    <Badge tone={SYNC_STATUS_BADGE[run.status].tone}>{SYNC_STATUS_BADGE[run.status].label}</Badge>
+                    {run.restoredAt ? (
+                      <Badge tone="info" icon="undo">
+                        {run.status === 'succeeded' ? 'Undone' : 'Restored'}
+                      </Badge>
+                    ) : (
+                      <Badge tone={SYNC_STATUS_BADGE[run.status].tone}>{SYNC_STATUS_BADGE[run.status].label}</Badge>
+                    )}
                   </IndexTableCell>
                   <IndexTableCell>{formatDate(run.startedAt ?? run.initiatedAt)}</IndexTableCell>
                   <IndexTableCell>{formatDate(run.completedAt)}</IndexTableCell>

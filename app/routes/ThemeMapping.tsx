@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { AppLayout } from '../components/AppLayout';
 import { ErrorBanner } from '../components/ErrorBanner';
 import { LoadingState } from '../components/LoadingState';
-import { themeLabel } from '../components/MappingControls';
+import { LiveThemeWarning, themeLabel } from '../components/MappingControls';
 import { MappingCard } from '../components/MappingCard';
 import { Banner, Button, Modal, Option, Paragraph, Section, Select, Stack, Text } from '../components/ui';
 import { api } from '../lib/api-client';
@@ -15,7 +15,7 @@ const NONE = '__none__';
 
 /**
  * Theme mapping: connect each repository branch to its own Shopify theme, for
- * example main → Live theme and staging → Staging copy. A branch syncs to one
+ * example main → Copy of live theme and staging → Staging copy. A branch syncs to one
  * theme only and a theme receives one branch only.
  */
 export default function ThemeMapping() {
@@ -37,6 +37,7 @@ export default function ThemeMapping() {
   const [adding, setAdding] = useState(!!(params.get('branch') || params.get('themeId')));
   const [newBranch, setNewBranch] = useState(params.get('branch') ?? '');
   const [newThemeId, setNewThemeId] = useState(params.get('themeId') ?? '');
+  const [liveAck, setLiveAck] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const create = useMutation(api.mappings.create);
 
@@ -73,6 +74,7 @@ export default function ThemeMapping() {
   };
   const freeBranches = branchList.filter((b) => !mappingForBranch(b.name));
   const freeThemes = allThemes.filter((t) => !themeBlocked(t));
+  const selectedTheme = allThemes.find((t) => t.id === newThemeId);
   const nothingFree = !branches.loading && !themes.loading && (freeBranches.length === 0 || freeThemes.length === 0);
   /** Why "Add mapping" in the page header is disabled, shown in a banner below it. */
   const addBlocked = !nothingFree
@@ -93,6 +95,7 @@ export default function ThemeMapping() {
   };
 
   const closeAdd = () => {
+    setLiveAck(false);
     setAdding(false);
     setNewBranch('');
     setNewThemeId('');
@@ -104,6 +107,7 @@ export default function ThemeMapping() {
     const created = await create.run({
       branch: newBranch,
       themeId: newThemeId,
+      ...(liveAck ? { confirmLive: true } : {}),
     });
     if (created) {
       showToast(`${created.branch} → ${created.themeName} added`);
@@ -165,8 +169,8 @@ export default function ThemeMapping() {
           <Stack gap="base">
             <Paragraph>
               Connect a branch of {repository} to the Shopify theme it should update — for example{' '}
-              <Text type="strong">main → Live theme</Text> and <Text type="strong">staging → Staging copy</Text>.
-              Nothing in the theme changes until you sync.
+              <Text type="strong">main → Copy of live theme</Text> and <Text type="strong">staging → Staging copy</Text>
+              . Nothing in the theme changes until you sync.
             </Paragraph>
             <Stack direction="inline">
               <Button variant="primary" icon="plus" disabled={nothingFree} onClick={() => setAdding(true)}>
@@ -238,12 +242,20 @@ export default function ThemeMapping() {
               </Select>
             </>
           )}
+          {selectedTheme?.isLive && (
+            <LiveThemeWarning
+              theme={selectedTheme}
+              branch={newBranch || null}
+              checked={liveAck}
+              onChange={setLiveAck}
+            />
+          )}
           <ErrorBanner error={create.error} heading="Mapping not added" onDismiss={create.clearError} />
         </Stack>
         <Button
           slot="primary-action"
           variant="primary"
-          disabled={!newBranch || !newThemeId || nothingFree}
+          disabled={!newBranch || !newThemeId || nothingFree || (!!selectedTheme?.isLive && !liveAck)}
           loading={create.pending}
           onClick={doCreate}
         >

@@ -441,7 +441,7 @@ describe('updating a theme, step by step', () => {
     const mappingId = (await api<ThemeMappingsResponse>('GET', '/api/mappings')).body.data.items[0]!.id;
 
     // main → "xyz" (THEME_LIVE): sync C2 there.
-    const toXyz = await api<ThemeMapping>('PUT', `/api/mappings/${mappingId}`, { themeId: THEME_LIVE.id, confirm: true });
+    const toXyz = await api<ThemeMapping>('PUT', `/api/mappings/${mappingId}`, { themeId: THEME_LIVE.id, confirm: true, confirmLive: true });
     expect(toXyz.status).toBe(200);
     const xyzPreview = (await api<SyncPreview>('POST', '/api/sync/preview', { commitSha: C2, themeId: THEME_LIVE.id, strategy: 'commit_changes' })).body.data;
     await api('POST', '/api/sync', { syncId: xyzPreview.syncId, confirm: true, confirmLiveTheme: true, confirmThemeName: THEME_LIVE.name });

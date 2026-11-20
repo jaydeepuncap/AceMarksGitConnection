@@ -6,7 +6,7 @@ import { createLogger } from '../../worker/lib/logger';
 import { handleSyncMessage } from '../../worker/sync/dispatch';
 import { planCommitChanges } from '../../worker/sync/planner';
 import { createTestEnv, sessionToken, type TestContext } from '../helpers/env';
-import { seedMapping, seedShop, SHA_B, THEME_DEV, THEME_LIVE } from '../helpers/fixtures';
+import { seedMapping, seedShop, SHA_B, SHA_D, THEME_DEV, THEME_LIVE } from '../helpers/fixtures';
 import { installWorld, PNG, REPO, type WorldOptions } from '../helpers/sync-world';
 
 const SHOP = 'alpha.myshopify.com';
@@ -372,12 +372,66 @@ describe('sync workflow', () => {
       expect(detail).toMatchObject({ status: 'running', filesSucceeded: 1, filesFailed: 0, filesChanged: writes.length });
     });
 
-    it('does not restore a completed update', async () => {
+    it('undoes a completed sync in steps and moves the theme back', async () => {
       await setup();
+      const before = new Map(world.themeFiles.get(THEME_DEV.id)!);
       const { body: p } = await preview({});
       await api('POST', '/api/sync', { syncId: p.data.syncId, confirm: true });
       await drainQueue();
-      expect((await api('POST', `/api/sync/history/${p.data.syncId}/restore`, {})).status).toBe(409);
+      expect((await api<SyncRunDetail>('GET', `/api/sync/history/${p.data.syncId}`)).body.data).toMatchObject({
+        status: 'succeeded',
+        canRestore: true,
+      });
+
+      // A small request budget restores a few files per request: the client repeats until done.
+      (t.env as { SUBREQUEST_BUDGET?: string }).SUBREQUEST_BUDGET = '20';
+      let res = await api<SyncRun>('POST', `/api/sync/history/${p.data.syncId}/restore`, {});
+      let steps = 1;
+      while (res.status === 202 && steps < 10) {
+        expect(res.body.data.restoreProgress).not.toBeNull();
+        res = await api<SyncRun>('POST', `/api/sync/history/${p.data.syncId}/restore`, {});
+        steps++;
+      }
+      expect(steps).toBeGreaterThan(1);
+      expect(res.status).toBe(200);
+      expect(res.body.data).toMatchObject({ canRestore: false, restoreProgress: null });
+      expect(res.body.data.restoredAt).not.toBeNull();
+
+      // Every file is back; files the sync added are gone.
+      const files = world.themeFiles.get(THEME_DEV.id)!;
+      for (const [path, content] of before) expect(files.get(path)).toBe(content);
+      expect(files.has('snippets/new.liquid')).toBe(false);
+      // The theme is no longer on the undone commit.
+      const { body: last } = await api<SyncRun | null>('GET', `/api/sync/last?themeId=${encodeURIComponent(THEME_DEV.id)}&branch=main`);
+      expect(last.data).toBeNull();
+    });
+
+    it('undoes syncs to a theme newest first', async () => {
+      await setup();
+      const { body: first } = await preview({});
+      await api('POST', '/api/sync', { syncId: first.data.syncId, confirm: true });
+      await drainQueue();
+      // (The test world serves no blobs for the direct-edit check: keep the preview from downloading.)
+      (t.env as { SUBREQUEST_BUDGET?: string }).SUBREQUEST_BUDGET = '20';
+      const { body: second } = await preview({ commitSha: SHA_D });
+      await api('POST', '/api/sync', { syncId: second.data.syncId, confirm: true });
+      await drainQueue();
+
+      const blocked = await api('POST', `/api/sync/history/${first.data.syncId}/restore`, {});
+      expect(blocked.status).toBe(409);
+      expect(blocked.body.error.message).toMatch(/Undo that sync first/);
+      const { body: detail } = await api<SyncRunDetail>('GET', `/api/sync/history/${first.data.syncId}`);
+      expect(detail.data.canRestore).toBe(false);
+      expect(detail.data.restoreNote).toMatch(/Undo that sync first/);
+
+      // Restore runs in steps (202) until done (200).
+      const undo = async (id: string) => {
+        let status = 202;
+        for (let i = 0; i < 10 && status === 202; i++) status = (await api('POST', `/api/sync/history/${id}/restore`, {})).status;
+        return status;
+      };
+      expect(await undo(second.data.syncId)).toBe(200);
+      expect(await undo(first.data.syncId)).toBe(200);
     });
 
     it('does not rewrite files that are already identical in the theme', async () => {

@@ -15,7 +15,7 @@ import { cached } from '../lib/cache';
 import { base64ToBytes } from '../lib/crypto';
 import { getLastSynced, latestSucceededRun, saveLastSynced, type Database } from '../lib/database';
 import type { Logger } from '../lib/logger';
-import { getThemeFileBodies, type ShopifyGraphqlClient } from '../lib/shopify-graphql';
+import { deleteThemeFiles, getThemeFileBodies, upsertThemeFiles, type ShopifyGraphqlClient } from '../lib/shopify-graphql';
 
 /** One branch's last synced commit, as stored in assets/theme-sync.json. */
 export interface MarkerBranchEntry {
@@ -183,6 +183,38 @@ export function buildThemeSyncMarker(input: {
 }
 
 const firstLine = (message: string | null) => (message ?? '').split('\n')[0] ?? '';
+
+/**
+ * Rewrites assets/theme-sync.json from the app's records after an undo: the newest branch entry on top,
+ * every branch listed. Removes the file when the theme has no synced branch left.
+ */
+export async function rewriteThemeSyncMarker(
+  admin: ShopifyGraphqlClient,
+  rows: ThemeBranchSyncRow[],
+  theme: { id: string; name: string; repository: string },
+): Promise<void> {
+  const newest = rows[0];
+  if (!newest) {
+    await deleteThemeFiles(admin, theme.id, [THEME_SYNC_MARKER_PATH]);
+    return;
+  }
+  const marker = buildThemeSyncMarker({
+    previous: null,
+    rows,
+    sync: {
+      commitSha: newest.commitSha,
+      message: newest.commitMessage,
+      repository: theme.repository,
+      branch: newest.branch,
+      themeName: theme.name,
+      syncedOn: newest.syncedAt.toISOString(),
+      syncId: newest.syncId ?? '',
+    },
+  });
+  await upsertThemeFiles(admin, theme.id, [
+    { filename: THEME_SYNC_MARKER_PATH, body: { type: 'TEXT', value: `${JSON.stringify(marker, null, 2)}\n` } },
+  ]);
+}
 
 /** Reads the marker straight from the theme (no cache). */
 export async function fetchThemeSyncMarker(admin: ShopifyGraphqlClient, themeId: string): Promise<ThemeSyncMarker | null> {

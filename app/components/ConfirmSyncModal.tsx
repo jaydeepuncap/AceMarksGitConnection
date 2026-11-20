@@ -66,12 +66,14 @@ export function ConfirmSyncModal({ open, preview, submitting, error, onClose, on
   const [typedName, setTypedName] = useState('');
   const [showSkipped, setShowSkipped] = useState(false);
   const [acceptEdits, setAcceptEdits] = useState(false);
+  const [replaceAck, setReplaceAck] = useState(false);
 
   useEffect(() => {
     if (!open) {
       setAck(false);
       setTypedName('');
       setAcceptEdits(false);
+      setReplaceAck(false);
     }
   }, [open]);
 
@@ -89,12 +91,17 @@ export function ConfirmSyncModal({ open, preview, submitting, error, onClose, on
   // Nothing to write (e.g. only ignored files changed): confirming just records the commit as the theme's
   // commit, so it stops showing as waiting. Not for re-applying an older commit, which would move it back.
   const markOnly = !!preview && writes === 0 && preview.strategy !== 'commit_changes';
+  // A full sync into a theme the app never synced replaces its existing code (e.g. a theme set up by hand
+  // or from another source): say so plainly and ask for an explicit OK.
+  const replacesUnsynced =
+    !!preview && preview.strategy === 'full_snapshot' && !preview.base && preview.summary.updates > 0;
   const canConfirm =
     !!preview &&
     (writes > 0 || markOnly) &&
     liveConfirmed &&
     !codeBlocked &&
     (!editsWarning || acceptEdits) &&
+    (!replacesUnsynced || replaceAck) &&
     !submitting;
 
   return (
@@ -218,6 +225,21 @@ export function ConfirmSyncModal({ open, preview, submitting, error, onClose, on
             <Text type="strong">{preview.commit.sha}</Text> · push {STRATEGY_LABEL[preview.strategy]} · preview valid
             until {new Date(preview.expiresAt).toLocaleTimeString()}
           </Paragraph>
+
+          {replacesUnsynced && preview && (
+            <Banner tone="critical" heading={`This replaces existing code in ${preview.theme.name}`}>
+              <Stack gap="small-200">
+                <Paragraph>
+                  {`${preview.theme.name} has never been synced by this app, so its current code did not come from ${preview.branch ?? 'this branch'}. Up to ${preview.summary.updates} existing file(s) will be replaced with the repository's version, and changes made to them in Shopify are lost. Each file is backed up first, and the sync can be undone for 30 days.`}
+                </Paragraph>
+                <Checkbox
+                  label={`Replace the existing code in ${preview.theme.name}`}
+                  checked={replaceAck}
+                  onChange={(event: FieldEvent) => setReplaceAck(event.currentTarget.checked)}
+                />
+              </Stack>
+            </Banner>
+          )}
 
           {writes === 0 && (
             <Banner tone="info" heading="Nothing to apply">

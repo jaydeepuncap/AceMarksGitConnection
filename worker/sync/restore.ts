@@ -1,7 +1,7 @@
 /**
- * "Restore backup" (client guide, section 7): puts the theme back exactly as it
- * was before an incomplete update. Every file the update touched was saved to
- * KV right before it changed (see backupFiles in the executor):
+ * "Restore backup" / "Undo this sync": puts the theme back exactly as it was
+ * before an update (incomplete or completed). Every file the update touched was
+ * saved to KV right before it changed (see backupFiles in the executor):
  *   - files that existed are written back with their previous content;
  *   - files the update created (backed up as "absent") are removed again.
  * Files that were never touched have no backup and are left alone.
@@ -26,19 +26,29 @@ export interface RestoreResult {
   restored: number;
   removed: number;
   failed: { path: string; message: string }[];
+  /** Index of the next file to restore (another step is needed), or null when every file was handled. */
+  next: number | null;
+  /** Files of the sync, restored or not (the step works through them in order). */
+  total: number;
 }
 
 type Backup = { path: string; absent?: true; type?: ThemeFileBody['type']; value?: string };
 
+/**
+ * One step of a restore: the files from `start`, at most `maxFiles` of them (Cloudflare limits the
+ * requests of one invocation; each file needs a backup read). Call again from `next` until it is null.
+ */
 export async function restoreBackup(
   deps: { db: Database; admin: ShopifyGraphqlClient; kv: KVNamespace; logger: Logger },
   run: SyncHistoryRow,
+  step: { start: number; maxFiles: number } = { start: 0, maxFiles: Number.MAX_SAFE_INTEGER },
 ): Promise<RestoreResult> {
   const { db, admin, kv, logger } = deps;
   const ops = await listSyncOperations(db, run.shopId, run.id);
+  const end = Math.min(ops.length, step.start + step.maxFiles);
   const writes: { filename: string; body: ThemeFileBody }[] = [];
   const removals: string[] = [];
-  for (const op of ops) {
+  for (const op of ops.slice(step.start, end)) {
     const raw = await kv.get(backupKey(run.shopId, run.id, op.path));
     if (raw === null) continue;
     const backup = JSON.parse(raw) as Backup;
@@ -47,11 +57,17 @@ export async function restoreBackup(
       writes.push({ filename: op.path, body: { type: backup.type, value: backup.value } });
     }
   }
-  if (writes.length === 0 && removals.length === 0) {
+  if (step.start === 0 && end >= ops.length && writes.length === 0 && removals.length === 0) {
     throw new ApiError(409, 'CONFLICT', 'There is no backup for this update (backups are kept for 30 days)');
   }
 
-  const result: RestoreResult = { restored: 0, removed: 0, failed: [] };
+  const result: RestoreResult = {
+    restored: 0,
+    removed: 0,
+    failed: [],
+    next: end < ops.length ? end : null,
+    total: ops.length,
+  };
 
   // Upserts, bounded by file count and request size.
   let batch: typeof writes = [];

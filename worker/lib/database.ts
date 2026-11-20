@@ -518,6 +518,9 @@ export async function findActiveSyncForTheme(
 }
 
 const RETRYABLE_STATUSES: SyncStatus[] = ['failed', 'partially_failed'];
+/** Syncs whose changes can be put back from their backups (kept 30 days): incomplete ones and completed ones. */
+const RESTORABLE_STATUSES: SyncStatus[] = ['failed', 'partially_failed', 'succeeded'];
+export const BACKUP_DAYS = 30;
 
 export function toSyncRunDto(row: SyncHistoryRow): SyncRun {
   const details = row.errorDetails as { code?: string; message?: string } | null;
@@ -551,9 +554,18 @@ export function toSyncRunDto(row: SyncHistoryRow): SyncRun {
     commitsIncluded: Array.isArray(options.commitsIncluded) ? (options.commitsIncluded as IncludedCommit[]) : [],
     backedUp,
     allowDeletes: options.allowDeletes === true,
-    canRestore: RETRYABLE_STATUSES.includes(row.status) && backedUp > 0 && !restoredAt,
+    canRestore:
+      RESTORABLE_STATUSES.includes(row.status) &&
+      backedUp > 0 &&
+      !restoredAt &&
+      !!row.completedAt &&
+      Date.now() - row.completedAt.getTime() < BACKUP_DAYS * 86_400_000,
     restoredAt,
     restoredFiles: typeof options.restoredFiles === 'number' ? options.restoredFiles : 0,
+    restoreProgress:
+      typeof options.restoreCursor === 'number' && typeof options.restoreTotal === 'number' && !restoredAt
+        ? { done: options.restoreCursor, total: options.restoreTotal }
+        : null,
   };
 }
 
@@ -697,6 +709,8 @@ export async function latestSucceededRun(
         eq(syncHistory.shopId, shopId),
         eq(syncHistory.themeId, themeId),
         eq(syncHistory.status, 'succeeded'),
+        // An undone sync is no longer what the theme is on.
+        sql`json_extract(${syncHistory.options}, '$.restoredAt') is null`,
         ...(repository ? [sql`lower(${syncHistory.repository}) = ${repository.toLowerCase()}`] : []),
         branch
           ? sql`(${syncHistory.branch} = ${branch} or ${syncHistory.branch} is null)`
@@ -729,7 +743,7 @@ export async function claimRestore(db: Database, shopId: string, syncId: string)
       and(
         eq(syncHistory.id, syncId),
         eq(syncHistory.shopId, shopId),
-        inArray(syncHistory.status, ['failed', 'partially_failed']),
+        inArray(syncHistory.status, ['failed', 'partially_failed', 'succeeded']),
         sql`json_extract(${syncHistory.options}, '$.restoredAt') is null`,
         sql`coalesce(json_extract(${syncHistory.options}, '$.restoring'), 0) < ${now - 5 * 60_000}`,
       ),
@@ -872,6 +886,52 @@ export async function reconcileGithubAccount(db: Database, shopId: string): Prom
   await upsertSettings(db, shopId, { defaultRepository: null, defaultBranch: null, githubAccount: login });
 }
 
+/**
+ * A later sync that changed files in the same theme (not undone). Undoing an older sync first would
+ * also put back what the newer one changed, so it must be undone first.
+ */
+export async function newerThemeChange(
+  db: Database,
+  shopId: string,
+  run: { id: string; themeId: string; completedAt: Date | null },
+): Promise<SyncHistoryRow | undefined> {
+  if (!run.completedAt) return undefined;
+  const [row] = await db
+    .select()
+    .from(syncHistory)
+    .where(
+      and(
+        eq(syncHistory.shopId, shopId),
+        eq(syncHistory.themeId, run.themeId),
+        ne(syncHistory.id, run.id),
+        inArray(syncHistory.status, ['succeeded', 'partially_failed', 'failed', 'running', 'queued']),
+        sql`(${syncHistory.filesSucceeded} > 0 or ${syncHistory.status} in ('running', 'queued'))`,
+        sql`json_extract(${syncHistory.options}, '$.restoredAt') is null`,
+        sql`coalesce(${syncHistory.completedAt}, ${syncHistory.initiatedAt}) > ${run.completedAt.getTime()}`,
+      ),
+    )
+    .orderBy(desc(syncHistory.initiatedAt))
+    .limit(1);
+  return row;
+}
+
+/** Forgets a theme's last synced commit on one branch (after undoing its first sync). */
+export async function deleteLastSynced(db: Database, shopId: string, themeId: string, branch: string): Promise<void> {
+  await db
+    .delete(themeBranchSync)
+    .where(and(eq(themeBranchSync.shopId, shopId), eq(themeBranchSync.themeId, themeId), eq(themeBranchSync.branch, branch)));
+}
+
+/** The message of a commit, from any recorded sync of it (for labels after an undo). */
+export async function commitMessageFromHistory(db: Database, shopId: string, commitSha: string): Promise<string | null> {
+  const [row] = await db
+    .select({ message: syncHistory.commitMessage })
+    .from(syncHistory)
+    .where(and(eq(syncHistory.shopId, shopId), eq(syncHistory.commitSha, commitSha)))
+    .limit(1);
+  return row?.message ?? null;
+}
+
 export async function removeMapping(
   db: Database,
   shopId: string,
@@ -903,8 +963,10 @@ export async function latestCompletedRun(
         eq(syncHistory.themeId, themeId),
         inArray(syncHistory.status, ['succeeded', 'partially_failed', 'failed']),
         sql`${syncHistory.completedAt} is not null`,
-        // A review that could not be prepared changed nothing: it is not the theme's last sync.
+        // A review that could not be prepared changed nothing, and an undone sync was put back:
+        // neither is the theme's last sync.
         sql`coalesce(json_extract(${syncHistory.options}, '$.stage'), '') <> 'preview'`,
+        sql`json_extract(${syncHistory.options}, '$.restoredAt') is null`,
         ...(branch ? [eq(syncHistory.branch, branch)] : []),
       ),
     )

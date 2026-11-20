@@ -442,6 +442,10 @@ export interface SyncRun {
   /** When the backup was restored (the theme is back as it was before this update). */
   restoredAt: string | null;
   restoredFiles: number;
+  /** While a restore/undo runs in steps: files handled so far of all the sync touched. */
+  restoreProgress: { done: number; total: number } | null;
+  /** Why this sync cannot be undone right now (e.g. a newer sync changed the theme), when it otherwise could. */
+  restoreNote?: string | null;
 }
 
 /**
@@ -527,6 +531,8 @@ export interface CreateThemeMappingRequest {
   repository?: string;
   branch: string;
   themeId: string;
+  /** Required when the theme is the live theme. */
+  confirmLive?: boolean;
 }
 
 /** Changing a mapping replaces it (the old one stays in the audit trail). */
@@ -534,6 +540,8 @@ export interface UpdateThemeMappingRequest {
   branch?: string;
   themeId?: string;
   confirm: true;
+  /** Required when moving the mapping to the live theme. */
+  confirmLive?: boolean;
 }
 
 /** Changed-file count of a commit (for the commit list). */

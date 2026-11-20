@@ -233,6 +233,35 @@ describe('Adding a mapping', () => {
   });
 });
 
+describe('Mapping a branch to the live theme', () => {
+  it('warns and needs an explicit confirmation', async () => {
+    const { api } = await import('../../app/lib/api-client');
+    (api.themes.list as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
+      theme('1', 'abc'),
+      theme('2', 'xyz'),
+      theme('3', 'Live store', 'MAIN'),
+    ]);
+    const { container } = render(
+      <MemoryRouter initialEntries={['/mappings?branch=dev&themeId=gid%3A%2F%2Fshopify%2FOnlineStoreTheme%2F3']}>
+        <ThemeMapping />
+      </MemoryRouter>,
+    );
+    const wait = { timeout: 5000 };
+    await waitFor(
+      () => expect(container.querySelector('s-banner[heading="Live store is your live theme"]')).not.toBeNull(),
+      wait,
+    );
+    const add = [...container.querySelectorAll('s-modal s-button')].find((b) => b.textContent === 'Add mapping')!;
+    expect(add.hasAttribute('disabled')).toBe(true);
+    const ack = [...container.querySelectorAll('s-checkbox')].find(
+      (c) => c.getAttribute('label') === 'I understand that syncs to this theme change my storefront',
+    ) as HTMLElement & { checked?: boolean };
+    ack.checked = true;
+    fireEvent(ack, new Event('change', { bubbles: true }));
+    await waitFor(() => expect(add.hasAttribute('disabled')).toBe(false), wait);
+  });
+});
+
 describe('Theme mapping page when everything is mapped', () => {
   it('disables "Add mapping" and explains why', async () => {
     const { api } = await import('../../app/lib/api-client');
