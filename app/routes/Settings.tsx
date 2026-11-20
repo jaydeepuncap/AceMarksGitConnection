@@ -294,8 +294,10 @@ export default function Settings() {
                       <Icon type="git-repository" />
                       <Text type="strong">{repoInfo.data.fullName}</Text>
                       <Badge tone="neutral">{repoInfo.data.private ? 'Private' : 'Public'}</Badge>
-                      <Badge tone={repoInfo.data.permissions.push ? 'info' : 'neutral'}>
-                        {repoInfo.data.permissions.push ? 'Read & write' : 'Read only'}
+                      {/* GitHub reports the account's own permission on the repository, not what the token may do, so a
+                          read-only token on your own repository would show "write". The app only reads: say what was verified. */}
+                      <Badge tone="success" icon="check">
+                        Read access verified
                       </Badge>
                       <Text color="subdued">{`Default branch ${repoInfo.data.defaultBranch}`}</Text>
                     </Stack>

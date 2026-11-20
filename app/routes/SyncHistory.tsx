@@ -204,13 +204,22 @@ function SyncDetail({ id, onBack, onOpen }: { id: string; onBack: () => void; on
   };
 
   const failed = (data?.operations ?? []).filter((op) => op.status === 'failed');
-  const incomplete = data?.status === 'partially_failed' || data?.status === 'failed';
+  // A review that could not be prepared: recorded as failed, but nothing was planned or written.
+  const previewFailed =
+    data?.status === 'failed' && data.filesChanged === 0 && (data.operations ?? []).length === 0 && !!data.errorDetails;
+  const incomplete = !previewFailed && (data?.status === 'partially_failed' || data?.status === 'failed');
   // Retrying cannot fix a code error; the developer has to.
   const retryHelps = failed.length === 0 || failed.some((op) => op.failure?.kind !== 'code');
 
   const operations = (data?.operations ?? []).filter((op) => showSkipped || op.status !== 'skipped');
   // Files written or failed so far (live while the update runs).
-  const done = data ? Math.min(data.filesChanged, data.filesSucceeded + data.filesFailed) : 0;
+  // Files checked so far: every planned file that is no longer pending — written, failed, or found
+  // identical in the theme while applying (a full sync skips many of those).
+  const pendingFiles = (data?.operations ?? []).filter((op) => op.status === 'pending').length;
+  const done = data ? Math.max(0, Math.min(data.filesChanged, data.filesChanged - pendingFiles)) : 0;
+  const unchangedWhileApplying = (data?.operations ?? []).filter(
+    (op) => op.status === 'skipped' && op.skipReason === 'Already identical in the theme',
+  ).length;
 
   const themeNumericId = data?.themeId.split('/').pop() ?? '';
   const seconds =
@@ -287,19 +296,27 @@ function SyncDetail({ id, onBack, onOpen }: { id: string; onBack: () => void; on
               heading: 'Backup restored',
               text: `${data.themeName} is back as it was before this update.`,
             }
-          : incomplete
+          : previewFailed
             ? {
                 icon: 'alert-circle',
                 tone: 'critical',
-                heading: 'Update incomplete',
-                text: `${data.filesSucceeded} of ${data.filesChanged} files were updated. See what failed and your options below.`,
+                heading: 'The review could not be prepared',
+                text: data.errorDetails?.message ?? 'Something went wrong while preparing the review.',
+                note: 'Nothing in the theme was changed. Prepare the review again; if it keeps failing, share the request details with support.',
               }
-            : {
-                icon: 'clock',
-                tone: 'auto',
-                heading: SYNC_STATUS_BADGE[data.status].label,
-                text: `${data.themeName} · ${onCommit}`,
-              };
+            : incomplete
+              ? {
+                  icon: 'alert-circle',
+                  tone: 'critical',
+                  heading: 'Update incomplete',
+                  text: `${data.filesSucceeded} of ${data.filesChanged} files were updated. See what failed and your options below.`,
+                }
+              : {
+                  icon: 'clock',
+                  tone: 'auto',
+                  heading: SYNC_STATUS_BADGE[data.status].label,
+                  text: `${data.themeName} · ${onCommit}`,
+                };
 
   return (
     <AppLayout
@@ -320,7 +337,7 @@ function SyncDetail({ id, onBack, onOpen }: { id: string; onBack: () => void; on
             heading="The full update could not be prepared"
             onDismiss={rerunPreview.clearError}
           />
-          {data?.errorDetails && !incomplete && (
+          {data?.errorDetails && !incomplete && !previewFailed && (
             <Banner tone="critical" heading={data.errorDetails.code}>
               <Paragraph>{data.errorDetails.message}</Paragraph>
             </Banner>
@@ -348,7 +365,7 @@ function SyncDetail({ id, onBack, onOpen }: { id: string; onBack: () => void; on
                 <Stack gap="small-200">
                   <ProgressBar progress={(done / Math.max(1, data.filesChanged)) * 100} tone="info" />
                   <Text color="subdued">
-                    {`${Math.round((done / Math.max(1, data.filesChanged)) * 100)}% · ${done} of ${data.filesChanged} files. Each file is backed up right before it changes; you can leave this page.`}
+                    {`${Math.round((done / Math.max(1, data.filesChanged)) * 100)}% · ${done} of ${data.filesChanged} files checked · ${data.filesSucceeded} updated${unchangedWhileApplying ? ` · ${unchangedWhileApplying} already identical` : ''}. Each file is backed up right before it changes; you can leave this page.`}
                   </Text>
                 </Stack>
               )}
@@ -367,6 +384,13 @@ function SyncDetail({ id, onBack, onOpen }: { id: string; onBack: () => void; on
                 {`${syncTypeLabel(data.strategy)} · ${included.length} commit${included.length === 1 ? '' : 's'} · ${data.filesSucceeded} of ${data.filesChanged} file${data.filesChanged === 1 ? '' : 's'} updated${duration ? ` · took ${duration}` : ''}`}
               </Text>
               {hero.note && <Text color="subdued">{hero.note}</Text>}
+              {previewFailed && (
+                <Stack direction="inline">
+                  <Button variant="primary" icon="refresh" loading={rerunPreview.pending} onClick={doRerun}>
+                    Prepare the review again
+                  </Button>
+                </Stack>
+              )}
             </Stack>
           </Section>
 

@@ -110,7 +110,15 @@ export default function ThemeMapping() {
       setNewBranch('');
       setNewThemeId('');
       setAdding(false);
-      refresh();
+      // Show the new mapping at once, in order, without rebuilding the other cards (which would reload
+      // their status and shift the page); then reload the list quietly.
+      if (mappings.data) {
+        const items = [...mappings.data.items.filter((m) => m.id !== created.id), created].sort(
+          (a, b) => a.repository.localeCompare(b.repository) || a.branch.localeCompare(b.branch),
+        );
+        mappings.setData({ ...mappings.data, items });
+      }
+      mappings.reload();
     }
   };
 

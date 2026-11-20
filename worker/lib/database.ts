@@ -310,6 +310,34 @@ export type NewSyncOperation = Omit<
 // Upper bound on columns bound per sync_operations row (incl. defaulted ones).
 const OPERATION_COLUMNS = 16;
 
+/**
+ * Records a review that could not be prepared (e.g. GitHub or Shopify unreachable) as a failed run, so it
+ * shows in Sync history. Nothing was written; `options.stage = 'preview'` keeps it out of "last sync".
+ */
+export async function recordFailedPreview(
+  db: Database,
+  shopId: string,
+  run: Pick<NewSyncRun, 'repository' | 'branch' | 'commitSha' | 'themeId' | 'themeName' | 'themeRole' | 'strategy' | 'initiatedBy'> & {
+    error: { code: string; message: string };
+    allowDeletes: boolean;
+  },
+): Promise<string> {
+  const id = crypto.randomUUID();
+  const now = new Date();
+  const { error, allowDeletes, ...fields } = run;
+  await db.insert(syncHistory).values({
+    ...fields,
+    id,
+    shopId,
+    status: 'failed',
+    errorDetails: error,
+    options: { stage: 'preview', allowDeletes },
+    startedAt: now,
+    completedAt: now,
+  });
+  return id;
+}
+
 /** Persists a preview: the run row (status "previewed") plus one row per planned file. */
 export async function createSyncPreview(
   db: Database,
@@ -875,6 +903,8 @@ export async function latestCompletedRun(
         eq(syncHistory.themeId, themeId),
         inArray(syncHistory.status, ['succeeded', 'partially_failed', 'failed']),
         sql`${syncHistory.completedAt} is not null`,
+        // A review that could not be prepared changed nothing: it is not the theme's last sync.
+        sql`coalesce(json_extract(${syncHistory.options}, '$.stage'), '') <> 'preview'`,
         ...(branch ? [eq(syncHistory.branch, branch)] : []),
       ),
     )

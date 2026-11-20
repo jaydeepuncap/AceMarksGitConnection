@@ -86,8 +86,16 @@ export function ConfirmSyncModal({ open, preview, submitting, error, onClose, on
   const liveConfirmed = !live || (ack && typedName === preview?.theme.name);
   const codeBlocked = preview?.checks.code.status === 'failed';
   const editsWarning = preview?.checks.directEdits.status === 'warning';
+  // Nothing to write (e.g. only ignored files changed): confirming just records the commit as the theme's
+  // commit, so it stops showing as waiting. Not for re-applying an older commit, which would move it back.
+  const markOnly = !!preview && writes === 0 && preview.strategy !== 'commit_changes';
   const canConfirm =
-    !!preview && writes > 0 && liveConfirmed && !codeBlocked && (!editsWarning || acceptEdits) && !submitting;
+    !!preview &&
+    (writes > 0 || markOnly) &&
+    liveConfirmed &&
+    !codeBlocked &&
+    (!editsWarning || acceptEdits) &&
+    !submitting;
 
   return (
     <Modal id={MODAL_ID} open={open} size="large" heading="Review before updating" onHide={onClose}>
@@ -174,7 +182,9 @@ export function ConfirmSyncModal({ open, preview, submitting, error, onClose, on
           )}
 
           <Text type="strong">
-            {`${writes} file(s) affected: ${preview.summary.creates} to create · ${preview.summary.updates} to update · ${preview.summary.deletes} to delete · ${preview.summary.skipped} skipped · ${preview.summary.ignored} ignored`}
+            {preview.strategy === 'full_snapshot'
+              ? `Up to ${writes} file(s) affected: ${preview.summary.creates} to create · up to ${preview.summary.updates} to update · ${preview.summary.deletes} to delete · ${preview.summary.skipped} skipped · ${preview.summary.ignored} ignored. Files that turn out identical in the theme are skipped while updating, so fewer usually change.`
+              : `${writes} file(s) affected: ${preview.summary.creates} to create · ${preview.summary.updates} to update · ${preview.summary.deletes} to delete · ${preview.summary.skipped} skipped · ${preview.summary.ignored} ignored`}
           </Text>
           {preview.conflicts.length > 0 && (
             <Banner
@@ -212,7 +222,9 @@ export function ConfirmSyncModal({ open, preview, submitting, error, onClose, on
           {writes === 0 && (
             <Banner tone="info" heading="Nothing to apply">
               <Paragraph>
-                No file in the pushed commits maps to a writable theme file with the current settings.
+                {markOnly
+                  ? `No theme file needs to change (for example, only ignored files changed). Mark ${preview.theme.name} as up to date to record it on ${preview.commit.sha.slice(0, 7)}; no theme file is written except its sync record.`
+                  : 'No file in this commit maps to a writable theme file with the current settings.'}
               </Paragraph>
             </Banner>
           )}
@@ -286,7 +298,7 @@ export function ConfirmSyncModal({ open, preview, submitting, error, onClose, on
           })
         }
       >
-        {live ? 'Confirm & Sync live theme' : 'Confirm & Sync'}
+        {markOnly ? 'Mark as up to date' : live ? 'Confirm & Sync live theme' : 'Confirm & Sync'}
       </Button>
       <Button slot="secondary-actions" disabled={submitting} onClick={onClose}>
         Cancel

@@ -119,6 +119,26 @@ describe('sync workflow', () => {
   describe('preview', () => {
     beforeEach(() => setup());
 
+    it('records a review that could not be prepared in Sync history, not as the last sync', async () => {
+      world.mock.first((req) => {
+        if (req.url.includes('api.github.com') && req.url.includes('/commits/')) throw new TypeError('Network connection lost.');
+        return undefined;
+      });
+      const { status, body } = await preview({});
+      expect(status).toBe(502);
+      expect(body.error.code).toBe('UPSTREAM_UNREACHABLE');
+      const { body: history } = await api<{ items: SyncRun[] }>('GET', '/api/sync/history');
+      expect(history.data.items).toHaveLength(1);
+      expect(history.data.items[0]).toMatchObject({
+        status: 'failed',
+        commitSha: SHA_B,
+        filesChanged: 0,
+        errorDetails: { code: 'UPSTREAM_UNREACHABLE' },
+      });
+      const { body: last } = await api<SyncRun | null>('GET', `/api/sync/last?themeId=${encodeURIComponent(THEME_DEV.id)}&branch=main`);
+      expect(last.data).toBeNull();
+    }, 15000);
+
     it('builds a plan without modifying the theme', async () => {
       const { status, body } = await preview({});
       expect(status).toBe(201);
@@ -209,6 +229,20 @@ describe('sync workflow', () => {
       expect(steps).toBeGreaterThanOrEqual(3); // 3 files, one per step
       const { body: detail } = await api<SyncRunDetail>('GET', `/api/sync/history/${p.data.syncId}`);
       expect(detail.data).toMatchObject({ status: 'succeeded', filesSucceeded: 3, filesFailed: 0 });
+    });
+
+    it('confirming a review with nothing to write marks the theme as up to date', async () => {
+      await setup();
+      // Only the ignored file: nothing to write.
+      const { body: p } = await preview({ includePaths: ['config/settings_data.json'] });
+      expect(p.data.summary.creates + p.data.summary.updates + p.data.summary.deletes).toBe(0);
+      const { status } = await api<SyncRun>('POST', '/api/sync', { syncId: p.data.syncId, confirm: true });
+      expect(status).toBe(202);
+      await drainQueue();
+      const { body: detail } = await api<SyncRunDetail>('GET', `/api/sync/history/${p.data.syncId}`);
+      expect(detail.data).toMatchObject({ status: 'succeeded', filesSucceeded: 0, filesFailed: 0 });
+      const { body: last } = await api<SyncRun | null>('GET', `/api/sync/last?themeId=${encodeURIComponent(THEME_DEV.id)}&branch=main`);
+      expect(last.data?.commitSha).toBe(SHA_B);
     });
 
     it('requires confirm: true and refuses to execute a preview twice', async () => {

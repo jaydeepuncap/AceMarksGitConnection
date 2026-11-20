@@ -19,18 +19,19 @@ import {
   claimRestore,
   findActiveSyncForTheme,
   getActiveMappingForTheme,
-  latestCompletedRun,
-  type Database,
   getDb,
   getSettings,
   getSyncRun,
+  latestCompletedRun,
   listSyncOperations,
   listSyncRuns,
   mergeRunOptions,
+  recordFailedPreview,
   resetFailedOperations,
   toSyncOperationDto,
   toSyncRunDto,
   transitionSyncRun,
+  type Database,
 } from '../lib/database';
 import { ApiError, ok } from '../lib/response';
 import { getTheme } from '../lib/shopify-graphql';
@@ -140,6 +141,8 @@ export const syncRoutes = new Hono<AppEnv>()
       (await github.getRepository(target.owner, target.repo)).defaultBranch;
     await assertMapped(db, shop.id, body.themeId, target.fullName, branch);
 
+    const strategy = body.strategy ?? settings.syncPreferences.strategy;
+    const allowDeletes = body.allowDeletes ?? settings.syncPreferences.allowDeletes;
     const preview = await buildSyncPreview(
       { db, github, admin: await adminClient(c), kv: c.env.KV, logger: c.get('logger') },
       {
@@ -150,14 +153,33 @@ export const syncRoutes = new Hono<AppEnv>()
         branch,
         commitSha: body.commitSha,
         themeId: body.themeId,
-        strategy: body.strategy ?? settings.syncPreferences.strategy,
-        allowDeletes: body.allowDeletes ?? settings.syncPreferences.allowDeletes,
+        strategy,
+        allowDeletes,
         preferences: settings.syncPreferences,
         includePaths: body.includePaths,
         commitShas: body.commitShas,
         downloadBudget: previewDownloadBudget(subrequestBudget(c.env)),
       },
-    );
+    ).catch(async (err: unknown) => {
+      // A server or upstream failure (not a rejected request such as "already synced") is kept in
+      // Sync history so it can be found and run again.
+      const apiErr = err instanceof ApiError ? err : null;
+      if (!apiErr || apiErr.status >= 500) {
+        await recordFailedPreview(db, shop.id, {
+          repository: target.fullName,
+          branch,
+          commitSha: body.commitSha,
+          themeId: body.themeId,
+          themeName: mapped?.themeName ?? 'Theme',
+          themeRole: 'UNKNOWN',
+          strategy,
+          initiatedBy: userId,
+          allowDeletes,
+          error: { code: apiErr?.code ?? 'INTERNAL_ERROR', message: apiErr?.message ?? 'The review could not be prepared' },
+        }).catch((recordErr: unknown) => c.get('logger').warn('sync.preview_failure_not_recorded', { error: String(recordErr) }));
+      }
+      throw err;
+    });
     return ok<SyncPreview>(c, preview, 'Preview generated. No changes were made to the theme.', 201);
   })
   .post('/', syncLimiter, async (c) => {

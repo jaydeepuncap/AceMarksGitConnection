@@ -64,7 +64,8 @@ export const commitsRoutes = new Hono<AppEnv>()
     if (last) {
       const walk = await cached(
         c.env.KV,
-        `cache:${shop.id}:gh:${target.fullName}:after:${branch}:${last.commitSha}`,
+        // Keyed by the branch head too (page 1 starts with it): a new commit must not reuse an old count.
+        `cache:${shop.id}:gh:${target.fullName}:after:${branch}:${last.commitSha}:${query.page === 1 ? (items[0]?.sha ?? '') : ''}`,
         60,
         async () => {
           const w = await client.listCommitsUntil(target.owner, target.repo, branch, last.commitSha, 300);
@@ -78,9 +79,15 @@ export const commitsRoutes = new Hono<AppEnv>()
     }
     const synced = await syncedCommits(db, shop.id, query.themeId, branch, items.map((i) => i.sha));
     const offset = (query.page - 1) * query.perPage;
+    // The commit the theme is on is matched by SHA when it is on this page, so the label can never
+    // land on another commit; the count from GitHub only places pages that do not contain it.
+    const lastOnPage = last ? items.findIndex((item) => item.sha === last.commitSha) : -1;
     items.forEach((item, i) => {
       const position = offset + i;
-      if (lastIndex !== null) {
+      if (lastOnPage >= 0) {
+        item.syncStatus =
+          i < lastOnPage ? (synced.has(item.sha) ? 'added' : 'new') : i === lastOnPage ? 'last_synced' : 'added';
+      } else if (lastIndex !== null) {
         item.syncStatus = position < lastIndex ? (synced.has(item.sha) ? 'added' : 'new') : position === lastIndex ? 'last_synced' : 'added';
       } else {
         item.syncStatus = synced.has(item.sha) ? 'added' : last ? 'new' : null;
